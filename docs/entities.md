@@ -238,7 +238,8 @@ counters—not holiday dates, names, or raw configuration data.
 | Country (disabled) | Diagnostic sensor | `/system/country` | No | No | startup only |
 | System information (disabled) | Text diagnostic sensor with module names, versions, and sanitized attributes | `/system/info` | No | No | startup only |
 | System bus | Diagnostic sensor | `/system/bus` | No | No | 15 min |
-| Season optimization (disabled) | Diagnostic sensor | `/system/globalSeasonOptimizer/currentMode` | No | No | 60 s |
+| Season switching | Select | `/system/seasonOptimizer/mode` | Capability-dependent | Yes, with advertised options and write permission | 5 min; read back after change |
+| Current heating/cooling status (disabled) | Diagnostic sensor | `/system/globalSeasonOptimizer/currentMode` | No | No | 60 s |
 | iSRC support (disabled) | Diagnostic sensor | `/system/iSRC/supportStatus` | No | No | startup only |
 | Outdoor temperature source | Diagnostic sensor | `/system/sensors/temperatures/outdoorTemperatureSource` | No | No | 60 s |
 | Outdoor temperature | Sensor | `/system/sensors/temperatures/outdoor_t1` | No | No | 15 min |

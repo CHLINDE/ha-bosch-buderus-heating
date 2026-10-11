@@ -70,6 +70,10 @@ _POINTT_TO_HA: dict[str, dict[str, str]] = {
         "forcedHeat": "forced_heat",
         "forcedCool": "forced_cool",
     },
+    "season_switching": {
+        "forcedHeat": "forced_heat",
+        "forcedCool": "forced_cool",
+    },
     "pv_contact_state": {"off": "inactive", "on": "active"},
     "system_type": {
         "boiler": "boiler_single",

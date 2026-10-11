@@ -5,6 +5,48 @@ Versioning after its first tagged preview.
 
 ## [Unreleased]
 
+## [0.8.1-beta.2] - 2026-10-11
+
+I added a **Season switching** control so the central heating season can be
+changed directly in Home Assistant when the installation exposes it. A heating
+circuit can remain in summer pause even with its operation mode set to Manual;
+the new control exposes the separate central season setting.
+
+- I use the options and write permission reported for
+  `/system/seasonOptimizer/mode`. Known options have German and English labels:
+  Heating/cooling off, Automatic, Heating only and Cooling only. Cooling is not
+  offered on installations that do not advertise it. Options update during
+  normal polling, and writes to unoffered options are rejected.
+- I kept the control scoped to its gateway. Heating-circuit modes, hot-water
+  settings and heating/cooling thresholds are not written by this control.
+  Each change uses the existing single PUT and mandatory read-back.
+- I translated the actual `heating` and `cooling` season states and named the
+  existing status sensor **Current heating/cooling status**. It remains separate
+  from the requested setting, with its existing identity and activation choice.
+  Its default is still disabled; it can be enabled in the entity settings.
+- I kept existing polling intervals. There are no additional background cloud
+  requests. Diagnostics explain the new control's eligibility without exporting
+  current settings or unknown option text.
+
+My local records from 2026-10-11 show the underlying season setting changing
+from `off` to `forcedHeat`, followed by actual season status `heating` and
+heating-circuit status `heating_manual_on`. These records concern the existing
+appliance setting. The new Home Assistant select still needs a physical test
+after installation; cooling has not been tested on that installation.
+
+After updating through HACS, restart Home Assistant and look for
+**Season switching** (German: **Saisonumschaltung**) under the heating system.
+Heating only enables
+heating; demand and normal controller conditions still determine compressor
+operation. See [Season switching](https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/blob/v0.8.1-beta.2/docs/season-switching.md) for details.
+
+I verified 1,125 automated test cases with 96.26% combined statement and branch
+coverage, including 24 new season-control cases. Formatting, linting, strict
+type checking and the runtime dependency audit passed. These counts include
+parametrized variants and do not replace testing the new control on an installation.
+
+This release is a pre-release. **0.8.0 remains Stable/Latest.**
+
 ## [0.8.1-beta.1] - 2026-10-11
 
 I am releasing this beta to make PointT startup more resilient to temporary

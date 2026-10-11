@@ -229,6 +229,10 @@
         "name": "Betriebsart",
         "state": { "off": "Aus", "low": "Eco", "high": "Komfort", "ownprogram": "Auto", "eco": "Eco+" }
       },
+      "season_switching": {
+        "name": "Saisonumschaltung",
+        "state": { "off": "Heizen/Kühlen aus", "automatic": "Automatisch", "forced_heat": "Nur Heizbetrieb", "forced_cool": "Nur Kühlbetrieb" }
+      },
       "silent_mode": {
         "name": "Silent Mode",
         "state": { "off": "Aus", "auto": "Automatisch", "on": "Ein" }
@@ -286,7 +290,7 @@
       "auxiliary_heater_operation_mode": { "name": "Betriebsart des Zuheizers", "state": { "off": "AUS", "manual": "EIN", "auto": "Auto" } },
       "pv_contact_state": { "name": "PV-Kontaktstatus", "state": { "inactive": "Inaktiv", "active": "Aktiv" } },
       "data_processing_status": { "name": "Datenverarbeitungsstatus", "state": { "in_progress": "In Bearbeitung", "completed": "Abgeschlossen" } },
-      "season_optimizer_mode": { "name": "Saisonoptimierung", "state": { "off": "Standby", "automatic": "Automatische Umschaltung", "forced_heat": "Nur Heizbetrieb", "forced_cool": "Nur Kühlbetrieb" } },
+      "season_optimizer_mode": { "name": "Aktueller Heiz-/Kühlstatus", "state": { "off": "Inaktiv", "heating": "Heizen", "cooling": "Kühlen", "automatic": "Automatische Umschaltung", "forced_heat": "Nur Heizbetrieb", "forced_cool": "Nur Kühlbetrieb" } },
       "isrc_support_status": { "name": "iSRC-Unterstützung", "state": { "not_supported_incompatible_controller": "Nicht unterstützt: inkompatibler Regler", "not_supported_pairing_enabled": "Nicht unterstützt: Kopplungsmodus aktiv", "supported": "Unterstützt", "in_evaluation": "Wird geprüft" } },
       "heat_pump_type": { "name": "Wärmepumpentyp", "state": { "air_water": "Luft/Wasser", "brine_water": "Sole/Wasser", "exhaust_air": "Abluft/Wasser" } },
       "heat_source_type": { "name": "Wärmeerzeugertyp", "state": { "no_appliance": "Kein Wärmeerzeuger", "heatpump": "Wärmepumpe", "boiler": "Heizkessel", "boiler_oil": "Öl-Heizkessel", "boiler_gas": "Gas-Heizkessel", "boiler_unknown": "Unbekannter Heizkessel", "hybrid": "Hybridsystem" } },

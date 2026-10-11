@@ -229,6 +229,10 @@
         "name": "Hot water operation mode",
         "state": { "off": "Off", "low": "Eco", "high": "Comfort", "ownprogram": "Auto", "eco": "Eco+" }
       },
+      "season_switching": {
+        "name": "Season switching",
+        "state": { "off": "Heating/cooling off", "automatic": "Automatic", "forced_heat": "Heating only", "forced_cool": "Cooling only" }
+      },
       "silent_mode": {
         "name": "Silent mode",
         "state": { "off": "Off", "auto": "Automatic", "on": "On" }
@@ -286,7 +290,7 @@
       "auxiliary_heater_operation_mode": { "name": "Auxiliary heater operation mode", "state": { "off": "Off", "manual": "On", "auto": "Auto" } },
       "pv_contact_state": { "name": "PV contact status", "state": { "inactive": "Inactive", "active": "Active" } },
       "data_processing_status": { "name": "Data processing status", "state": { "in_progress": "In progress", "completed": "Completed" } },
-      "season_optimizer_mode": { "name": "Season optimization", "state": { "off": "Idle", "automatic": "Automatic switching", "forced_heat": "Always heating", "forced_cool": "Always cooling" } },
+      "season_optimizer_mode": { "name": "Current heating/cooling status", "state": { "off": "Idle", "heating": "Heating", "cooling": "Cooling", "automatic": "Automatic switching", "forced_heat": "Always heating", "forced_cool": "Always cooling" } },
       "isrc_support_status": { "name": "iSRC support", "state": { "not_supported_incompatible_controller": "Not supported: incompatible controller", "not_supported_pairing_enabled": "Not supported: pairing enabled", "supported": "Supported", "in_evaluation": "Being evaluated" } },
       "heat_pump_type": { "name": "Heat pump type", "state": { "air_water": "Air/water", "brine_water": "Brine/water", "exhaust_air": "Exhaust air/water" } },
       "heat_source_type": { "name": "Heat source type", "state": { "no_appliance": "No appliance", "heatpump": "Heat pump", "boiler": "Boiler", "boiler_oil": "Oil boiler", "boiler_gas": "Gas boiler", "boiler_unknown": "Unknown boiler", "hybrid": "Hybrid system" } },

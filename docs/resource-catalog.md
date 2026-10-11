@@ -331,7 +331,8 @@ Derived total values:
 | `/system/bus` | System bus | R | Diagnostic |
 | `/system/country` | System country | R | Diagnostic entity, disabled by default |
 | `/system/dateTime` | System time | R/W | Do not expose as a control |
-| `/system/globalSeasonOptimizer/currentMode` | Season optimization | R | Optional diagnostic status: `off`, `automatic`, `forcedHeat`, `forcedCool`; disabled by default |
+| `/system/seasonOptimizer/mode` | Season switching | R/W when advertised | Select with individually advertised options; known codes: `off`, `automatic`, `forcedHeat`, `forcedCool` |
+| `/system/globalSeasonOptimizer/currentMode` | Current heating/cooling status | R | Actual status: `off`, `heating`, `cooling`; legacy mode codes remain recognized; disabled by default |
 | `/system/iSRC/supportStatus` | iSRC support | R | Static diagnostic status, disabled by default |
 | `/system/info` | System information | R | Static text diagnostic sensor with module names and versions; sanitized details as attributes, internal token fields discarded |
 | `/system/silentMode/enabled` | Silent mode | R/W | Select: Off, Automatic, On; only for the exact live capability |

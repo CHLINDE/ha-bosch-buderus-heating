@@ -826,7 +826,7 @@ def test_known_array_entities_exist_when_empty_at_startup(
             "/system/globalSeasonOptimizer/currentMode",
             "automatic",
             "season_optimizer_mode",
-            ["off", "automatic", "forced_heat", "forced_cool"],
+            ["off", "heating", "cooling", "automatic", "forced_heat", "forced_cool"],
         ),
         (
             "/heatingCircuits/hc1/currentSuWiMode",

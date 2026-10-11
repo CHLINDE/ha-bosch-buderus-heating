@@ -60,6 +60,11 @@ SILENT_MODE_POLICY = EnumWritePolicy(
     frozenset({"stringValue"}),
     frozenset({"off", "auto", "on"}),
 )
+SEASON_SWITCHING_POLICY = EnumWritePolicy(
+    r"^/system/seasonOptimizer/mode$",
+    frozenset({"stringValue"}),
+    frozenset({"off", "automatic", "forcedHeat", "forcedCool"}),
+)
 AUXILIARY_HEATER_OPERATION_MODE_POLICY = EnumWritePolicy(
     r"^/heatSources/additionalHeater/operationMode$",
     frozenset({"stringValue"}),
@@ -351,6 +356,7 @@ def assess_control(resource: Resource) -> ControlAssessment:
         HEATING_CIRCUIT_OPERATION_MODE_POLICY,
         DHW_OPERATION_MODE_POLICY,
         SILENT_MODE_POLICY,
+        SEASON_SWITCHING_POLICY,
         AUXILIARY_HEATER_OPERATION_MODE_POLICY,
         *STRING_SWITCH_POLICIES,
     )

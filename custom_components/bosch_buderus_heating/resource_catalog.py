@@ -572,7 +572,8 @@ _GERMAN_PATH_NAMES = {
     "/holidayMode/activeModes": "Aktive Urlaubsmodi",
     "/holidayMode/configuration": "Urlaubskonfiguration",
     "/holidayMode/list": "Urlaubszeiten",
-    "/system/globalSeasonOptimizer/currentMode": "Saisonoptimierung",
+    "/system/globalSeasonOptimizer/currentMode": "Aktueller Heiz-/Kühlstatus",
+    "/system/seasonOptimizer/mode": "Saisonumschaltung",
     "/system/iSRC/supportStatus": "iSRC-Unterstützung",
 }
 
@@ -730,7 +731,8 @@ _ENGLISH_PATH_NAMES = {
     "/holidayMode/activeModes": "Active holiday modes",
     "/holidayMode/configuration": "Holiday configuration",
     "/holidayMode/list": "Holiday periods",
-    "/system/globalSeasonOptimizer/currentMode": "Season optimization",
+    "/system/globalSeasonOptimizer/currentMode": "Current heating/cooling status",
+    "/system/seasonOptimizer/mode": "Season switching",
     "/system/iSRC/supportStatus": "iSRC support",
 }
 

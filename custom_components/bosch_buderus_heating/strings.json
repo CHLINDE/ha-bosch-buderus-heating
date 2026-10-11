@@ -249,6 +249,10 @@
         "name": "Hot water operation mode",
         "state": { "off": "Off", "low": "Eco", "high": "Comfort", "ownprogram": "Auto", "eco": "Eco+" }
       },
+      "season_switching": {
+        "name": "Season switching",
+        "state": { "off": "Heating/cooling off", "automatic": "Automatic", "forced_heat": "Heating only", "forced_cool": "Cooling only" }
+      },
       "silent_mode": {
         "name": "Silent mode",
         "state": { "off": "Off", "auto": "Automatic", "on": "On" }
@@ -404,8 +408,8 @@
         "state": { "in_progress": "In progress", "completed": "Completed" }
       },
       "season_optimizer_mode": {
-        "name": "Season optimization",
-        "state": { "off": "Idle", "automatic": "Automatic switching", "forced_heat": "Always heating", "forced_cool": "Always cooling" }
+        "name": "Current heating/cooling status",
+        "state": { "off": "Idle", "heating": "Heating", "cooling": "Cooling", "automatic": "Automatic switching", "forced_heat": "Always heating", "forced_cool": "Always cooling" }
       },
       "isrc_support_status": {
         "name": "iSRC support",

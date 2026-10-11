@@ -231,7 +231,14 @@ _ENUM_OPTIONS: dict[str, tuple[str, ...]] = {
     "auxiliary_heater_operation_mode": ("off", "manual", "auto"),
     "pv_contact_state": ("inactive", "active"),
     "data_processing_status": ("in_progress", "completed"),
-    "season_optimizer_mode": ("off", "automatic", "forced_heat", "forced_cool"),
+    "season_optimizer_mode": (
+        "off",
+        "heating",
+        "cooling",
+        "automatic",
+        "forced_heat",
+        "forced_cool",
+    ),
     "isrc_support_status": (
         "not_supported_incompatible_controller",
         "not_supported_pairing_enabled",

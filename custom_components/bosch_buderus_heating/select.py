@@ -28,6 +28,7 @@ from .writes import (
     AUXILIARY_HEATER_OPERATION_MODE_POLICY,
     DHW_OPERATION_MODE_POLICY,
     HEATING_CIRCUIT_OPERATION_MODE_POLICY,
+    SEASON_SWITCHING_POLICY,
     SILENT_MODE_POLICY,
     STRING_SWITCH_POLICIES,
     EnumWritePolicy,
@@ -82,6 +83,8 @@ def build_select_descriptions(
             translation_key = "hot_water_operation_mode"
         elif policy is SILENT_MODE_POLICY:
             translation_key = "silent_mode"
+        elif policy is SEASON_SWITCHING_POLICY:
+            translation_key = "season_switching"
         elif policy is AUXILIARY_HEATER_OPERATION_MODE_POLICY:
             translation_key = "auxiliary_heater_operation_mode"
         else:
@@ -109,6 +112,7 @@ def _option_map(resource: Resource, translation_key: str) -> dict[str, str]:
         "heating_circuit_operation_mode": ("off", "manual", "auto"),
         "hot_water_operation_mode": ("Off", "low", "high", "ownprogram", "eco"),
         "silent_mode": ("off", "auto", "on"),
+        "season_switching": ("off", "automatic", "forcedHeat", "forcedCool"),
         "auxiliary_heater_operation_mode": ("off", "manual", "auto"),
     }.get(translation_key, ())
     ordered = tuple(value for value in preferred if value in advertised)

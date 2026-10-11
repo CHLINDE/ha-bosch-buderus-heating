@@ -4,6 +4,40 @@ Releases are built from a verified Git tag. The HACS archive contains the
 integration directly at its root and is published together with a SHA-256
 checksum file.
 
+## 0.8.1-beta.2 verification
+
+I prepared this beta on 2026-10-11 to expose central season switching in Home
+Assistant. The new select uses the gateway's offered options and write
+permission, with the existing validated write and read-back service.
+[Season switching](season-switching.md) documents the setting, its separate
+actual-status sensor and the available local appliance evidence.
+
+- Python 3.14.2 with the pinned development environment (HA 2026.10.0b4):
+  **1,125 tests passed**, **96.26% combined statement and branch coverage**.
+  This includes **24 new parametrized season-control test cases**.
+- With released HA 2026.10.0, **185 targeted control, sensor and diagnostic
+  tests passed**.
+- Ruff 0.16.10 formatting/lint, strict Mypy 2.4.0 and development dependency
+  consistency passed. An isolated runtime dependency audit found no known
+  vulnerabilities.
+- The Linux package contains **52 files**, **213,834 bytes**, with
+  `manifest.json` at its root. Tests verify reproducible construction and
+  import from an isolated extracted installation. Every archived file matches
+  the prepared component source.
+- ZIP SHA-256:
+  `eef26ab8ccf75096aa4efc6455d639b339d53fcffd68c6f082bade7881b3a30a`.
+
+The package was built and tested from an isolated Linux copy of the staged
+source to avoid Windows worktree metadata being interpreted as Linux paths.
+No application credentials or raw installation exports are included.
+The new HA select still needs a physical test after installation. Existing
+local appliance records confirm the underlying setting, not this new UI.
+
+Publication uses the protected main branch, required PR checks and the existing
+tag-triggered release workflow. The release is a pre-release;
+**0.8.0 remains Stable/Latest**. Published assets and notes must be compared with
+this package and the matching CHANGELOG section after the workflow finishes.
+
 ## 0.8.1-beta.1 verification
 
 I prepared this beta on 2026-10-11 with PointT robustness and request use as

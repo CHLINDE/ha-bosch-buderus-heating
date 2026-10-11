@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
@@ -64,6 +64,7 @@ def _sensor(
         entry,
     )
     coordinator.resources = {resource.path: resource}
+    coordinator.update_interval = None
     coordinator.data = {
         resource.path: ResourceSnapshot(resource, available, datetime.now(UTC))
     }
@@ -1598,6 +1599,7 @@ async def test_platform_adds_every_discovered_safe_scalar(
     sensor.coordinator.resources = {safe.path: safe, private.path: private}
     entry = SimpleNamespace(
         entry_id="entry-one",
+        async_on_unload=Mock(),
         runtime_data=SimpleNamespace(
             client=SimpleNamespace(metrics=RequestMetrics()),
             coordinators=(sensor.coordinator,),
@@ -1674,6 +1676,7 @@ async def test_next_holiday_sensor_exposes_upcoming_period(
     }
     entry = SimpleNamespace(
         entry_id="entry-one",
+        async_on_unload=Mock(),
         runtime_data=SimpleNamespace(
             client=SimpleNamespace(metrics=RequestMetrics()),
             coordinators=(coordinator,),

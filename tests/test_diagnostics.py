@@ -170,7 +170,7 @@ async def test_diagnostics_contains_schema_and_metrics_but_no_private_data(
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
     rendered = repr(diagnostics)
 
-    assert diagnostics["diagnostics_schema"] == 13
+    assert diagnostics["diagnostics_schema"] == 14
 
     for private in (
         gateway_id,
@@ -215,6 +215,7 @@ async def test_diagnostics_contains_schema_and_metrics_but_no_private_data(
         {
             "path": "/heatingCircuits/hc2",
             "source": "reference",
+            "read_policy": "normal",
             "bulk_result": "success",
             "fallback_reason": None,
             "fallback_result": None,

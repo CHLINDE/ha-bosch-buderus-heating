@@ -51,7 +51,7 @@ diagnostic report with the appliance display.
 
 ## Missing controls
 
-Schema 13 reports `control` under each entry in `gateways → capabilities`.
+Schema 14 reports `control` under each entry in `gateways → capabilities`.
 The same assessment drives the select, number, and switch implementations:
 
 - `platform`: the principal control type or `null` for unsupported paths;
@@ -136,7 +136,42 @@ This field is not a connectivity or current-health indicator. A subsequent
 failed request remains visible in `resource_results` and the existing fault
 availability handling, even when the last parser result was `empty`. Unrelated
 reads do not advance `last_successful_update` or confirm a fault resolution.
-The field names and diagnostics schema version 13 are unchanged.
+These fault-parser fields retain their existing meanings in schema 14.
+
+## Supplementary startup data
+
+See [Request behavior and recovery](request-behavior.md) for the complete path
+list, successful-once definition, timing, safety limits and entity lifecycle.
+
+`startup_data` reports deferred reads separately from functional `discovery`.
+Each path includes its advertised/registered origin, status, logical attempts,
+actual attempt/success times, and seconds until the earliest retry. Actual HTTP
+attempts are counted under `request_metrics.requests_by_type.startup_metadata`.
+An access-token refresh can cause two HTTP attempts for one logical batch.
+`omitted` records the unused license endpoint without counting a request or
+failure. `budget_wait` means a read was not sent before the shared deadline.
+
+Successful reviewed metadata is retained in memory for the current integration
+load. Temporary failures retry after 60, 120, 300, 900, then 1800 seconds between
+failures, using the next ordinary coordinator wake-up. Delays remain at 1800
+seconds for further transient failures. Rate-limit pauses take precedence.
+Advertised or previously registered metadata sensors with 403/404/406 retry
+after 1800 seconds. Unsupported diagnostic-only paths and unconfirmed optional
+probes with these local errors do not repeat continuously.
+
+Existing metadata sensors remain unavailable while pending. Recovery restores
+the same sensor or creates a newly discovered supported sensor. A diagnostic
+download and debug logging do not trigger additional requests.
+
+`technical_metadata` contains only reviewed technical values: known product
+labels such as MX400, recognized manufacturer names, strictly numeric dotted
+firmware/hardware versions, and a validated installed circuit count. Unknown
+product text, network identifiers, device timestamps and personal names are
+not exported. Whenever such technical values are present, the privacy block
+truthfully sets `contains_raw_resource_values: true` and
+`raw_resource_values_scope: allowlisted_technical_metadata`. Measurements,
+current settings, credentials and stable identifiers remain excluded. The
+anonymized inventory exporter drops this entire section.
 
 ## Request metrics
 

@@ -24,6 +24,7 @@ from .pointt import (
 )
 from .pointt.const import MAX_BULK_PATHS
 from .pointt.redaction import resource_path_template
+from .startup_data import LICENSE_PATH, StartupGatewayData, is_startup_path
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -65,6 +66,7 @@ class DiscoveryPathDiagnostic:
     fallback_reason: str | None = None
     fallback_result: str | None = None
     discovered: bool = False
+    read_policy: str = "normal"
 
     @property
     def failed(self) -> bool:
@@ -428,6 +430,7 @@ async def async_discover_resources(
     maximum_depth: int = MAX_DISCOVERY_DEPTH,
     maximum_resources: int = MAX_DISCOVERY_RESOURCES,
     diagnostics: DiscoveryDiagnostics | None = None,
+    startup_data: StartupGatewayData | None = None,
 ) -> dict[str, Resource]:
     """Follow PointT references without escaping configured safety bounds."""
     if maximum_depth < 0 or maximum_resources < 1:
@@ -435,6 +438,10 @@ async def async_discover_resources(
 
     report = diagnostics or DiscoveryDiagnostics()
     report.reset()
+    if startup_data is not None:
+        startup_data.begin_discovery(
+            maximum_resources=maximum_resources, maximum_depth=maximum_depth
+        )
     referenced_pending: dict[str, int] = {}
     catalog_pending: dict[str, int] = {}
     optional_pending: dict[str, int] = {}
@@ -444,6 +451,17 @@ async def async_discover_resources(
 
     def schedule(path: str, depth: int, source: DiscoveryPathSource) -> None:
         report.scheduled(path, source)
+        if path == LICENSE_PATH:
+            report.paths[path].read_policy = "omitted_license"
+            if startup_data is not None:
+                startup_data.omit_license()
+            return
+        if startup_data is not None and is_startup_path(path):
+            report.paths[path].read_policy = "startup_once"
+            startup_data.schedule(
+                path, depth, advertised=source is DiscoveryPathSource.REFERENCE
+            )
+            return
         if path in processed:
             return
         depth = min(
@@ -484,6 +502,14 @@ async def async_discover_resources(
         # catalog paths, and catalog paths before other optional probes.
         pending = referenced_pending or catalog_pending or optional_pending
         frontier_entries = dict(islice(pending.items(), capacity))
+        if startup_data is not None:
+            frontier_entries = {
+                path: frontier_entries[path]
+                for path in startup_data.reserve_discovery(tuple(frontier_entries))
+            }
+            if not frontier_entries:
+                report.stop_reason = "resource_limit"
+                break
         frontier = tuple(frontier_entries)
         for path in frontier:
             del pending[path]

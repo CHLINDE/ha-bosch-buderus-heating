@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter
+from time import monotonic
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -33,19 +34,20 @@ from .resource_catalog import (
     supports_entity,
 )
 from .runtime import BoschBuderusRuntimeData
+from .startup_data import LICENSE_PATH, STARTUP_BUDGET_SECONDS, safe_technical_value
 from .writes import EnumWritePolicy, NumberWritePolicy, assess_control
 
-DIAGNOSTICS_SCHEMA_VERSION = 13
+DIAGNOSTICS_SCHEMA_VERSION = 14
 
 
 async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: BoschBuderusConfigEntry
 ) -> dict[str, Any]:
-    """Return schema and aggregate state without credentials or raw values."""
+    """Return schema, aggregates and reviewed metadata without private values."""
     del hass
     runtime = getattr(entry, "runtime_data", None)
     selected = entry.data.get(CONF_GATEWAY_IDS, [])
-    base = {
+    base: dict[str, Any] = {
         "diagnostics_schema": DIAGNOSTICS_SCHEMA_VERSION,
         "privacy": {
             "contains_raw_resource_values": False,
@@ -73,6 +75,9 @@ async def async_get_config_entry_diagnostics(
         _gateway_diagnostics(index, coordinator)
         for index, coordinator in enumerate(runtime.coordinators, start=1)
     ]
+    if any(report["technical_metadata"] for report in gateway_reports):
+        base["privacy"]["contains_raw_resource_values"] = True
+        base["privacy"]["raw_resource_values_scope"] = "allowlisted_technical_metadata"
     return {
         **base,
         "setup": {"runtime_available": True},
@@ -131,6 +136,12 @@ def _gateway_diagnostics(
         "device_class": _gateway_class(coordinator.gateway),
         "runtime": coordinator.diagnostics_summary(),
         "discovery": _discovery_diagnostics(coordinator),
+        "startup_data": _startup_diagnostics(coordinator),
+        "technical_metadata": [
+            {"path": diagnostic_resource_path(resource.path), "value": value}
+            for resource in resources
+            if (value := safe_technical_value(resource)) is not None
+        ],
         "faults": {
             **fault_state,
             "supported_resources": tuple(
@@ -327,6 +338,7 @@ def _discovery_diagnostics(
             {
                 "path": diagnostic_resource_path(path),
                 "source": item.source.value,
+                "read_policy": item.read_policy,
                 "bulk_result": item.bulk_result,
                 "fallback_reason": item.fallback_reason,
                 "fallback_result": item.fallback_result,
@@ -336,6 +348,54 @@ def _discovery_diagnostics(
                 report.paths.items(),
                 key=lambda entry: diagnostic_resource_path(entry[0]),
             )
+        ],
+    }
+
+
+def _startup_diagnostics(
+    coordinator: BoschBuderusDataUpdateCoordinator,
+) -> dict[str, object]:
+    """Describe pending reads locally without performing a diagnostic request."""
+    state = coordinator.startup_data
+    now = monotonic()
+    return {
+        "scope": "current_entry_session",
+        "successful_reads_repeat": False,
+        "initial_entry_budget_seconds": STARTUP_BUDGET_SECONDS,
+        "recovery_max_batch_paths": 30,
+        "budget_exhaustions": state.budget_exhaustions,
+        "logical_attempts": sum(read.attempts for read in state.reads.values()),
+        "http_attempts_location": "request_metrics.requests_by_type.startup_metadata",
+        "omitted": [
+            {
+                "path": LICENSE_PATH,
+                "reason": "unused_license_document",
+                "requested": False,
+            }
+        ]
+        if state.omitted_license
+        else [],
+        "paths": [
+            {
+                "path": diagnostic_resource_path(path),
+                "advertised": read.advertised,
+                "registered_before_setup": read.registered,
+                "active": read.active,
+                "result": read.result,
+                "pending": read.pending,
+                "attempts": read.attempts,
+                "consecutive_failures": read.failures,
+                "last_attempt": read.last_attempt.isoformat()
+                if read.last_attempt
+                else None,
+                "last_success": read.last_success.isoformat()
+                if read.last_success
+                else None,
+                "next_attempt_in_seconds": max(0, math.ceil(read.next_attempt - now))
+                if read.pending
+                else None,
+            }
+            for path, read in sorted(state.reads.items())
         ],
     }
 

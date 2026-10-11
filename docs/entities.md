@@ -102,6 +102,15 @@ Due groups are combined into batch requests of no more than 30 resources.
 HTTP 429 pauses further requests temporarily. Successful partial values and
 the most recent valid state are retained during partial failures.
 
+In 0.8.1-beta.1, a valid read-only `/devices/{reported-id}/productName` or
+`/heatSources/numberOfRefrigerantCircuitsInstalled` is read successfully once
+per integration load, with delayed recovery after temporary failures. Existing
+diagnostic sensors keep their IDs, names and enable/disable choices; new
+supported sensors can appear on recovery. These resources no longer belong to
+the 15/30-minute slow group after a valid response. Administrative supplementary
+leaves create no entities. The complete path list, exceptions and timing are
+documented in [Request behavior and recovery](request-behavior.md).
+
 ## Optional request diagnostics
 
 The following integration-wide entities are created once per config entry and

@@ -5,9 +5,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from homeassistant.components.binary_sensor import (
-    BinarySensorDeviceClass,
     BinarySensorEntity,
     BinarySensorEntityDescription,
 )
@@ -42,6 +42,13 @@ from .sensor import (
     _semantic_key,
     _values_scalar_keys,
 )
+
+if TYPE_CHECKING:
+    from homeassistant.components.binary_sensor.const import BinarySensorDeviceClass
+else:
+    # Older HA defines this class in the platform module. Newer HA retains
+    # that runtime export, but types it at its defining location in const.
+    from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 
 
 @dataclass(frozen=True, kw_only=True)

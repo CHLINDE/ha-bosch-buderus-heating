@@ -33,9 +33,13 @@ system information are never exposed.
 
 ## Home Assistant diagnostics
 
-The integration diagnostic export contains schema and aggregate state only.
-It omits config-entry data, credentials, stable identifiers, firmware strings,
-raw resource values, user-defined names, request URLs, and response bodies.
+The integration diagnostic export contains schema, aggregate state and a narrow
+allowlist of technical metadata in schema 14. Known product labels, recognized
+manufacturers, strictly numeric dotted version strings and validated installed
+circuit counts may be included. Its privacy declaration explicitly identifies
+these allowed resource values when present. It omits config-entry data,
+credentials, stable identifiers, unrestricted firmware/product text, current
+measurements and settings, user-defined names, request URLs and response bodies.
 Canonical logical IDs such as `hc2`, `dhw1`, and `hs1` remain visible in local
 diagnostics so multi-circuit discovery can be investigated. Arbitrary device IDs
 and unrecognized dynamic IDs are replaced with path placeholders. Unknown model
@@ -49,7 +53,7 @@ field and user-review policy.
 
 Maintainers can reduce a downloaded diagnostics report further with the
 [anonymized inventory exporter](anonymized-inventory.md). It removes runtime
-metrics, discovery details, concrete diagnostic paths, and display names. It
-permits only structural capability fields and rejects reports that do not
+metrics, discovery details, all technical values, concrete diagnostic paths,
+and display names. It permits only structural capability fields and rejects reports that do not
 declare all privacy guarantees or contain concrete heating-circuit, hot-water,
 or heat-source IDs in their exported capability templates.

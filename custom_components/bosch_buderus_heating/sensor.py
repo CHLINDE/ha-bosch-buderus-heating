@@ -28,7 +28,7 @@ from homeassistant.const import (
     UnitOfVolume,
     UnitOfVolumeFlowRate,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -73,6 +73,7 @@ from .resource_catalog import (
     resource_name,
     supports_entity,
 )
+from .startup_data import startup_placeholder
 
 type ValueKind = Literal[
     "value",
@@ -433,11 +434,40 @@ async def async_setup_entry(
         )
         if any(path in coordinator.resources for path in HOLIDAY_PERIOD_PATHS):
             entities.append(BoschBuderusNextHolidaySensor(coordinator))
-        entities.extend(
-            BoschBuderusSensor(coordinator, description)
-            for description in build_sensor_descriptions(coordinator.resources)
-        )
+        _track_resource_sensors(entry, coordinator, async_add_entities)
     async_add_entities(entities)
+
+
+def _track_resource_sensors(
+    entry: BoschBuderusConfigEntry,
+    coordinator: BoschBuderusDataUpdateCoordinator,
+    async_add_entities: AddConfigEntryEntitiesCallback,
+) -> None:
+    """Keep registered metadata sensors and add recovered values exactly once."""
+    resources = dict(coordinator.resources)
+    for path in coordinator.startup_data.registered_paths():
+        if path not in resources:
+            resources[path] = startup_placeholder(path)
+    descriptions = build_sensor_descriptions(resources)
+    seen = {description.unique_key for description in descriptions}
+    async_add_entities([BoschBuderusSensor(coordinator, item) for item in descriptions])
+
+    @callback
+    def recover() -> None:
+        recovered = {
+            path: snapshot.resource
+            for path, snapshot in (coordinator.data or {}).items()
+            if coordinator.startup_data.tracks(path) and snapshot.available
+        }
+        entities = []
+        for description in build_sensor_descriptions(recovered):
+            if description.unique_key not in seen:
+                seen.add(description.unique_key)
+                entities.append(BoschBuderusSensor(coordinator, description))
+        if entities:
+            async_add_entities(entities)
+
+    entry.async_on_unload(coordinator.async_add_listener(recover))
 
 
 class BoschBuderusRequestMetricSensor(SensorEntity):

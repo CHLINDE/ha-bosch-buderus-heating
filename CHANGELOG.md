@@ -5,6 +5,107 @@ Versioning after its first tagged preview.
 
 ## [Unreleased]
 
+## [0.8.1-beta.1] - 2026-10-11
+
+I am releasing this beta to make PointT startup more resilient to temporary
+failures and reduce unnecessary cloud reads. Functional discovery now runs
+before reviewed supplementary metadata. If an informational request fails,
+the integration can finish loading its usable resources and recover the
+missing supplementary data later. **0.8.0 remains Stable/Latest.**
+
+### More resilient startup and recovery
+
+- I stopped requesting the unused `/gateway/thirdPartyLicenseInformation`
+  document. A failure on that endpoint can no longer abort discovery. This
+  does not establish the original cause of every connection failure in #49.
+- I separated reviewed informational leaves from functional discovery, with
+  one shared **30-second supplementary budget per integration entry**, after
+  functional discovery for all selected gateways. Unsent work remains pending.
+  The exact paths and startup order are documented in the
+  [request guide](https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/blob/v0.8.1-beta.1/docs/request-behavior.md).
+- Temporary failures retry after **1, 2, 5, 15 and then 30 minutes** between
+  failed attempts, using existing coordinator wake-ups. Further failures
+  retain the 30-minute delay. Recovery uses at most one batch of 30 paths per
+  entry per minute, after normal gateway work, without immediate fallback
+  GETs or extra network retries. Healthy gateways take turns.
+- Expected metadata sensors returning 403, 404 or 406 retry after 30 minutes.
+  Unsupported diagnostic-only candidates do not repeat continuously. Cloud
+  rate-limit pauses take priority, and invalid credentials still trigger
+  reauthentication. The shared 512-path and depth-eight limits remain.
+- Existing metadata sensors retain their identities and user settings while
+  unavailable. They recover on a valid response without a restart. Newly
+  recovered supported resources can add entities during normal operation.
+  This does not replace rediscovery after adding a previously unknown circuit.
+
+### Fewer unnecessary requests
+
+- I changed valid read-only device product names and installed refrigerant-
+  circuit counts from 15/30-minute polling to **one successful read per
+  integration load**. "Once" means after success, not one attempt forever.
+  An explicit reload or Home Assistant restart reads them again; automatic
+  retries of unfinished setup retain the cache when configuration and
+  credentials are unchanged. Ordinary token refresh does not clear it.
+- Administrative supplementary values do not create entities. Diagnostic
+  downloads and debug status logging use local state and add no cloud requests.
+- In a local HTTP test with 30 fast paths and two metadata leaves, steady
+  polling used **60 instead of 64 requests per hour** in the standard profile
+  and **30 instead of 32** in the cloud-friendly profile. Startup and failure
+  recovery are excluded from those figures. Savings depend on batch layout;
+  fewer path reads do not always mean fewer separate HTTP requests.
+- Operating-value intervals and write validation/read-back remain unchanged.
+  Supplementary success never refreshes unrelated values or confirms that a
+  heating fault has cleared.
+
+### Diagnostics and maintainability
+
+- Schema **14** distinguishes omitted, deferred, failed and recovered reads,
+  actual read times, earliest retry times and logical versus physical requests.
+  A narrow allowlist makes known technical metadata visible without exposing
+  current measurements, settings, personal names, network identifiers or tokens.
+  The structural inventory export also removes these technical values.
+- I separated supplementary request handling from the Home Assistant
+  coordinator. Queue/cache changes use defined methods and immutable status
+  views. Tests cover recovery without restart, cancellation, authentication,
+  rate limits, wrong-resource replies and stable entity identity.
+
+### Included maintenance updates
+
+- **PR #55:** Ruff pre-commit hooks 0.16.10.
+- **PR #56:** Hypothesis 6.168.5, Mypy 2.4.0, the Home Assistant test package
+  0.13.370 and Ruff 0.16.10. I retained **Pytest 9.0.3** because the Home
+  Assistant test package requires it. The proposed 9.1.1 pin makes the
+  dependency set impossible to install and is not part of this beta.
+- **PR #57:** Pinned CodeQL initialization and analysis actions 4.38.3.
+- I aligned form schemas with the validation backend used by the installed
+  Home Assistant, including its 2026.10 transition to Probatio. Required fields
+  and suggested holiday values use matching marker types. This compatibility
+  choice is isolated from the PointT client and adds no cloud requests.
+- This beta includes the existing 0.8.0 fault notifications, entity-preserving
+  cleanup, sign-in recovery and icon changes. Those are inherited from the
+  stable release; the new runtime focus is startup recovery and request use.
+
+### Validation and beta testing
+
+I ran **1,101 automated test cases** with the pinned development environment
+and again with released Home Assistant **2026.10.0**. Both passed with
+**96.23% combined statement and branch coverage**. Another 167 targeted form,
+notification-options and holiday-write checks passed on HA **2026.9.4**.
+Formatting, linting, strict typing and the isolated dependency audit passed;
+the audit found no known vulnerabilities.
+
+Local verification and the publication checklist are recorded in
+[the release report](https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/blob/v0.8.1-beta.1/docs/release.md).
+The new request policy still needs field confirmation. Automated tests and a
+local HTTP server do not establish long-term stability on a physical system.
+
+Enable beta versions in HACS, select **0.8.1-beta.1** and
+restart Home Assistant. Check the expected entities, including disabled ones,
+and observe whether missing supplementary values recover on their own after
+a temporary failure. Heating does not need to be enabled for these read checks.
+Do not deliberately interrupt the appliance or change heating settings just
+to test recovery. If something remains missing, provide a fresh diagnostic
+export and the time of the problem after reviewing it for personal information.
+
 ## [0.8.0] - 2026-10-10
 
 I am releasing 0.8.0 with heating fault notifications, a refreshed icon and

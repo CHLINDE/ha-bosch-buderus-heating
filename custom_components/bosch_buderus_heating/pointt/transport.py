@@ -269,6 +269,9 @@ class PointTTransport:
                 except (UnicodeDecodeError, json.JSONDecodeError) as err:
                     raise InvalidPayload("PointT response was not valid JSON") from err
                 result = _validate_json(parsed)
+        except asyncio.CancelledError:
+            outcome = "cancelled"
+            raise
         except AccessTokenRejected:
             outcome = "authentication_error"
             raise

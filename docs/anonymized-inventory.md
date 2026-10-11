@@ -43,6 +43,11 @@ user-defined names. The tool aborts unless the report explicitly declares all
 privacy-sensitive fields redacted and the exported heating-circuit, hot-water,
 and heat-source path templates contain no concrete installation identifier.
 
+Schema 14 may explicitly declare `allowlisted_technical_metadata` as its only
+raw-value scope. The exporter accepts this scoped declaration and discards
+the entire technical-metadata section. Its output still declares no raw
+resource values. Unrestricted raw-value declarations remain rejected.
+
 ## Firmware warning
 
 After every complete discovery, the integration compares known PointT paths

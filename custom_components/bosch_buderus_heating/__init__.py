@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+from time import monotonic
 from typing import TYPE_CHECKING, Any, cast
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
+from homeassistant.core import callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.util.hass_dict import HassKey
 
 from .compatibility import sync_firmware_compatibility_issue
 from .const import (
@@ -29,17 +32,22 @@ from .pointt import (
     PointTError,
     TokenManager,
 )
+from .pointt.transport import RateLimitBackoff
 from .resource_catalog import (
     CapabilityMaturity,
     capability_maturity,
     configured_device_name,
 )
 from .runtime import BoschBuderusRuntimeData
+from .startup_data import STARTUP_BUDGET_SECONDS, StartupSession, is_startup_entity_path
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 type BoschBuderusConfigEntry = ConfigEntry[BoschBuderusRuntimeData]
+_ACCOUNT_BACKOFFS: HassKey[dict[str, RateLimitBackoff]] = HassKey(
+    f"{DOMAIN}.account_backoffs"
+)
 
 
 async def async_setup_entry(
@@ -63,17 +71,51 @@ async def async_setup_entry(
 
     token_manager = TokenManager(oauth_client, tokens, persist_tokens)
     previous_runtime = getattr(entry, "runtime_data", None)
+    startup = StartupSession(tuple(sorted(selected_ids)), options=dict(entry.options))
+    if (
+        isinstance(previous_runtime, BoschBuderusRuntimeData)
+        and previous_runtime.startup is not None
+        and previous_runtime.startup.can_resume(tuple(selected_ids), entry.options)
+        and previous_runtime.token_manager.tokens == tokens
+    ):
+        startup = previous_runtime.startup
+    if (
+        isinstance(previous_runtime, BoschBuderusRuntimeData)
+        and previous_runtime.startup is not None
+        and previous_runtime.startup is not startup
+    ):
+        previous_runtime.startup.detach()
+
+    @callback
+    def startup_state_changed() -> None:
+        # HA skips the integration's unload hook when reloading setup_retry.
+        # Observe that explicit reset while preserving automatic retries.
+        if entry.state in (ConfigEntryState.NOT_LOADED, ConfigEntryState.SETUP_ERROR):
+            startup.close()
+
+    startup.attach_state_listener(
+        lambda: entry.async_on_state_change(startup_state_changed)
+    )
     client = PointTClient(
         session,
         token_manager,
-        backoff=(
+        metrics=(
+            previous_runtime.client.metrics
+            if isinstance(previous_runtime, BoschBuderusRuntimeData)
+            and previous_runtime.startup is startup
+            else None
+        ),
+        backoff=hass.data.setdefault(_ACCOUNT_BACKOFFS, {}).setdefault(
+            entry.entry_id,
             previous_runtime.client.backoff
             if isinstance(previous_runtime, BoschBuderusRuntimeData)
-            else None
+            else RateLimitBackoff(),
         ),
     )
     # Keep the account brake even when gateway discovery prevents setup.
-    entry.runtime_data = BoschBuderusRuntimeData(client, token_manager, (), ())
+    entry.runtime_data = BoschBuderusRuntimeData(
+        client, token_manager, (), (), startup=startup
+    )
 
     try:
         gateways = await client.get_gateways()
@@ -95,6 +137,7 @@ async def async_setup_entry(
             gateway,
             entry,
             polling_profile_from_options(entry.options),
+            startup_session=startup,
         )
         for gateway in selected_gateways
     )
@@ -106,10 +149,14 @@ async def async_setup_entry(
         token_manager=token_manager,
         gateways=selected_gateways,
         coordinators=coordinators,
+        startup=startup,
     )
+    _restore_registered_startup_paths(hass, entry)
     for coordinator in coordinators:
         await coordinator.async_load_fault_state()
         await coordinator.async_config_entry_first_refresh()
+
+    await _async_load_startup_data(coordinators)
 
     sync_firmware_compatibility_issue(hass, entry, coordinators)
 
@@ -120,6 +167,8 @@ async def async_setup_entry(
     _remove_retired_entities(hass, entry, coordinators)
     entry.runtime_data.notifications = await async_setup_notifications(hass, entry)
     entry.async_on_unload(entry.add_update_listener(async_update_notification_options))
+    startup.mark_setup_complete()
+    entry.async_on_unload(startup.detach)
     return True
 
 
@@ -129,9 +178,55 @@ async def async_unload_entry(
     """Unload a Bosch/Buderus Heating config entry."""
     unloaded = bool(await hass.config_entries.async_unload_platforms(entry, PLATFORMS))
     if unloaded:
+        if entry.runtime_data.startup is not None:
+            entry.runtime_data.startup.close()
         for manager in entry.runtime_data.notifications:
             await manager.async_close()
     return unloaded
+
+
+async def async_remove_entry(
+    hass: HomeAssistant, entry: BoschBuderusConfigEntry
+) -> None:
+    """Forget the memory-only account brake when its entry is deleted."""
+    hass.data.get(_ACCOUNT_BACKOFFS, {}).pop(entry.entry_id, None)
+
+
+def _restore_registered_startup_paths(
+    hass: HomeAssistant, entry: BoschBuderusConfigEntry
+) -> None:
+    """Recover exact existing scalar IDs without guessing device identifiers."""
+    registry = er.async_get(hass)
+    for entity in er.async_entries_for_config_entry(registry, entry.entry_id):
+        if entity.domain != "sensor" or entity.platform != DOMAIN:
+            continue
+        for coordinator in entry.runtime_data.coordinators:
+            prefix = f"{coordinator.gateway.gateway_id}:"
+            if entity.unique_id.startswith(prefix):
+                path = "/" + entity.unique_id.removeprefix(prefix).replace(":", "/")
+                if is_startup_entity_path(path):
+                    coordinator.startup_data.schedule(path, 0, registered=True)
+
+
+async def _async_load_startup_data(
+    coordinators: tuple[BoschBuderusDataUpdateCoordinator, ...],
+) -> None:
+    """Give all core gateways priority, then share one short optional deadline."""
+    deadline = monotonic() + STARTUP_BUDGET_SECONDS
+    while monotonic() < deadline:
+        attempted = False
+        for coordinator in coordinators:
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                break
+            snapshots = dict(coordinator.data or {})
+            if await coordinator.async_read_startup_batch(snapshots, budget=remaining):
+                coordinator.data = snapshots
+                attempted = True
+        if not attempted:
+            return
+    for coordinator in coordinators:
+        coordinator.startup_data.budget_expired(monotonic())
 
 
 async def async_migrate_entry(

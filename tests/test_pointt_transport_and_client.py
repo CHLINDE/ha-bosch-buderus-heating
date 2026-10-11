@@ -35,6 +35,249 @@ from custom_components.bosch_buderus_heating.pointt.transport import (
 
 pytestmark = pytest.mark.usefixtures("socket_enabled")
 
+
+async def test_startup_bulk_disables_network_retry_and_counts_actual_requests() -> None:
+    calls = 0
+
+    async def unavailable(request: web.Request) -> web.Response:
+        nonlocal calls
+        calls += 1
+        return web.Response(status=504)
+
+    async with (
+        serve([("POST", "/bulk", unavailable)]) as url,
+        aiohttp.ClientSession() as session,
+    ):
+        client = PointTClient(session, "synthetic", base_url=url)
+        with pytest.raises(ServiceUnavailable):
+            await client.get_resources_bulk(
+                "gateway",
+                ["/gateway/tosAccepted"],
+                retryable=False,
+                request_type="startup_metadata",
+            )
+        assert calls == 1
+        metrics = client.metrics.snapshot()
+        assert metrics["requests_total"] == 1
+        assert metrics["requests_by_type"] == {"startup_metadata": 1}
+        assert metrics["bulk_resource_paths_total"] == 1
+        assert metrics["retry_attempts"] == metrics["fallback_requests"] == 0
+
+
+@pytest.mark.parametrize("friendly", [False, True])
+async def test_hour_of_polling_saves_metadata_paths_and_batch_boundary_requests(
+    hass, friendly, caplog
+):
+    """Count real HTTP calls for a 30-path gateway and two metadata leaves."""
+    import logging
+    from datetime import UTC, datetime
+    from unittest.mock import patch
+
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    from custom_components.bosch_buderus_heating.const import DOMAIN, PollingProfile
+    from custom_components.bosch_buderus_heating.coordinator import (
+        BoschBuderusDataUpdateCoordinator,
+        ResourceSnapshot,
+    )
+    from custom_components.bosch_buderus_heating.pointt import (
+        Gateway,
+        Resource,
+        ResourceMetadata,
+    )
+    from custom_components.bosch_buderus_heating.resource_catalog import (
+        PollGroup,
+        poll_group,
+    )
+    from custom_components.bosch_buderus_heating.startup_data import CIRCUIT_COUNT_PATH
+
+    fast_paths = tuple(
+        f"/heatingCircuits/hc{number}/roomtemperature" for number in range(1, 31)
+    )
+    caplog.set_level(logging.WARNING, logger="aiohttp.access")
+    metadata_paths = ("/devices/synthetic/productName", CIRCUIT_COUNT_PATH)
+    calls = []
+
+    async def response(request: web.Request) -> web.Response:
+        body = await request.json()
+        paths = body[0]["resourcePaths"]
+        calls.append(tuple(paths))
+        return web.json_response(
+            [
+                {
+                    "gatewayId": "synthetic",
+                    "resourcePaths": [
+                        {
+                            "resourcePath": path,
+                            "serverStatus": 200,
+                            "gatewayResponse": {
+                                "status": 200,
+                                "payload": {
+                                    "value": "MX400"
+                                    if path == metadata_paths[0]
+                                    else 2,
+                                    "type": "stringValue"
+                                    if path == metadata_paths[0]
+                                    else "floatValue",
+                                    "unit": "C" if path in fast_paths else "",
+                                },
+                            },
+                        }
+                        for path in paths
+                    ],
+                }
+            ]
+        )
+
+    async with (
+        serve([("POST", "/bulk", response)]) as url,
+        aiohttp.ClientSession() as session,
+    ):
+        measurements = []
+        for before in (True, False):
+            calls.clear()
+            client = PointTClient(session, "synthetic", base_url=url)
+            entry = MockConfigEntry(domain=DOMAIN)
+            entry.add_to_hass(hass)
+            coordinator = BoschBuderusDataUpdateCoordinator(
+                hass,
+                client,
+                Gateway("synthetic"),
+                entry,
+                PollingProfile.CLOUD_FRIENDLY if friendly else PollingProfile.STANDARD,
+            )
+            coordinator.resources = {
+                path: Resource(
+                    path,
+                    value="MX400" if path == metadata_paths[0] else 2,
+                    has_value=True,
+                    metadata=ResourceMetadata(
+                        resource_type="stringValue"
+                        if path == metadata_paths[0]
+                        else "floatValue",
+                        unit="C" if path in fast_paths else None,
+                    ),
+                )
+                for path in (*fast_paths, *metadata_paths)
+            }
+            coordinator.data = {
+                path: ResourceSnapshot(resource, True, datetime.now(UTC))
+                for path, resource in coordinator.resources.items()
+            }
+            coordinator._paths_by_group = {
+                group: tuple(
+                    path
+                    for path, resource in coordinator.resources.items()
+                    if poll_group(resource) is group
+                )
+                for group in coordinator._poll_intervals
+            }
+            if before:
+                # The two reviewed leaves used the slow group before this change.
+                coordinator._paths_by_group[PollGroup.SLOW] = metadata_paths
+            coordinator._next_update = {
+                group: interval.total_seconds()
+                for group, interval in coordinator._poll_intervals.items()
+            }
+            with patch(
+                "custom_components.bosch_buderus_heating.coordinator.monotonic",
+                return_value=0.0,
+            ) as clock:
+                for minute in range(1, 61):
+                    clock.return_value = minute * 60.0
+                    coordinator.data = await coordinator._async_update_data()
+            count = client.metrics.snapshot()
+            measurements.append(
+                (count["requests_total"], count["bulk_resource_paths_total"])
+            )
+            assert count["requests_total"] == len(calls)
+            assert all(len(paths) <= 30 for paths in calls)
+            if not before:
+                assert not set(metadata_paths).intersection(
+                    path for paths in calls for path in paths
+                )
+        slow_polls = 2 if friendly else 4
+        fast_polls = 30 if friendly else 60
+        assert measurements == [
+            (fast_polls + slow_polls, fast_polls * 30 + slow_polls * 2),
+            (fast_polls, fast_polls * 30),
+        ]
+
+
+async def test_startup_bulk_still_refreshes_a_rejected_token_once() -> None:
+    calls = 0
+    provider = AsyncMock()
+    provider.get_access_token.side_effect = ["old-synthetic", "new-synthetic"]
+
+    async def refresh(request: web.Request) -> web.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return web.Response(status=401)
+        return web.json_response(
+            [
+                {
+                    "gatewayId": "gateway",
+                    "resourcePaths": [
+                        {
+                            "resourcePath": "/gateway/tosAccepted",
+                            "serverStatus": 200,
+                            "gatewayResponse": {
+                                "status": 200,
+                                "payload": {"value": True},
+                            },
+                        }
+                    ],
+                }
+            ]
+        )
+
+    async with (
+        serve([("POST", "/bulk", refresh)]) as url,
+        aiohttp.ClientSession() as session,
+    ):
+        client = PointTClient(session, provider, base_url=url)
+        result = await client.get_resources_bulk(
+            "gateway",
+            ["/gateway/tosAccepted"],
+            retryable=False,
+            request_type="startup_metadata",
+        )
+        assert result[0].ok
+        assert calls == 2
+        assert client.metrics.requests_by_type["startup_metadata"] == 2
+        provider.get_access_token.assert_awaited_with(
+            force_refresh=True, rejected_token="old-synthetic"
+        )
+
+
+async def test_cancelled_http_read_is_counted_as_cancelled_and_releases_capacity() -> (
+    None
+):
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def response(request: web.Request) -> web.Response:
+        entered.set()
+        await release.wait()
+        return web.json_response({"value": 1})
+
+    async with (
+        serve([("GET", "/gateways/{gateway}/resource/system", response)]) as url,
+        aiohttp.ClientSession() as session,
+    ):
+        client = PointTClient(session, "synthetic", base_url=url, concurrency=1)
+        task = asyncio.create_task(client.get_resource("gateway", "/system"))
+        await entered.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        release.set()
+        assert client.metrics.snapshot()["outcomes"] == {"cancelled": 1}
+        assert client.metrics.snapshot()["requests_successful"] == 0
+        assert (await client.get_resource("gateway", "/system")).value == 1
+
+
 Handler = Callable[[web.Request], Awaitable[web.StreamResponse]]
 
 

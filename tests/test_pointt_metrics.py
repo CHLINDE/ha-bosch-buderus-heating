@@ -55,6 +55,7 @@ def test_request_metrics_aggregate_without_request_details() -> None:
         "fallback_requests": 1,
         "fallback_requests_by_reason": {"other": 1},
         "requests_by_category": {"bulk": 2, "other": 1},
+        "requests_by_type": {"bulk": 2, "fallback": 1},
         "requests_by_method": {"GET": 1, "POST": 2},
         "responses_by_status_class": {"2xx": 1, "4xx": 1, "other": 1},
         "outcomes": {

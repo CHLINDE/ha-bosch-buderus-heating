@@ -11,7 +11,6 @@ from time import monotonic
 from typing import Any, cast, override
 from urllib.parse import urlparse
 
-import voluptuous as vol
 from homeassistant.components import persistent_notification
 from homeassistant.config_entries import (
     ConfigEntry,
@@ -53,6 +52,7 @@ from .const import (
 from .coordinator import BoschBuderusDataUpdateCoordinator, Freshness
 from .data import tokens_from_data, tokens_to_data
 from .enum_translation import writable_enum_options
+from .ha_schema import validation as vol
 from .holiday_writes import (
     HolidayTimeError,
     HolidayTimeStepError,

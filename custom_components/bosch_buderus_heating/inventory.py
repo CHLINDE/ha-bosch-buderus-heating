@@ -50,8 +50,8 @@ def build_anonymized_inventory(
     wrapped = diagnostics.get("data")
     if "privacy" not in diagnostics and isinstance(wrapped, Mapping):
         diagnostics = wrapped
-    _validate_privacy(diagnostics.get("privacy"))
     diagnostics_schema = diagnostics.get("diagnostics_schema")
+    _validate_privacy(diagnostics.get("privacy"), schema=diagnostics_schema)
     if not isinstance(diagnostics_schema, int) or isinstance(diagnostics_schema, bool):
         raise InventoryError("Diagnostics schema version is missing")
     gateways = diagnostics.get("gateways")
@@ -79,17 +79,27 @@ def build_anonymized_inventory(
     }
 
 
-def _validate_privacy(value: object) -> None:
+def _validate_privacy(value: object, *, schema: object = None) -> None:
     if not isinstance(value, Mapping):
         raise InventoryError("Diagnostics privacy declaration is missing")
     required = (
         "contains_credentials",
         "contains_stable_identifiers",
         "contains_user_defined_names",
-        "contains_raw_resource_values",
     )
     if any(value.get(key) is not False for key in required):
         raise InventoryError("Diagnostics are not declared safe for sharing")
+    if value.get("contains_raw_resource_values") is False:
+        return
+    if (
+        schema == 14
+        and value.get("contains_raw_resource_values") is True
+        and value.get("raw_resource_values_scope") == "allowlisted_technical_metadata"
+    ):
+        # Technical metadata is deliberately excluded by _safe_gateway's
+        # explicit structural field lists, even if the input adds extra values.
+        return
+    raise InventoryError("Diagnostics contain unrestricted resource values")
 
 
 def _safe_gateway(number: int, value: object) -> dict[str, object]:

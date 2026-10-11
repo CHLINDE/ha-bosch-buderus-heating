@@ -19,7 +19,11 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import DOMAIN, RATE_LIMIT_ISSUE_PREFIX, PollingProfile
-from .discovery import DiscoveryDiagnostics, async_discover_resources
+from .discovery import (
+    ROOT_RESOURCE_PATHS,
+    DiscoveryDiagnostics,
+    async_discover_resources,
+)
 from .faults import FaultTracker, fault_resource_candidates, is_fault_resource_path
 from .holiday_writes import HolidayWriteService, holiday_resources_from_snapshots
 from .holidays import (
@@ -43,6 +47,8 @@ from .pointt.const import MAX_BULK_PATHS
 from .pointt.models import BatchItemResult
 from .pointt.redaction import resource_path_template
 from .resource_catalog import PollGroup, poll_group
+from .startup_data import STARTUP_BUDGET_SECONDS, StartupSession
+from .startup_reader import StartupReader
 from .writes import EnumWritePolicy, NumberWritePolicy, WriteService
 
 _LOGGER = logging.getLogger(__name__)
@@ -93,6 +99,7 @@ class SnapshotSource(StrEnum):
     BATCH = "batch"
     FALLBACK = "fallback"
     WRITE = "write"
+    STARTUP = "startup"
 
 
 class Freshness(StrEnum):
@@ -168,6 +175,8 @@ class BoschBuderusDataUpdateCoordinator(
         gateway: Gateway,
         config_entry: ConfigEntry[Any],
         polling_profile: PollingProfile = PollingProfile.STANDARD,
+        *,
+        startup_session: StartupSession | None = None,
     ) -> None:
         poll_intervals = (
             POLL_INTERVALS_CLOUD_FRIENDLY
@@ -188,6 +197,12 @@ class BoschBuderusDataUpdateCoordinator(
         )
         self.client = client
         self.gateway = gateway
+        self.startup_session = startup_session or StartupSession((gateway.gateway_id,))
+        self.startup_data = self.startup_session.gateway(gateway.gateway_id)
+        self._startup_reader = StartupReader(
+            client, gateway.gateway_id, self.startup_data, roots=ROOT_RESOURCE_PATHS
+        )
+        self._main_cycle_failed = False
         self._config_entry = config_entry
         self.polling_profile = polling_profile
         self._poll_intervals = poll_intervals
@@ -428,8 +443,21 @@ class BoschBuderusDataUpdateCoordinator(
         self._polls_total += 1
         try:
             async with self._update_lock:
-                return await self._async_update_data_locked()
+                self._main_cycle_failed = False
+                snapshots = await self._async_update_data_locked()
+                self.startup_data.record_main_cycle(
+                    successful=not self._main_cycle_failed
+                )
+                if self.startup_data.healthy and self.startup_session.claim(
+                    self.gateway.gateway_id, monotonic()
+                ):
+                    try:
+                        await self.async_read_startup_batch(snapshots)
+                    finally:
+                        self.startup_session.release()
+                return snapshots
         except Exception:
+            self.startup_data.record_main_cycle(successful=False)
             self._poll_failures += 1
             self.faults.mark_unavailable()
             raise
@@ -552,6 +580,7 @@ class BoschBuderusDataUpdateCoordinator(
             )
         )
         if not paths:
+            self._main_cycle_failed = not self.last_update_success
             self._advance_groups(due_groups, now_monotonic)
             return dict(self.data or {})
 
@@ -667,6 +696,10 @@ class BoschBuderusDataUpdateCoordinator(
         self._deferred_poll_paths = tuple(
             path for path in paths if path not in attempted_paths
         )
+        self._main_cycle_failed = bool(failed_chunks) or any(
+            not result.ok and result.status not in (403, 404, 406)
+            for result in cycle_results
+        )
         for path in self._deferred_poll_paths:
             if (previous := snapshots.get(path)) is not None:
                 # No request was made: retain the attempt timestamp and counters.
@@ -729,6 +762,7 @@ class BoschBuderusDataUpdateCoordinator(
                 self.client,
                 self.gateway.gateway_id,
                 diagnostics=self.discovery_diagnostics,
+                startup_data=self.startup_data,
             )
         except AuthenticationError as err:
             raise ConfigEntryAuthFailed from err
@@ -821,7 +855,7 @@ class BoschBuderusDataUpdateCoordinator(
             for group, interval in self._poll_intervals.items()
         }
         updated_at = datetime.now(UTC)
-        return {
+        snapshots = {
             path: ResourceSnapshot(
                 resource=resource,
                 available=True,
@@ -831,6 +865,55 @@ class BoschBuderusDataUpdateCoordinator(
             )
             for path, resource in successful_resources.items()
         }
+        self._merge_startup_resources(snapshots)
+        return snapshots
+
+    def _merge_startup_resources(self, snapshots: dict[str, ResourceSnapshot]) -> None:
+        """Keep the actual read timestamp, including across automatic setup retries."""
+        for read in self.startup_data.cached_reads():
+            if read.resource is None or read.last_success is None:
+                continue
+            path, resource = read.path, read.resource
+            if path in snapshots and snapshots[path].last_success >= read.last_success:
+                continue
+            self.resources[path] = resource
+            snapshots[path] = ResourceSnapshot(
+                resource=resource,
+                available=True,
+                last_success=read.last_success,
+                last_attempt=read.last_attempt,
+                source=SnapshotSource.STARTUP,
+            )
+        self._paths_by_group = {
+            group: tuple(
+                path
+                for path, resource in self.resources.items()
+                if poll_group(resource) is group
+            )
+            for group in self._poll_intervals
+        }
+
+    async def async_read_startup_batch(
+        self,
+        snapshots: dict[str, ResourceSnapshot],
+        *,
+        budget: float = STARTUP_BUDGET_SECONDS,
+    ) -> bool:
+        """Apply supplementary results to HA without changing main-poll health."""
+        try:
+            batch = await self._startup_reader.async_read_batch(
+                self.resources.keys(), budget=budget
+            )
+        except AuthenticationError as err:
+            self.startup_session.close()
+            raise ConfigEntryAuthFailed from err
+        for path, category in batch.outcomes:
+            self._record_capability(path, category, SnapshotSource.STARTUP)
+        if batch.rate_limit is not None:
+            self._activate_rate_limit_backoff(batch.rate_limit, monotonic())
+        if batch.attempted:
+            self._merge_startup_resources(snapshots)
+        return batch.attempted
 
     async def _async_core_fallback(
         self, chunk: tuple[str, ...]

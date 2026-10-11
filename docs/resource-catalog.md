@@ -379,6 +379,15 @@ authorization contract are independently verified.
 
 ## Gateway values
 
+Reviewed supplemental metadata is read after functional discovery. Device
+`productName` and `numberOfRefrigerantCircuitsInstalled` retain their existing
+sensor identities but leave periodic polling after a valid read-only response.
+The reviewed administrative leaves `/gateway/tosAccepted`, `/system/dateTime`,
+`/gateway/wifi/mac`, and device `inclusionTime`/`sgtin` also use this bounded
+startup phase. They do not gain entities, and their personal values are not
+exported. Temporary failures recover automatically; see the
+[startup recovery rules](architecture.md#nonessential-startup-reads).
+
 | PointT path | User-facing name | Access | HA mapping / note |
 |---|---|---:|---|
 | `/gateway` | Gateway resources | R | Internal: discovery |
@@ -387,7 +396,7 @@ authorization contract are independently verified.
 | `/gateway/dataProcessing/status` | Data processing status | R | Static diagnostic status, disabled by default |
 | `/gateway/serialId` | Serial number | R | Device information and diagnostic entity disabled by default |
 | `/gateway/swPrefix` | Software family | R | Diagnostic |
-| `/gateway/thirdPartyLicenseInformation` | License information | R | No entity |
+| `/gateway/thirdPartyLicenseInformation` | License information | R | Omitted entirely; advertised presence remains in diagnostics |
 | `/gateway/tosAccepted` | Acceptance of terms of service | R/W | Administrative value; never offer as a control |
 | `/gateway/tzInfo` | Time-zone information | R | Internal: discovery |
 | `/gateway/tzInfo/timeZone` | Time zone | R/W | Diagnostic; never write from Home Assistant |

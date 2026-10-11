@@ -180,6 +180,8 @@ class PointTClient:
         paths: Sequence[str],
         *,
         chunk_size: int = MAX_BULK_PATHS,
+        retryable: bool = True,
+        request_type: str | None = None,
     ) -> tuple[BatchItemResult, ...]:
         """Read resources sequentially in safe bulk chunks."""
         _encode_gateway_id(gateway_id)
@@ -192,7 +194,11 @@ class PointTClient:
                 }
             ]
             payload, request_sequence = await self._request_with_sequence(
-                "POST", "bulk", json_body=body, retryable=True
+                "POST",
+                "bulk",
+                json_body=body,
+                retryable=retryable,
+                request_type=request_type,
             )
             parsed = parse_batch_response(
                 payload, gateway_id=gateway_id, requested_paths=chunk

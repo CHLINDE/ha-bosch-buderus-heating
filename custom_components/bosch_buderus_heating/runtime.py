@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from .coordinator import BoschBuderusDataUpdateCoordinator
 from .pointt import Gateway, PointTClient, TokenManager
+from .startup_data import StartupSession
 
 if TYPE_CHECKING:
     from .notifications import FaultNotifications
@@ -21,3 +22,4 @@ class BoschBuderusRuntimeData:
     gateways: tuple[Gateway, ...]
     coordinators: tuple[BoschBuderusDataUpdateCoordinator, ...]
     notifications: tuple[FaultNotifications, ...] = ()
+    startup: StartupSession | None = None

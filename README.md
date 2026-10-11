@@ -29,6 +29,14 @@ default and can be configured for each installation. See the
 [release notes](CHANGELOG.md) for all changes since 0.7.2 and the field checks
 that remain open.
 
+I am releasing **0.8.1-beta.1** to improve recovery from temporary PointT
+failures and reduce unnecessary metadata reads. Successful supplementary data
+is read once per integration load; temporary failures are retried later without
+a restart. Version **0.8.0 remains the stable release**. The beta also includes
+the compatible maintenance updates from PRs #55, #56 and #57. See the
+[exact request and recovery rules](docs/request-behavior.md) and
+[beta release notes](CHANGELOG.md#081-beta1---2026-10-11).
+
 Bosch/Buderus Heating is an unofficial Home Assistant custom integration. It
 discovers the capabilities exposed by a heating system instead of assuming a
 fixed device layout. Heating circuits, hot-water circuits, heat generators,
@@ -323,6 +331,14 @@ The coordinator groups resources by how quickly they need to change:
 | Starts and operating hours | 15 minutes |
 | Static device information | At startup |
 
+Reviewed supplementary metadata now has a separate phase after functional
+discovery, with one shared 30-second entry budget. Valid read-only product
+names and installed refrigerant-circuit counts then stop repeating. Failed
+reads remain eligible for bounded recovery; existing sensor identities are
+preserved. The unused license document is not requested. See
+[Request behavior and recovery](docs/request-behavior.md) for the exact paths,
+retry delays, cache lifetime, limits and measured request savings.
+
 Group deadlines allow up to one second of timer-rounding tolerance so a slightly
 early Home Assistant callback does not skip the next read. Resource pauses and
 rate-limit deadlines retain their full duration.
@@ -336,8 +352,10 @@ invented data. Polling profiles can be changed through **Reconfigure**; see
 
 Home Assistant can generate a redacted diagnostic report from the integration
 menu. It contains capability schemas, availability, polling results, and
-request counters, but excludes credentials, raw values, stable identifiers,
-and user-defined names.
+request counters and narrowly allowlisted technical metadata. It excludes
+credentials, current operating/settings values, stable identifiers and
+user-defined names. The [diagnostics guide](docs/diagnostics.md) explains the
+technical-value allowlist and the value-free inventory export.
 
 Before opening an
 [issue](https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/issues):
@@ -357,6 +375,7 @@ gateway IDs, serial numbers, network identifiers, or unredacted API responses.
 |---|---|
 | [Setup guide](docs/setup.md) | Illustrated installation and SingleKey ID walkthrough |
 | [Entities and polling](docs/entities.md) | Entity names, API resources, write access, and intervals |
+| [Request behavior and recovery](docs/request-behavior.md) | Exact startup order, successful-once reads, retries, limits and cloud-load savings |
 | [Faults and notifications](docs/faults.md) | Fault entities, lifecycle behavior, and automation examples |
 | [Holiday periods](docs/holiday-periods.md) | Creating calendar entries and configuring heating behavior |
 | [Resource catalog](docs/resource-catalog.md) | Observed PointT resources and terminology |

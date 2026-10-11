@@ -40,6 +40,7 @@ from custom_components.bosch_buderus_heating.pointt import (
     ResourceMetadata,
     ServiceUnavailable,
 )
+from custom_components.bosch_buderus_heating.startup_data import StartupSession
 
 
 def _entry(hass: HomeAssistant) -> MockConfigEntry:
@@ -53,6 +54,113 @@ def _entry(hass: HomeAssistant) -> MockConfigEntry:
     )
     entry.add_to_hass(hass)
     return entry
+
+
+@pytest.mark.parametrize(
+    "reset",
+    [
+        "automatic_retry",
+        "reload",
+        "options",
+        "credentials",
+        "explicit_retry_reload",
+        "runtime_removed",
+    ],
+)
+async def test_startup_session_lifetime_and_account_brake(hass, reset):
+    from homeassistant.config_entries import ConfigEntryState
+
+    from custom_components.bosch_buderus_heating.pointt import BatchItemResult
+
+    entry = _entry(hass)
+    entry._async_set_state(hass, ConfigEntryState.SETUP_IN_PROGRESS, None)
+    product = "/devices/synthetic/productName"
+    metadata = Resource(
+        product,
+        value="MX400",
+        has_value=True,
+        metadata=ResourceMetadata(resource_type="stringValue"),
+    )
+    fast = Resource("/heatSources/actualModulation", value=1, has_value=True)
+
+    async def discover(client, gateway_id, *, startup_data, **kwargs):
+        startup_data.begin_discovery()
+        startup_data.schedule(product, 2, advertised=True)
+        return {fast.path: fast}
+
+    with (
+        patch(
+            "custom_components.bosch_buderus_heating.PointTClient.get_gateways",
+            AsyncMock(return_value=(Gateway("gateway-one"),)),
+        ),
+        patch(
+            "custom_components.bosch_buderus_heating.coordinator.async_discover_resources",
+            side_effect=discover,
+        ),
+        patch(
+            "custom_components.bosch_buderus_heating.coordinator.fault_resource_candidates",
+            return_value=(),
+        ),
+        patch(
+            "custom_components.bosch_buderus_heating.PointTClient.get_resources_bulk",
+            AsyncMock(
+                return_value=(
+                    BatchItemResult("gateway-one", product, 200, resource=metadata),
+                )
+            ),
+        ) as bulk,
+        patch(
+            "custom_components.bosch_buderus_heating.async_setup_notifications",
+            AsyncMock(return_value=()),
+        ),
+        patch.object(
+            hass.config_entries,
+            "async_forward_entry_setups",
+            AsyncMock(side_effect=[ConfigEntryNotReady("retry"), None, None]),
+        ),
+    ):
+        with pytest.raises(ConfigEntryNotReady):
+            await async_setup_entry(hass, entry)
+        original = entry.runtime_data.startup
+        assert isinstance(original, StartupSession)
+        assert not original.setup_complete
+        timestamp = original.gateway("gateway-one").reads[product].last_success
+        brake = entry.runtime_data.client.backoff
+        if reset == "reload":
+            original.mark_setup_complete()
+        elif reset == "runtime_removed":
+            original.detach()
+            del entry.runtime_data
+        elif reset == "options":
+            hass.config_entries.async_update_entry(entry, options={"test_change": True})
+        elif reset == "credentials":
+            hass.config_entries.async_update_entry(
+                entry,
+                data={
+                    **entry.data,
+                    **tokens_to_data(
+                        AuthTokens("different", "different-refresh", expires_at=4000.0)
+                    ),
+                },
+            )
+        elif reset == "explicit_retry_reload":
+            entry._async_set_state(hass, ConfigEntryState.SETUP_RETRY, None)
+            assert not original.closed
+            entry._async_set_state(hass, ConfigEntryState.NOT_LOADED, None)
+            assert original.closed
+        entry._async_set_state(hass, ConfigEntryState.SETUP_IN_PROGRESS, None)
+        assert await async_setup_entry(hass, entry)
+        assert entry.runtime_data.client.backoff is brake
+        current = entry.runtime_data.startup
+        assert (current is original) is (reset == "automatic_retry")
+        if reset == "automatic_retry":
+            assert bulk.await_count == 1
+            snapshot = entry.runtime_data.coordinators[0].data[product]
+            assert snapshot.last_success == timestamp
+            assert snapshot.resource == metadata
+        else:
+            assert bulk.await_count == 2
+        current.detach()
 
 
 async def test_entry_setup_selects_gateways_and_persists_rotated_tokens(

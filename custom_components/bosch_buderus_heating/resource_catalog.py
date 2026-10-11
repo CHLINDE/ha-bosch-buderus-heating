@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from .pointt import Resource
+from .startup_data import is_static_startup_resource
 
 
 class PollGroup(StrEnum):
@@ -858,6 +859,8 @@ def entity_enabled_by_default(path: str) -> bool:
 
 def poll_group(resource: Resource) -> PollGroup:
     """Classify a discovered resource into a cloud-friendly cadence."""
+    if is_static_startup_resource(resource):
+        return PollGroup.STATIC
     # Historical failure lists are probed during discovery, but are not polled
     # repeatedly until the integration exposes a history feature that uses them.
     if resource.path.endswith("/failurelist"):

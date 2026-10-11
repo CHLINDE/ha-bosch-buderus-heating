@@ -111,6 +111,7 @@ class RequestMetrics:
     maximum_duration_ms: float = 0.0
     last_duration_ms: float | None = None
     requests_by_category: Counter[str] = field(default_factory=Counter)
+    requests_by_type: Counter[str] = field(default_factory=Counter)
     requests_by_method: Counter[str] = field(default_factory=Counter)
     responses_by_status_class: Counter[str] = field(default_factory=Counter)
     outcomes: Counter[str] = field(default_factory=Counter)
@@ -147,6 +148,7 @@ class RequestMetrics:
 
         self.requests_total += 1
         self.requests_by_category[category] += 1
+        self.requests_by_type[safe_type] += 1
         self.requests_by_method[method.upper()] += 1
         self.responses_by_status_class[_status_class(status)] += 1
         self.outcomes[outcome] += 1
@@ -290,6 +292,7 @@ class RequestMetrics:
                 sorted(self.fallback_requests_by_reason.items())
             ),
             "requests_by_category": dict(sorted(self.requests_by_category.items())),
+            "requests_by_type": dict(sorted(self.requests_by_type.items())),
             "requests_by_method": dict(sorted(self.requests_by_method.items())),
             "responses_by_status_class": dict(
                 sorted(self.responses_by_status_class.items())

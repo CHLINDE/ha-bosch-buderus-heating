@@ -274,7 +274,7 @@ async def test_solar_entities_survive_discovery_polling_and_reload(
     }
 
     async def bulk_result(
-        gateway_id: str, paths: tuple[str, ...]
+        gateway_id: str, paths: tuple[str, ...], **kwargs: object
     ) -> tuple[BatchItemResult, ...]:
         results = []
         for path in paths:

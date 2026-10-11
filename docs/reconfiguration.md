@@ -33,7 +33,15 @@ the apps use different OAuth configurations.
 | Standard | 1 minute | 5 minutes | 15 minutes |
 | Cloud-friendly | 2 minutes | 10 minutes | 30 minutes |
 
-Static information is read during discovery and is not polled regularly.
+Static information is read during setup and is not polled regularly. Reviewed
+supplementary leaves have their own phase after functional discovery; failed
+reads can recover later without a reload. "Once" means one accepted read per
+integration load. An explicit reload starts a fresh metadata session, while an
+automatic retry of unfinished setup preserves it when the configuration and
+credentials are unchanged. An existing account rate-limit pause survives both.
+See [Request behavior and recovery](request-behavior.md) for exact paths,
+retry delays and limits.
+
 Both profiles use batch requests, partial-failure handling, backoff, negative
 caching, and a circuit breaker. The cloud-friendly profile is intended for
 installations where the PointT cloud repeatedly reports rate limits.

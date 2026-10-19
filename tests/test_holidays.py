@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -52,7 +53,11 @@ def test_multiple_periods_and_gateway_timezone_are_normalized() -> None:
         HOLIDAY_ACTIVE_MODES_PATH: Resource(path=HOLIDAY_ACTIVE_MODES_PATH),
     }
 
-    state = parse_holiday_state(resources, fallback_timezone="UTC")
+    state = parse_holiday_state(
+        resources,
+        fallback_timezone=UTC,
+        timezones={"Europe/Berlin": ZoneInfo("Europe/Berlin")},
+    )
 
     assert state.timezone_source == "gateway"
     assert len(state.periods) == 2
@@ -77,7 +82,7 @@ def test_incomplete_periods_are_ignored_without_losing_valid_entries() -> None:
 
     state = parse_holiday_state(
         {resource.path: resource},
-        fallback_timezone="invalid/timezone",
+        fallback_timezone=None,
     )
 
     assert len(state.periods) == 1
@@ -98,7 +103,7 @@ def test_active_modes_is_authoritative_and_schedule_is_fallback() -> None:
     now = datetime(2026, 8, 22, 12, tzinfo=UTC)
 
     fallback = parse_holiday_state(
-        {period.path: period}, fallback_timezone="UTC", now=now
+        {period.path: period}, fallback_timezone=UTC, now=now
     )
     inactive = parse_holiday_state(
         {
@@ -109,7 +114,7 @@ def test_active_modes_is_authoritative_and_schedule_is_fallback() -> None:
                 has_value=True,
             ),
         },
-        fallback_timezone="UTC",
+        fallback_timezone=UTC,
         now=now,
     )
     active = parse_holiday_state(
@@ -119,7 +124,7 @@ def test_active_modes_is_authoritative_and_schedule_is_fallback() -> None:
                 values=({"mode": "eco"},),
             )
         },
-        fallback_timezone="UTC",
+        fallback_timezone=UTC,
         now=now,
     )
     activated_fallback = parse_holiday_state(
@@ -130,7 +135,7 @@ def test_active_modes_is_authoritative_and_schedule_is_fallback() -> None:
                 has_value=True,
             )
         },
-        fallback_timezone="UTC",
+        fallback_timezone=UTC,
         now=now,
     )
 
@@ -151,7 +156,7 @@ def test_structured_dates_and_duplicates_are_supported() -> None:
         values=(duplicate, {"items": [duplicate]}),
     )
 
-    state = parse_holiday_state({resource.path: resource}, fallback_timezone="UTC")
+    state = parse_holiday_state({resource.path: resource}, fallback_timezone=UTC)
 
     assert len(state.periods) == 1
     assert state.periods[0].end.day == 4
@@ -180,7 +185,11 @@ def test_epoch_values_period_timezone_and_safe_names_are_supported() -> None:
         ),
     )
 
-    state = parse_holiday_state({resource.path: resource}, fallback_timezone="UTC")
+    state = parse_holiday_state(
+        {resource.path: resource},
+        fallback_timezone=UTC,
+        timezones={"Europe/Berlin": ZoneInfo("Europe/Berlin")},
+    )
 
     assert state.has_supported_source
     assert state.periods[0].start.isoformat() == "2026-10-01T14:00:00+02:00"
@@ -333,7 +342,7 @@ def test_writable_app_configuration_and_period_are_strictly_parsed() -> None:
     }
 
     configuration = parse_holiday_write_configuration(resources)
-    state = parse_holiday_state(resources, fallback_timezone="UTC")
+    state = parse_holiday_state(resources, fallback_timezone=UTC)
 
     assert configuration is not None
     assert configuration.assigned_to == ("hc1", "dhw1")

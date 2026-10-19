@@ -10,12 +10,12 @@ import re
 from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
-from zoneinfo import ZoneInfo
 
 from homeassistant.components import persistent_notification as pn
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.storage import Store
+from homeassistant.util import dt as dt_util
 
 from .const import CONF_FAULT_NOTIFICATIONS, CONF_GATEWAY_IDS, DOMAIN
 from .faults import (
@@ -312,7 +312,7 @@ class FaultNotifications:
 
     def _time(self, value: datetime, language: str) -> str:
         """Show HA observation times with the configured zone's actual UTC offset."""
-        local = value.astimezone(ZoneInfo(self.hass.config.time_zone))
+        local = dt_util.as_local(value)
         date_format = "%d.%m.%Y" if language == "de" else "%Y-%m-%d"
         return local.strftime(f"{date_format} %H:%M:%S %z")
 

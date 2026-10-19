@@ -10,6 +10,7 @@ from dataclasses import fields, replace
 from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from typing import Literal
 
+from .holiday_timezones import async_resolve_holiday_timezones
 from .holidays import (
     HOLIDAY_CONFIGURATION_PATH,
     HOLIDAY_LIST_PATH,
@@ -73,6 +74,7 @@ class HolidayWriteService:
         if read_back_attempts < 1:
             raise ValueError("Read-back attempts must be positive")
         self._client = client
+        self._timezones: dict[str, tzinfo | None] = {}
         self._sleep = sleep
         self._read_back_delay = read_back_delay
         self._read_back_attempts = read_back_attempts
@@ -83,7 +85,7 @@ class HolidayWriteService:
         resources: Mapping[str, Resource],
         values: HolidayWriteValues,
         *,
-        fallback_timezone: str,
+        fallback_timezone: tzinfo,
     ) -> Resource:
         """Create one period and confirm a new matching numeric identifier."""
         if configuration := parse_holiday_write_configuration(resources):
@@ -123,15 +125,20 @@ class HolidayWriteService:
         holiday_id: int,
         values: HolidayWriteValues,
         *,
-        fallback_timezone: str,
+        fallback_timezone: tzinfo,
         expected: HolidayWriteValues | None = None,
     ) -> Resource:
         """Update one period and confirm all known fields by numeric ID."""
-        _require_existing_id(resources, holiday_id, fallback_timezone)
+        self._timezones = await async_resolve_holiday_timezones(
+            resources, self._timezones
+        )
+        _require_existing_id(resources, holiday_id, fallback_timezone, self._timezones)
         baseline = expected or next(
             period.write_values
             for period in parse_holiday_state(
-                resources, fallback_timezone=fallback_timezone
+                resources,
+                fallback_timezone=fallback_timezone,
+                timezones=self._timezones,
             ).periods
             if holiday_period_id(period) == holiday_id
         )
@@ -158,7 +165,10 @@ class HolidayWriteService:
         )
         if (
             parse_confirmed_holiday_list(
-                merged_resource, resources, fallback_timezone=fallback_timezone
+                merged_resource,
+                resources,
+                fallback_timezone=fallback_timezone,
+                timezones=self._timezones,
             )
             is None
         ):
@@ -188,10 +198,13 @@ class HolidayWriteService:
         resources: Mapping[str, Resource],
         holiday_id: int,
         *,
-        fallback_timezone: str,
+        fallback_timezone: tzinfo,
     ) -> Resource:
         """Delete one period and confirm that its numeric ID disappeared."""
-        _require_existing_id(resources, holiday_id, fallback_timezone)
+        self._timezones = await async_resolve_holiday_timezones(
+            resources, self._timezones
+        )
+        _require_existing_id(resources, holiday_id, fallback_timezone, self._timezones)
         with suppress(RequestTimeout, ServiceUnavailable):
             await self._client.delete_holiday_period(gateway_id, holiday_id)
 
@@ -210,12 +223,19 @@ class HolidayWriteService:
         gateway_id: str,
         resources: Mapping[str, Resource],
         *,
-        fallback_timezone: str,
+        fallback_timezone: tzinfo,
     ) -> tuple[HolidayPeriod, ...]:
         """Establish an authoritative baseline before a non-idempotent write."""
         resource = await self._client.get_resource(gateway_id, HOLIDAY_LIST_PATH)
+        current = {**resources, HOLIDAY_LIST_PATH: resource}
+        self._timezones = await async_resolve_holiday_timezones(
+            current, self._timezones
+        )
         periods = parse_confirmed_holiday_list(
-            resource, resources, fallback_timezone=fallback_timezone
+            resource,
+            current,
+            fallback_timezone=fallback_timezone,
+            timezones=self._timezones,
         )
         if periods is None:
             raise WriteValidationError("Current holiday list is incomplete or invalid")
@@ -227,7 +247,7 @@ class HolidayWriteService:
         resources: Mapping[str, Resource],
         confirmed: Callable[[tuple[HolidayPeriod, ...]], bool],
         *,
-        fallback_timezone: str,
+        fallback_timezone: tzinfo,
     ) -> Resource:
         last_temporary_error: RequestTimeout | ServiceUnavailable | None = None
         for attempt in range(self._read_back_attempts):
@@ -241,8 +261,14 @@ class HolidayWriteService:
                 continue
             current = dict(resources)
             current[HOLIDAY_LIST_PATH] = holiday_list
+            self._timezones = await async_resolve_holiday_timezones(
+                current, self._timezones
+            )
             periods = parse_confirmed_holiday_list(
-                holiday_list, current, fallback_timezone=fallback_timezone
+                holiday_list,
+                current,
+                fallback_timezone=fallback_timezone,
+                timezones=self._timezones,
             )
             if periods is not None and confirmed(periods):
                 return holiday_list
@@ -604,12 +630,15 @@ def _period_matches_values(period: HolidayPeriod, expected: HolidayWriteValues) 
 
 
 def _require_existing_id(
-    resources: Mapping[str, Resource], holiday_id: int, fallback_timezone: str
+    resources: Mapping[str, Resource],
+    holiday_id: int,
+    fallback_timezone: tzinfo,
+    timezones: Mapping[str, tzinfo | None],
 ) -> None:
     if not any(
         holiday_period_id(period) == holiday_id
         for period in parse_holiday_state(
-            resources, fallback_timezone=fallback_timezone
+            resources, fallback_timezone=fallback_timezone, timezones=timezones
         ).periods
     ):
         raise WriteValidationError(

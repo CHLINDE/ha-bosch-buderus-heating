@@ -32,6 +32,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from . import BoschBuderusConfigEntry
 from .coordinator import BoschBuderusDataUpdateCoordinator, ResourceSnapshot
@@ -53,6 +54,7 @@ from .faults import (
 from .holidays import (
     HOLIDAY_PERIOD_PATHS,
     HOLIDAY_RESOURCE_PATHS,
+    HOLIDAY_TIMEZONE_PATH,
     HolidayPeriod,
     HolidayState,
     parse_holiday_state,
@@ -574,7 +576,9 @@ class BoschBuderusNextHolidaySensor(
 
     @property
     def available(self) -> bool:
-        return super().available and bool(self._available_resources)
+        return super().available and any(
+            path in self._available_resources for path in HOLIDAY_RESOURCE_PATHS
+        )
 
     @property
     def native_value(self) -> datetime | None:
@@ -602,7 +606,7 @@ class BoschBuderusNextHolidaySensor(
         snapshots = self.coordinator.data or {}
         return {
             path: snapshot.resource
-            for path in HOLIDAY_RESOURCE_PATHS
+            for path in (*HOLIDAY_RESOURCE_PATHS, HOLIDAY_TIMEZONE_PATH)
             if (snapshot := snapshots.get(path)) is not None and snapshot.available
         }
 
@@ -610,7 +614,8 @@ class BoschBuderusNextHolidaySensor(
     def _state(self) -> HolidayState:
         return parse_holiday_state(
             self._available_resources,
-            fallback_timezone=self.coordinator.hass.config.time_zone,
+            fallback_timezone=dt_util.get_default_time_zone(),
+            timezones=self.coordinator.holiday_timezones,
         )
 
     @property

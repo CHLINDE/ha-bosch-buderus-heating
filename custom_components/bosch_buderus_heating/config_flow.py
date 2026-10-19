@@ -36,6 +36,7 @@ from homeassistant.helpers.selector import (
     TextSelectorConfig,
     TextSelectorType,
 )
+from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_BRAND,
@@ -685,7 +686,11 @@ class BoschBuderusOptionsFlow(OptionsFlow):
                 resources = holiday_resources_from_snapshots(
                     choice.coordinator.data or {}
                 )
-                timezone = holiday_timezone(resources, self.hass.config.time_zone)
+                timezone = holiday_timezone(
+                    resources,
+                    dt_util.get_default_time_zone(),
+                    timezones=choice.coordinator.holiday_timezones,
+                )
                 for field, value in (("holiday_start", start), ("holiday_end", end)):
                     if isinstance(value, datetime):
                         if value.tzinfo is not None:
@@ -845,7 +850,9 @@ class BoschBuderusOptionsFlow(OptionsFlow):
             if configuration is None:
                 continue
             state = parse_holiday_state(
-                resources, fallback_timezone=coordinator.hass.config.time_zone
+                resources,
+                fallback_timezone=dt_util.get_default_time_zone(),
+                timezones=coordinator.holiday_timezones,
             )
             for period in state.periods:
                 holiday_id = holiday_period_id(period)

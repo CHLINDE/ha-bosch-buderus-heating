@@ -752,6 +752,24 @@ async def test_observation_times_disambiguate_clock_change(hass, rig):
     assert "Confirmed resolved: 2026-10-25 02:30:00 +0100" in message
 
 
+async def test_notification_rendering_uses_loaded_ha_zone_after_config_changes(
+    hass, rig
+):
+    _, coordinator, manager, current, _ = rig
+    await manager.async_start()
+    for name, expected, occurrence in (
+        ("Europe/Berlin", "2026-10-03 14:00:00 +0200", "first"),
+        ("Asia/Kathmandu", "2026-10-03 17:45:00 +0545", "second"),
+    ):
+        await hass.config.async_set_time_zone(name)
+        with patch(
+            "zoneinfo.ZoneInfo", side_effect=AssertionError("notification zone I/O")
+        ):
+            _apply(coordinator.faults, {**A, "occurrenceId": occurrence})
+            manager.async_update()
+        assert expected in next(iter(current.values()))["message"]
+
+
 @pytest.mark.parametrize(
     "crash_point,visible_on_restart",
     [

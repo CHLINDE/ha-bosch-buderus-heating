@@ -9,7 +9,6 @@ import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta, timezone, tzinfo
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .pointt import Resource
 from .pointt.models import JsonValue
@@ -184,27 +183,20 @@ class HolidayState:
 def parse_holiday_state(
     resources: Mapping[str, Resource],
     *,
-    fallback_timezone: str = "UTC",
+    fallback_timezone: tzinfo | None = UTC,
+    timezones: Mapping[str, tzinfo | None] | None = None,
     now: datetime | None = None,
 ) -> HolidayState:
     """Parse all supported PointT holiday shapes without trusting their schema."""
-    timezone, timezone_source = _select_timezone(resources, fallback_timezone)
+    timezone, timezone_source = _select_timezone(
+        resources, fallback_timezone, timezones
+    )
     name_codec = _holiday_name_codec(resources)
-    candidates: list[Mapping[str, JsonValue]] = []
-    for path in HOLIDAY_PERIOD_PATHS:
-        resource = resources.get(path)
-        if resource is None:
-            continue
-        for payload in _resource_payloads(resource):
-            candidates.extend(_period_candidates(payload))
-            if len(candidates) >= _MAX_CANDIDATES:
-                break
-
     invalid = 0
     periods: list[HolidayPeriod] = []
     seen: set[tuple[datetime, datetime, str | None]] = set()
-    for candidate in candidates[:_MAX_CANDIDATES]:
-        parsed = _parse_period(candidate, timezone, name_codec)
+    for candidate in _holiday_candidates(resources):
+        parsed = _parse_period(candidate, timezone, name_codec, timezones)
         if parsed is None:
             invalid += 1
             continue
@@ -251,7 +243,8 @@ def parse_confirmed_holiday_list(
     resource: Resource,
     resources: Mapping[str, Resource],
     *,
-    fallback_timezone: str,
+    fallback_timezone: tzinfo,
+    timezones: Mapping[str, tzinfo | None] | None = None,
 ) -> tuple[HolidayPeriod, ...] | None:
     """Require a complete explicit list before confirming a calendar mutation."""
     if resource.path != HOLIDAY_LIST_PATH:
@@ -264,14 +257,14 @@ def parse_confirmed_holiday_list(
         return None
     if len(rows) > _MAX_CANDIDATES:
         return None
-    timezone, _source = _select_timezone(resources, fallback_timezone)
+    timezone, _source = _select_timezone(resources, fallback_timezone, timezones)
     codec = _holiday_name_codec(resources)
     periods: list[HolidayPeriod] = []
     seen: set[int] = set()
     for row in rows:
         if not isinstance(row, dict):
             return None
-        period = _parse_period(row, timezone, codec)
+        period = _parse_period(row, timezone, codec, timezones)
         if period is None or (identifier := holiday_period_id(period)) is None:
             return None
         if identifier in seen:
@@ -403,6 +396,22 @@ def _resource_payloads(resource: Resource) -> Iterable[JsonValue]:
     yield from resource.values
 
 
+def _holiday_candidates(
+    resources: Mapping[str, Resource],
+) -> list[Mapping[str, JsonValue]]:
+    """Use the same bounded candidates for parsing and timezone preparation."""
+    candidates: list[Mapping[str, JsonValue]] = []
+    for path in HOLIDAY_PERIOD_PATHS:
+        resource = resources.get(path)
+        if resource is None:
+            continue
+        for payload in _resource_payloads(resource):
+            candidates.extend(_period_candidates(payload))
+            if len(candidates) >= _MAX_CANDIDATES:
+                return candidates[:_MAX_CANDIDATES]
+    return candidates
+
+
 def _period_candidates(
     payload: JsonValue, *, depth: int = 0
 ) -> list[Mapping[str, JsonValue]]:
@@ -438,6 +447,7 @@ def _parse_period(
     candidate: Mapping[str, JsonValue],
     default_timezone: tzinfo,
     name_codec: HolidayNameCodec | None,
+    timezones: Mapping[str, tzinfo | None] | None,
 ) -> HolidayPeriod | None:
     normalized = {_normalize_key(key): value for key, value in candidate.items()}
     start_raw = _find_value(normalized, _START_KEYS)
@@ -445,7 +455,10 @@ def _parse_period(
     if start_raw is None or end_raw is None:
         return None
 
-    period_timezone = _timezone_from_mapping(normalized) or default_timezone
+    zone_name = _timezone_name_from_mapping(normalized)
+    period_timezone = (
+        _resolved_timezone(zone_name, timezones) if zone_name is not None else None
+    ) or default_timezone
     start_result = _parse_datetime(start_raw, period_timezone)
     end_result = _parse_datetime(end_raw, period_timezone)
     if start_result is None or end_result is None:
@@ -488,10 +501,13 @@ def holiday_period_id(period: HolidayPeriod) -> int | None:
 
 
 def holiday_timezone(
-    resources: Mapping[str, Resource], fallback_timezone: str
+    resources: Mapping[str, Resource],
+    fallback_timezone: tzinfo,
+    *,
+    timezones: Mapping[str, tzinfo | None] | None = None,
 ) -> tzinfo:
     """Return the validated gateway or Home Assistant holiday time zone."""
-    return _select_timezone(resources, fallback_timezone)[0]
+    return _select_timezone(resources, fallback_timezone, timezones)[0]
 
 
 def encode_holiday_name(name: str, codec: HolidayNameCodec | None) -> str | None:
@@ -799,25 +815,29 @@ def _active_payload_value(value: JsonValue) -> bool | None:
 
 
 def _select_timezone(
-    resources: Mapping[str, Resource], fallback_timezone: str
+    resources: Mapping[str, Resource],
+    fallback_timezone: tzinfo | None,
+    timezones: Mapping[str, tzinfo | None] | None,
 ) -> tuple[tzinfo, str]:
     timezone_resource = resources.get(HOLIDAY_TIMEZONE_PATH)
     if timezone_resource is not None and isinstance(timezone_resource.value, str):
-        timezone = _zoneinfo(timezone_resource.value)
+        timezone = _resolved_timezone(timezone_resource.value, timezones)
         if timezone is not None:
             return timezone, "gateway"
-    timezone = _zoneinfo(fallback_timezone)
-    if timezone is not None:
-        return timezone, "home_assistant"
+    if fallback_timezone is not None:
+        return fallback_timezone, "home_assistant"
     return UTC, "utc_fallback"
 
 
-def _timezone_from_mapping(values: Mapping[str, JsonValue]) -> tzinfo | None:
+def _timezone_name_from_mapping(values: Mapping[str, JsonValue]) -> str | None:
     value = _find_value(values, frozenset(_TIME_ZONE_KEYS))
-    return _zoneinfo(value) if isinstance(value, str) else None
+    return value.strip() if isinstance(value, str) else None
 
 
-def _zoneinfo(value: str) -> tzinfo | None:
+def _resolved_timezone(
+    value: str, timezones: Mapping[str, tzinfo | None] | None
+) -> tzinfo | None:
+    """Use prepared named zones or construct a fixed offset without file I/O."""
     candidate = value.strip()
     match = re.fullmatch(r"(?:UTC)?([+-])(\d{2}):?(\d{2})", candidate, re.IGNORECASE)
     if match:
@@ -826,10 +846,28 @@ def _zoneinfo(value: str) -> tzinfo | None:
             return None
         delta = timedelta(hours=hours, minutes=minutes)
         return timezone(delta if match.group(1) == "+" else -delta)
-    try:
-        return ZoneInfo(candidate)
-    except ValueError, ZoneInfoNotFoundError:
-        return None
+    return timezones.get(candidate) if timezones is not None else None
+
+
+def holiday_timezone_names(resources: Mapping[str, Resource]) -> frozenset[str]:
+    """Collect only zones used by the bounded holiday parser, without loading them."""
+    names: set[str] = set()
+    gateway_zone = resources.get(HOLIDAY_TIMEZONE_PATH)
+    if gateway_zone is not None and isinstance(gateway_zone.value, str):
+        names.add(gateway_zone.value.strip())
+    for candidate in _holiday_candidates(resources):
+        normalized = {_normalize_key(key): value for key, value in candidate.items()}
+        if (name := _timezone_name_from_mapping(normalized)) is not None:
+            names.add(name)
+    # Fixed offsets are handled entirely in memory. Reject oversized/unprintable
+    # input before passing a cloud-supplied name to the timezone database.
+    return frozenset(
+        name
+        for name in names
+        if 0 < len(name) <= 255
+        and name.isprintable()
+        and not re.fullmatch(r"(?:UTC)?[+-]\d{2}:?\d{2}", name, re.IGNORECASE)
+    )
 
 
 def _find_value(

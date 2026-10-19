@@ -390,6 +390,7 @@ def _entry_with_writable_holiday(hass: HomeAssistant) -> tuple[MockConfigEntry, 
     entry = _reconfigure_entry(hass)
     coordinator = SimpleNamespace(
         hass=hass,
+        holiday_timezones={},
         gateway=Gateway("gateway-one", model="K40"),
         data={
             HOLIDAY_LIST_PATH: SimpleNamespace(
@@ -1018,6 +1019,7 @@ async def test_new_holiday_routes_to_explicit_gateway(
     first.async_create_holiday = AsyncMock()
     second = SimpleNamespace(
         hass=hass,
+        holiday_timezones={},
         gateway=Gateway("gateway-two", model="MX400"),
         data=deepcopy(first.data),
         async_create_holiday=AsyncMock(),

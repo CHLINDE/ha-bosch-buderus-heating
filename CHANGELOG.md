@@ -5,6 +5,17 @@ Versioning after its first tagged preview.
 
 ## [Unreleased]
 
+I fixed the blocking timezone lookups identified in the HACS review. Named
+gateway and per-period holiday zones are now loaded asynchronously before
+rendering, including newly returned periods during write confirmation. Invalid
+zone names are cached, and obsolete entries are removed within the existing
+64-period limit. Fault notifications use Home Assistant's already loaded zone.
+
+I also made the holiday-active and next-holiday sensors use the gateway zone
+consistently with the calendar. Daylight-saving transitions, explicit offsets,
+and Home Assistant's fallback zone keep their existing semantics. These changes
+add no cloud requests. Thank you to Frenck for identifying the blocking lookups.
+
 ## [0.8.1-beta.2] - 2026-10-11
 
 I added a **Season switching** control so the central heating season can be

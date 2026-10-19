@@ -9,6 +9,7 @@ from time import monotonic
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 
 from . import BoschBuderusConfigEntry
 from .const import CONF_BRAND, CONF_GATEWAY_IDS
@@ -118,7 +119,8 @@ def _gateway_diagnostics(
     )
     holiday_state = parse_holiday_state(
         coordinator.resources,
-        fallback_timezone=coordinator.hass.config.time_zone,
+        fallback_timezone=dt_util.get_default_time_zone(),
+        timezones=coordinator.holiday_timezones,
     )
     current_holiday_resources = {
         path: snapshot.resource

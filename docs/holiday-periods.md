@@ -14,6 +14,18 @@ Holiday support appears only when the connected gateway provides the required
 PointT resources. The available settings may differ between installations;
 the integration displays only options advertised by the current system.
 
+Holiday times use the gateway's time zone, with Home Assistant's configured
+zone as the fallback. A time zone supplied for an individual period takes
+precedence for that period. The calendar and holiday sensors use the same
+rules, including daylight-saving changes. Named zones are prepared
+asynchronously when resource data changes, without additional cloud requests.
+
+Urlaubszeiten verwenden die Zeitzone der Anlage. Fehlt eine gültige Angabe,
+gilt die in Home Assistant eingestellte Zeitzone. Eine Zeitzone für einen
+einzelnen Zeitraum hat für diesen Vorrang. Kalender und Urlaubssensoren
+berücksichtigen dabei auch die Sommerzeit. Das Laden der Zeitzonen erfolgt
+asynchron und benötigt keine zusätzlichen Cloud-Abfragen.
+
 ## Create a holiday period
 
 To choose installation-specific modes before creating a period, open the

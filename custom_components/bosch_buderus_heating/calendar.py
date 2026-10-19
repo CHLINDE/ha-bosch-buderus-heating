@@ -21,6 +21,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from . import BoschBuderusConfigEntry
 from .const import DOMAIN
@@ -220,14 +221,16 @@ class BoschBuderusHolidayCalendar(
     def _state(self) -> HolidayState:
         return parse_holiday_state(
             self._available_resources,
-            fallback_timezone=self.coordinator.hass.config.time_zone,
+            fallback_timezone=dt_util.get_default_time_zone(),
+            timezones=self.coordinator.holiday_timezones,
         )
 
     @property
     def _timezone(self) -> tzinfo:
         return holiday_timezone(
             self._available_resources,
-            self.coordinator.hass.config.time_zone,
+            dt_util.get_default_time_zone(),
+            timezones=self.coordinator.holiday_timezones,
         )
 
     def _period_for_uid(self, uid: str) -> HolidayPeriod | None:

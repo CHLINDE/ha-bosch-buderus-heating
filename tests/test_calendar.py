@@ -28,6 +28,10 @@ from custom_components.bosch_buderus_heating.coordinator import (
     BoschBuderusDataUpdateCoordinator,
     ResourceSnapshot,
 )
+from custom_components.bosch_buderus_heating.holiday_writes import (
+    HolidayAlreadyExists,
+    HolidayWriteNotConfirmed,
+)
 from custom_components.bosch_buderus_heating.holidays import (
     HOLIDAY_ACTIVE_MODES_PATH,
     HOLIDAY_CONFIGURATION_PATH,
@@ -196,7 +200,7 @@ async def test_writable_calendar_creates_updates_and_deletes(
     )
     created = coordinator.async_create_holiday.await_args.args[0]
     assert created.start_date == "2030-09-01T00:00:00"
-    assert created.end_date == "2030-09-07T24:00:00"
+    assert created.end_date == "2030-09-08T00:00:00"
     assert created.heating_mode == "FIX_TEMPERATURE"
 
     await entity.async_update_event(
@@ -227,6 +231,46 @@ async def test_writable_calendar_creates_updates_and_deletes(
         recurrence_range="",
     )
     coordinator.async_delete_holiday.assert_awaited_once_with(7)
+
+
+@pytest.mark.parametrize(
+    ("operation", "outcome", "key"),
+    [
+        ("create", "duplicate", "holiday_already_exists"),
+        ("create", "previous", "holiday_previous_request_found"),
+        ("create", "adjusted", "holiday_write_adjusted"),
+        ("update", "adjusted", "holiday_write_adjusted"),
+        ("create", "unknown", "holiday_create_unconfirmed"),
+        ("update", "unknown", "holiday_update_unconfirmed"),
+    ],
+)
+async def test_calendar_explains_unconfirmed_holiday_writes(
+    hass, operation, outcome, key
+):
+    coordinator = _coordinator(hass, _writable_holiday_resources())
+    entity = BoschBuderusHolidayCalendar(coordinator)
+    resource = coordinator.data[HOLIDAY_LIST_PATH].resource
+    error = (
+        HolidayAlreadyExists(resource, previous_request=outcome == "previous")
+        if outcome in ("duplicate", "previous")
+        else HolidayWriteNotConfirmed(
+            resource, actual=entity._state.periods[0] if outcome == "adjusted" else None
+        )
+    )
+    writer = AsyncMock(side_effect=error)
+    setattr(coordinator, f"async_{operation}_holiday", writer)
+    event = {
+        EVENT_START: date(2030, 9, 1),
+        EVENT_END: date(2030, 9, 8),
+        EVENT_SUMMARY: "Test",
+    }
+    with pytest.raises(HomeAssistantError) as caught:
+        if operation == "create":
+            await entity.async_create_event(**event)
+        else:
+            await entity.async_update_event("pointt-7", event)
+    assert caught.value.translation_key == key
+    writer.assert_awaited_once()
 
 
 async def test_calendar_rejects_unsupported_fields(hass: HomeAssistant) -> None:
@@ -300,6 +344,31 @@ async def test_calendar_rejects_invalid_wall_times_without_writing(
     coordinator.async_update_holiday.assert_not_awaited()
 
 
+@pytest.mark.parametrize("operation", ["create", "update"])
+@pytest.mark.parametrize("end_day", [27, 28])
+async def test_calendar_explains_an_end_that_does_not_follow_the_start(
+    hass, operation, end_day
+):
+    coordinator = _coordinator(hass, _writable_holiday_resources())
+    coordinator.async_create_holiday = AsyncMock()
+    coordinator.async_update_holiday = AsyncMock()
+    entity = BoschBuderusHolidayCalendar(coordinator)
+    event = {
+        EVENT_START: datetime(2030, 10, 28, 8),
+        EVENT_END: datetime(2030, 10, end_day, 8),
+        EVENT_SUMMARY: "Trip",
+    }
+    with pytest.raises(HomeAssistantError) as caught:
+        if operation == "create":
+            await entity.async_create_event(**event)
+        else:
+            await entity.async_update_event("pointt-7", event)
+    assert caught.value.translation_domain == DOMAIN
+    assert caught.value.translation_key == "holiday_end_not_after_start"
+    coordinator.async_create_holiday.assert_not_awaited()
+    coordinator.async_update_holiday.assert_not_awaited()
+
+
 async def test_calendar_reports_unavailable_and_failed_writes(
     hass: HomeAssistant,
 ) -> None:
@@ -328,10 +397,12 @@ async def test_calendar_reports_unavailable_and_failed_writes(
         EVENT_SUMMARY: "New trip",
     }
 
-    with pytest.raises(HomeAssistantError, match="created or confirmed"):
+    with pytest.raises(HomeAssistantError) as error:
         await entity.async_create_event(**event)
-    with pytest.raises(HomeAssistantError, match="changed or confirmed"):
+    assert error.value.translation_key == "holiday_create_unconfirmed"
+    with pytest.raises(HomeAssistantError) as error:
         await entity.async_update_event("pointt-7", event)
+    assert error.value.translation_key == "holiday_update_unconfirmed"
     with pytest.raises(HomeAssistantError, match="deleted or confirmed"):
         await entity.async_delete_event("pointt-7")
 

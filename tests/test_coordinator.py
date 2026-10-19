@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from dataclasses import replace
 from datetime import UTC, datetime
 from time import monotonic
 from unittest.mock import AsyncMock, Mock, patch
@@ -31,6 +33,11 @@ from custom_components.bosch_buderus_heating.coordinator import (
     SnapshotSource,
     _energy_reset_count,
     _error_category,
+)
+from custom_components.bosch_buderus_heating.holiday_writes import (
+    HolidayAlreadyExists,
+    HolidayWriteNotConfirmed,
+    HolidayWriteService,
 )
 from custom_components.bosch_buderus_heating.holidays import (
     HOLIDAY_CONFIGURATION_PATH,
@@ -511,16 +518,146 @@ async def test_holiday_writes_publish_confirmed_list_snapshot(
 
     assert await coordinator.async_create_holiday(values) is confirmed
     assert await coordinator.async_update_holiday(7, values) is confirmed
-    assert await coordinator.async_delete_holiday(7) is confirmed
+    assert await coordinator.async_delete_holiday(7, expected=values) is confirmed
 
     coordinator._holiday_write_service.async_create.assert_awaited_once()
     coordinator._holiday_write_service.async_update.assert_awaited_once()
     coordinator._holiday_write_service.async_delete.assert_awaited_once()
+    assert (
+        coordinator._holiday_write_service.async_delete.await_args.kwargs["expected"]
+        is values
+    )
     assert coordinator.resources[HOLIDAY_LIST_PATH] is confirmed
     assert coordinator.data[HOLIDAY_LIST_PATH].source is SnapshotSource.WRITE
     assert coordinator.capability_metrics(HOLIDAY_LIST_PATH)["attempts_by_source"] == {
         "write": 3
     }
+
+
+@pytest.mark.parametrize("outcome", ["adjusted", "unavailable", "duplicate"])
+async def test_holiday_error_publishes_only_valid_actual_state(hass, outcome):
+    coordinator = _coordinator(hass, AsyncMock())
+    periods, configuration = _holiday_resources()
+    coordinator.resources = {r.path: r for r in (periods, configuration)}
+    coordinator.data = {r.path: _snapshot(r) for r in (periods, configuration)}
+    configuration_snapshot = coordinator.data[configuration.path]
+    actual = replace(
+        periods,
+        value=[
+            {
+                "id": 7,
+                "startDate": "2030-08-01T00:00:00",
+                "endDate": "2030-08-08T23:45:00",
+            }
+        ],
+    )
+    coordinator._holiday_write_service = AsyncMock()
+    error = (
+        HolidayAlreadyExists(actual)
+        if outcome == "duplicate"
+        else HolidayWriteNotConfirmed(actual if outcome == "adjusted" else None)
+    )
+    coordinator._holiday_write_service.async_delete.side_effect = error
+    with pytest.raises(type(error)):
+        await coordinator.async_delete_holiday(7)
+    expected = periods if outcome == "unavailable" else actual
+    assert coordinator.resources[HOLIDAY_LIST_PATH] is expected
+    assert coordinator.data[HOLIDAY_LIST_PATH].resource is expected
+    assert coordinator.data[HOLIDAY_LIST_PATH].available
+    assert coordinator.data[configuration.path] is configuration_snapshot
+    metrics = coordinator.capability_metrics(HOLIDAY_LIST_PATH)
+    assert metrics["successful"] == 0
+    assert metrics["attempts_by_source"] == (
+        {} if outcome == "duplicate" else {"write": 1}
+    )
+
+
+@pytest.mark.parametrize("outcome", ["success", "adjusted", "duplicate"])
+async def test_holiday_readback_prepares_new_zones_before_notifying_listeners(
+    hass, outcome
+):
+    from datetime import timedelta
+
+    from custom_components.bosch_buderus_heating.holidays import parse_holiday_state
+
+    coordinator = _coordinator(hass, AsyncMock())
+    periods, configuration = _holiday_resources()
+    coordinator.resources = {r.path: r for r in (periods, configuration)}
+    coordinator.data = {r.path: _snapshot(r) for r in (periods, configuration)}
+    actual = replace(
+        periods,
+        value=[
+            {
+                "id": 7,
+                "startDate": "2030-08-01T00:00:00",
+                "endDate": "2030-08-08T23:45:00",
+                "timeZone": "Asia/Kathmandu",
+            }
+        ],
+    )
+    writer = coordinator._holiday_write_service = AsyncMock()
+    writer.async_delete.return_value = actual
+    if outcome != "success":
+        writer.async_delete.side_effect = (
+            HolidayAlreadyExists(actual)
+            if outcome == "duplicate"
+            else HolidayWriteNotConfirmed(actual)
+        )
+    seen = []
+
+    def publish(data):
+        state = parse_holiday_state(
+            {HOLIDAY_LIST_PATH: data[HOLIDAY_LIST_PATH].resource},
+            timezones=coordinator.holiday_timezones,
+        )
+        seen.append(state.periods[0].start.utcoffset())
+
+    with patch.object(coordinator, "async_set_updated_data", side_effect=publish):
+        if outcome == "success":
+            await coordinator.async_delete_holiday(7)
+        else:
+            with pytest.raises((HolidayAlreadyExists, HolidayWriteNotConfirmed)):
+                await coordinator.async_delete_holiday(7)
+    assert seen == [timedelta(hours=5, minutes=45)]
+
+
+async def test_concurrent_holiday_creation_uses_one_post(hass):
+    client = AsyncMock()
+    coordinator = _coordinator(hass, client)
+    periods, configuration = _holiday_resources()
+    coordinator.resources = {r.path: r for r in (periods, configuration)}
+    coordinator.data = {r.path: _snapshot(r) for r in (periods, configuration)}
+    coordinator._holiday_write_service = HolidayWriteService(client, sleep=AsyncMock())
+    values = HolidayWriteValues(
+        start_date="2030-08-01T00:00:00",
+        end_date="2030-08-09T00:00:00",
+        heating_mode="FIX_TEMPERATURE",
+        dhw_mode="OFF",
+        ventilation_mode=None,
+        assigned_to=("hc1", "dhw1"),
+        name=None,
+        thermal_disinfection=None,
+        fix_temperature=17,
+    )
+    actual = replace(periods, value=[{"id": 7, **values.as_payload()}])
+    posted = asyncio.Event()
+    release = asyncio.Event()
+
+    async def post(*args):
+        posted.set()
+        await release.wait()
+
+    client.create_holiday_period.side_effect = post
+    client.get_resource.side_effect = [periods, actual, actual]
+    first = asyncio.create_task(coordinator.async_create_holiday(values))
+    await posted.wait()
+    second = asyncio.create_task(coordinator.async_create_holiday(values))
+    release.set()
+    result = await asyncio.gather(first, second, return_exceptions=True)
+    assert result[0] is actual
+    assert isinstance(result[1], HolidayAlreadyExists)
+    client.create_holiday_period.assert_awaited_once()
+    assert coordinator.data[HOLIDAY_LIST_PATH].resource is actual
 
 
 async def test_holiday_write_rejects_stale_capabilities(

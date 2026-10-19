@@ -6,7 +6,7 @@ import asyncio
 import math
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
-from dataclasses import fields, replace
+from dataclasses import dataclass, fields, replace
 from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from typing import Literal
 
@@ -25,9 +25,12 @@ from .holidays import (
     parse_holiday_write_configuration,
 )
 from .pointt import (
+    AuthenticationError,
     PointTClient,
+    RateLimited,
     RequestTimeout,
     Resource,
+    ResourceError,
     ServiceUnavailable,
     WriteNotConfirmed,
     WriteValidationError,
@@ -36,6 +39,44 @@ from .pointt import (
 DEFAULT_HOLIDAY_READ_BACK_DELAY = 0.5
 DEFAULT_HOLIDAY_READ_BACK_ATTEMPTS = 3
 _DATE_TIME_STEP_MINUTES = 15
+
+
+class HolidayChangedError(WriteValidationError):
+    """The period no longer matches the details confirmed for deletion."""
+
+
+class HolidayAlreadyExists(WriteValidationError):
+    """A period with this start and circuit assignment already exists."""
+
+    def __init__(self, resource: Resource, *, previous_request: bool = False) -> None:
+        self.resource = resource
+        self.previous_request = previous_request
+        super().__init__("A corresponding holiday already exists; edit it instead")
+
+
+class HolidayWriteNotConfirmed(WriteNotConfirmed):
+    """Retain a validated read-back without claiming the requested write succeeded."""
+
+    def __init__(
+        self,
+        resource: Resource | None,
+        *,
+        actual: HolidayPeriod | None = None,
+        requested: HolidayPeriod | None = None,
+    ) -> None:
+        self.resource = resource
+        self.actual = actual
+        self.requested = requested
+        # Values stay in memory for the local UI, never in exception/log text.
+        super().__init__(
+            "PointT holiday read-back did not confirm the requested settings"
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _PendingCreation:
+    values: HolidayWriteValues
+    previous_ids: frozenset[int]
 
 
 class HolidayTimeError(WriteValidationError):
@@ -58,6 +99,15 @@ class HolidayTimeStepError(WriteValidationError):
         )
 
 
+class HolidayTimeRangeError(WriteValidationError):
+    """The exclusive end does not follow the beginning of the holiday."""
+
+    translation_key = "holiday_end_not_after_start"
+
+    def __init__(self) -> None:
+        super().__init__("Holiday end must be after its start")
+
+
 class HolidayWriteService:
     """Write a holiday exactly once and confirm the resulting holiday list."""
 
@@ -78,6 +128,7 @@ class HolidayWriteService:
         self._sleep = sleep
         self._read_back_delay = read_back_delay
         self._read_back_attempts = read_back_attempts
+        self._pending_creations: dict[str, _PendingCreation] = {}
 
     async def async_create(
         self,
@@ -88,35 +139,88 @@ class HolidayWriteService:
         fallback_timezone: tzinfo,
     ) -> Resource:
         """Create one period and confirm a new matching numeric identifier."""
+        values = _canonical_write_times(values)
         if configuration := parse_holiday_write_configuration(resources):
             validate_holiday_values(values, configuration)
-        periods = await self._async_current_periods(
-            gateway_id, resources, fallback_timezone=fallback_timezone
-        )
-        previous_ids = {
-            identifier
-            for period in periods
-            if (identifier := holiday_period_id(period)) is not None
-        }
-        with suppress(RequestTimeout, ServiceUnavailable):
-            await self._client.create_holiday_period(gateway_id, values.as_payload())
-        # The server may have applied a timed-out non-idempotent POST. Always
-        # determine the result from the following read-back instead of retrying.
+        pending = self._pending_creations.get(gateway_id)
+        if pending is None:
+            current = await self._client.get_resource(gateway_id, HOLIDAY_LIST_PATH)
+            current_resources = {**resources, HOLIDAY_LIST_PATH: current}
+            self._timezones = await async_resolve_holiday_timezones(
+                current_resources, self._timezones
+            )
+            periods = parse_confirmed_holiday_list(
+                current,
+                current_resources,
+                fallback_timezone=fallback_timezone,
+                timezones=self._timezones,
+            )
+            if periods is None:
+                raise WriteValidationError(
+                    "Current holiday list is incomplete or invalid"
+                )
+            if any(_same_creation(period, values) for period in periods):
+                raise HolidayAlreadyExists(current)
+            pending = _PendingCreation(
+                values,
+                frozenset(
+                    identifier
+                    for period in periods
+                    if (identifier := holiday_period_id(period)) is not None
+                ),
+            )
+            # Record before POST: cancellation or a lost response must not cause
+            # a second non-idempotent write from another form or the calendar.
+            self._pending_creations[gateway_id] = pending
+            try:
+                with suppress(RequestTimeout, ServiceUnavailable):
+                    await self._client.create_holiday_period(
+                        gateway_id, values.as_payload()
+                    )
+            except AuthenticationError, RateLimited, ResourceError:
+                self._pending_creations.pop(gateway_id)
+                raise
+
+        attempted = pending.values
+        previous_ids = pending.previous_ids
 
         def confirmed(periods: tuple[HolidayPeriod, ...]) -> bool:
             return any(
                 (identifier := holiday_period_id(period)) is not None
                 and identifier not in previous_ids
-                and _period_matches_values(period, values)
+                and _period_matches_values(period, attempted)
                 for period in periods
             )
 
-        return await self._async_confirm(
-            gateway_id,
-            resources,
-            confirmed,
-            fallback_timezone=fallback_timezone,
-        )
+        def candidate(periods: tuple[HolidayPeriod, ...]) -> HolidayPeriod | None:
+            matches = [
+                period
+                for period in periods
+                if holiday_period_id(period) not in previous_ids
+                and _same_creation(period, attempted)
+            ]
+            return matches[0] if len(matches) == 1 else None
+
+        try:
+            result = await self._async_confirm(
+                gateway_id,
+                resources,
+                confirmed,
+                fallback_timezone=fallback_timezone,
+                candidate=candidate,
+                requested=attempted,
+            )
+        except HolidayWriteNotConfirmed as err:
+            if err.actual is not None:
+                # A real entry is now visible. Future create attempts will find
+                # it in the preflight list and direct the user to edit it.
+                self._pending_creations.pop(gateway_id)
+            raise
+        self._pending_creations.pop(gateway_id)
+        if values != attempted:
+            # This call checked an earlier request, not the newly entered data.
+            raise HolidayAlreadyExists(result, previous_request=True)
+        return result
 
     async def async_update(
         self,
@@ -155,7 +259,9 @@ class HolidayWriteService:
         )
         if baseline is None or current is None:
             raise WriteValidationError("Holiday is no longer available for editing")
-        values = _merge_holiday_changes(baseline, values, current)
+        values = _canonical_write_times(
+            _merge_holiday_changes(baseline, values, current)
+        )
         if configuration := parse_holiday_write_configuration(resources):
             validate_holiday_values(values, configuration, baseline=current)
         merged_resource = Resource(
@@ -190,6 +296,15 @@ class HolidayWriteService:
             resources,
             confirmed,
             fallback_timezone=fallback_timezone,
+            candidate=lambda periods: next(
+                (
+                    period
+                    for period in periods
+                    if holiday_period_id(period) == holiday_id
+                ),
+                None,
+            ),
+            requested=values,
         )
 
     async def async_delete(
@@ -199,12 +314,27 @@ class HolidayWriteService:
         holiday_id: int,
         *,
         fallback_timezone: tzinfo,
+        expected: HolidayWriteValues | None = None,
     ) -> Resource:
         """Delete one period and confirm that its numeric ID disappeared."""
         self._timezones = await async_resolve_holiday_timezones(
             resources, self._timezones
         )
         _require_existing_id(resources, holiday_id, fallback_timezone, self._timezones)
+        if expected is not None:
+            periods = await self._async_current_periods(
+                gateway_id, resources, fallback_timezone=fallback_timezone
+            )
+            current = next(
+                (
+                    period.write_values
+                    for period in periods
+                    if holiday_period_id(period) == holiday_id
+                ),
+                None,
+            )
+            if current != expected:
+                raise HolidayChangedError("Holiday changed before deletion")
         with suppress(RequestTimeout, ServiceUnavailable):
             await self._client.delete_holiday_period(gateway_id, holiday_id)
 
@@ -248,8 +378,13 @@ class HolidayWriteService:
         confirmed: Callable[[tuple[HolidayPeriod, ...]], bool],
         *,
         fallback_timezone: tzinfo,
+        candidate: Callable[[tuple[HolidayPeriod, ...]], HolidayPeriod | None]
+        | None = None,
+        requested: HolidayWriteValues | None = None,
     ) -> Resource:
         last_temporary_error: RequestTimeout | ServiceUnavailable | None = None
+        latest: Resource | None = None
+        actual: HolidayPeriod | None = None
         for attempt in range(self._read_back_attempts):
             await self._sleep(self._read_back_delay * (2**attempt))
             try:
@@ -270,13 +405,28 @@ class HolidayWriteService:
                 fallback_timezone=fallback_timezone,
                 timezones=self._timezones,
             )
-            if periods is not None and confirmed(periods):
-                return holiday_list
-        if last_temporary_error is not None:
-            raise WriteNotConfirmed("PointT holiday read-back timed out") from (
-                last_temporary_error
+            if periods is not None:
+                latest = holiday_list
+                actual = candidate(periods) if candidate is not None else None
+                if confirmed(periods):
+                    return holiday_list
+        expected_period: HolidayPeriod | None = None
+        if actual is not None and requested is not None:
+            expected = parse_confirmed_holiday_list(
+                Resource(
+                    path=HOLIDAY_LIST_PATH,
+                    value=[{"id": holiday_period_id(actual), **requested.as_payload()}],
+                    has_value=True,
+                ),
+                resources,
+                fallback_timezone=fallback_timezone,
+                timezones=self._timezones,
             )
-        raise WriteNotConfirmed("PointT holiday read-back did not confirm the change")
+            if expected:
+                expected_period = expected[0]
+        raise HolidayWriteNotConfirmed(
+            latest, actual=actual, requested=expected_period
+        ) from last_temporary_error
 
 
 def _merge_holiday_changes(
@@ -517,7 +667,7 @@ def _format_timespan(
         ):
             raise WriteValidationError("This system supports all-day holidays only")
         if end_date <= start_date:
-            raise WriteValidationError("Holiday end must be after its start")
+            raise HolidayTimeRangeError()
         # PointT date end values are inclusive; Home Assistant ends are exclusive.
         return start_date.isoformat(), (end_date - timedelta(days=1)).isoformat()
 
@@ -534,7 +684,7 @@ def _format_timespan(
         else datetime.combine(end, time(), timezone)
     )
     if end_datetime <= start_datetime:
-        raise WriteValidationError("Holiday end must be after its start")
+        raise HolidayTimeRangeError()
     _validate_time_step(start_datetime, "holiday_start")
     _validate_time_step(end_datetime, "holiday_end")
     return _format_start(start_datetime), _format_end(end_datetime)
@@ -575,9 +725,8 @@ def _format_start(value: datetime) -> str:
 
 
 def _format_end(value: datetime) -> str:
-    if value.time() == time():
-        previous = value.date() - timedelta(days=1)
-        return f"{previous.isoformat()}T24:00:00"
+    # Keep the selected day and clock time, including midnight. A real write
+    # using previous-day 24:00 was read back as 23:45 instead.
     return value.replace(tzinfo=None).isoformat(timespec="seconds")
 
 
@@ -608,6 +757,38 @@ def _encode_name(
             "This gateway does not support storing holiday names in PointT"
         )
     return encoded
+
+
+def _canonical_write_times(values: HolidayWriteValues) -> HolidayWriteValues:
+    """Read legacy 24:00 timestamps, but never send them back to the gateway."""
+    changes: dict[str, str] = {}
+    for field in ("start_date", "end_date"):
+        value = getattr(values, field)
+        if "T24:" not in value:
+            continue
+        if not value.endswith("T24:00:00"):
+            raise WriteValidationError("Invalid legacy midnight timestamp")
+        try:
+            parsed = _value_datetime(value, None, end=False)
+        except (ValueError, OverflowError) as err:
+            raise WriteValidationError("Invalid legacy midnight timestamp") from err
+        changes[field] = parsed.isoformat(timespec="seconds")
+    return replace(
+        values,
+        start_date=changes.get("start_date", values.start_date),
+        end_date=changes.get("end_date", values.end_date),
+    )
+
+
+def _same_creation(period: HolidayPeriod, expected: HolidayWriteValues) -> bool:
+    """Recognize a duplicate even when the gateway changed the requested end."""
+    actual = period.write_values
+    return (
+        actual is not None
+        and period.start
+        == _value_datetime(expected.start_date, period.start.tzinfo, end=False)
+        and set(actual.assigned_to) == set(expected.assigned_to)
+    )
 
 
 def _period_matches_values(period: HolidayPeriod, expected: HolidayWriteValues) -> bool:
@@ -646,9 +827,7 @@ def _require_existing_id(
         )
 
 
-def _value_datetime(
-    value: str, timezone: tzinfo | None, *, end: bool
-) -> datetime | None:
+def _value_datetime(value: str, timezone: tzinfo | None, *, end: bool) -> datetime:
     if len(value) == 10:
         parsed_date = date.fromisoformat(value)
         if end:

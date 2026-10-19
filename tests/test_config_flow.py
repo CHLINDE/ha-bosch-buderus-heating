@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
+from copy import deepcopy
+from dataclasses import replace
+from datetime import UTC
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from urllib.parse import parse_qs, urlparse
@@ -34,9 +38,17 @@ from custom_components.bosch_buderus_heating.const import (
 )
 from custom_components.bosch_buderus_heating.coordinator import Freshness
 from custom_components.bosch_buderus_heating.data import tokens_to_data
+from custom_components.bosch_buderus_heating.ha_schema import validation as vol
+from custom_components.bosch_buderus_heating.holiday_writes import (
+    HolidayAlreadyExists,
+    HolidayChangedError,
+    HolidayWriteNotConfirmed,
+    _merge_holiday_changes,
+)
 from custom_components.bosch_buderus_heating.holidays import (
     HOLIDAY_CONFIGURATION_PATH,
     HOLIDAY_LIST_PATH,
+    parse_holiday_state,
 )
 from custom_components.bosch_buderus_heating.pointt import (
     AuthenticationError,
@@ -54,13 +66,142 @@ from custom_components.bosch_buderus_heating.pointt import (
 from custom_components.bosch_buderus_heating.runtime import BoschBuderusRuntimeData
 
 
+async def _configure_options(hass, flow_id, user_input, *, action="save_holiday"):
+    """Submit the native form or its direct delete action."""
+    if action == "delete_holiday":
+        user_input = {**user_input, "holiday_delete": True}
+    return await hass.config_entries.options.async_configure(flow_id, user_input)
+
+
+async def _open_new_holiday(hass, entry):
+    result = await _start_holiday_options(hass, entry)
+    return await _configure_options(
+        hass, result["flow_id"], {CONF_HOLIDAY_PERIOD: "create"}
+    )
+
+
+def _new_holiday_input(result, **overrides):
+    return {
+        **_holiday_form_input(result),
+        "holiday_name": "Trip",
+        "holiday_start": "2030-08-01T08:00",
+        "holiday_end": "2030-08-08T08:00",
+        **overrides,
+    }
+
+
 async def _start_holiday_options(hass, entry):
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert result["type"] is FlowResultType.MENU
     assert result["menu_options"] == ["notifications", "holidays"]
-    return await hass.config_entries.options.async_configure(
-        result["flow_id"], {"next_step_id": "holidays"}
+    return await _configure_options(
+        hass, result["flow_id"], {"next_step_id": "holidays"}
     )
+
+
+async def _open_existing_holiday(
+    hass, entry, *, gateway_id="gateway-one", action="holiday"
+):
+    result = await _start_holiday_options(hass, entry)
+    selection = hashlib.sha256(f"{gateway_id}\x007".encode()).hexdigest()[:24]
+    result = await _configure_options(
+        hass, result["flow_id"], {CONF_HOLIDAY_PERIOD: selection}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "holiday"
+    assert "menu_options" not in result
+    if action == "delete_holiday":
+        return await _configure_options(
+            hass,
+            result["flow_id"],
+            _holiday_form_input(result),
+            action="delete_holiday",
+        )
+    return result
+
+
+def _holiday_form_input(result):
+    values = {}
+    for marker in result["data_schema"].schema:
+        if marker.description and "suggested_value" in marker.description:
+            values[marker.schema] = marker.description["suggested_value"]
+        elif marker.default is not vol.UNDEFINED:
+            values[marker.schema] = marker.default()
+    return values
+
+
+@pytest.mark.parametrize(
+    ("operation", "outcome", "reason"),
+    [
+        ("create", "adjusted", "holiday_create_adjusted"),
+        ("update", "adjusted", "holiday_update_adjusted"),
+        ("create", "unknown", "holiday_create_unconfirmed"),
+        ("create", "generic_unknown", "holiday_create_unconfirmed"),
+        ("create", "duplicate", "holiday_already_exists"),
+        ("create", "previous", "holiday_previous_request_found"),
+    ],
+)
+async def test_holiday_write_feedback_explains_actual_state_and_closes_creation(
+    hass, enable_custom_integrations, operation, outcome, reason
+):
+    entry, coordinator = _entry_with_writable_holiday(hass)
+    result = (
+        await _open_new_holiday(hass, entry)
+        if operation == "create"
+        else await _open_existing_holiday(hass, entry)
+    )
+    values = (
+        _new_holiday_input(result)
+        if operation == "create"
+        else _holiday_form_input(result)
+    )
+    values.update(holiday_start="2030-08-01T00:00", holiday_end="2030-08-09T00:00")
+
+    async def fail(*args, **kwargs):
+        desired = args[0] if operation == "create" else args[1]
+        assert desired.start_date == "2030-08-01T00:00:00"
+        assert desired.end_date == "2030-08-09T00:00:00"
+        if outcome == "generic_unknown":
+            raise WriteNotConfirmed()
+        if outcome == "unknown":
+            raise HolidayWriteNotConfirmed(None)
+        readback = Resource(
+            path=HOLIDAY_LIST_PATH,
+            value=[
+                {
+                    "id": 7,
+                    **replace(desired, end_date="2030-08-08T23:45:00").as_payload(),
+                }
+            ],
+            has_value=True,
+        )
+        if outcome in ("duplicate", "previous"):
+            raise HolidayAlreadyExists(readback, previous_request=outcome == "previous")
+        actual = parse_holiday_state(
+            {HOLIDAY_LIST_PATH: readback}, fallback_timezone=UTC
+        ).periods[0]
+        requested = parse_holiday_state(
+            {
+                HOLIDAY_LIST_PATH: replace(
+                    readback, value=[{"id": 7, **desired.as_payload()}]
+                )
+            },
+            fallback_timezone=UTC,
+        ).periods[0]
+        raise HolidayWriteNotConfirmed(readback, actual=actual, requested=requested)
+
+    writer = AsyncMock(side_effect=fail)
+    setattr(coordinator, f"async_{operation}_holiday", writer)
+    result = await _configure_options(hass, result["flow_id"], values)
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == reason
+    writer.assert_awaited_once()
+    assert not hass.config_entries.options.async_progress()
+    if outcome == "adjusted":
+        assert result["description_placeholders"] == {
+            "requested": "2030-08-01 00:00 / 2030-08-09 00:00",
+            "actual": "2030-08-01 00:00 / 2030-08-08 23:45",
+        }
 
 
 async def _start_auth_flow(
@@ -78,6 +219,238 @@ async def _start_auth_flow(
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "auth"
     return result
+
+
+@pytest.mark.parametrize("date_only", [False, True])
+async def test_create_and_edit_share_the_same_native_form_fields(
+    hass, enable_custom_integrations, date_only
+):
+    entry, coordinator = _entry_with_writable_holiday(hass)
+    if date_only:
+        coordinator.data[HOLIDAY_CONFIGURATION_PATH].resource.value["values"]["date"][
+            "allowedValues"
+        ] = ["date"]
+    existing = await _open_existing_holiday(hass, entry)
+    creating = await _open_new_holiday(hass, entry)
+    existing_fields = {
+        marker.schema: selector.serialize()
+        for marker, selector in existing["data_schema"].schema.items()
+    }
+    new_fields = {
+        marker.schema: selector.serialize()
+        for marker, selector in creating["data_schema"].schema.items()
+    }
+    assert existing_fields.pop("holiday_delete") == {
+        "selector": {"bosch-buderus-holiday-delete": {}}
+    }
+    if not date_only:
+        for field in ("holiday_start", "holiday_end"):
+            assert existing_fields[field]["selector"][
+                "bosch-buderus-holiday-datetime"
+            ] == {"default_time": ""}
+            assert new_fields[field]["selector"]["bosch-buderus-holiday-datetime"] == {
+                "default_time": "08:00"
+            }
+            existing_fields[field] = new_fields[field]
+    assert existing_fields == new_fields
+    assert "holiday_delete" not in new_fields
+    assert "holiday_heating_mode" in new_fields
+    assert "holiday_dhw_mode" in new_fields
+    assert _holiday_form_input(creating)["holiday_start"] == ""
+    assert _holiday_form_input(creating)["holiday_end"] == ""
+    if not date_only:
+        for field in ("holiday_start", "holiday_end"):
+            assert "bosch-buderus-holiday-datetime" in new_fields[field]["selector"]
+            assert len(_holiday_form_input(existing)[field]) == 16
+
+
+@pytest.mark.parametrize("creating", [False, True])
+@pytest.mark.parametrize("date_only", [False, True])
+@pytest.mark.parametrize("same_end", [False, True])
+async def test_end_before_or_equal_to_start_is_explained_without_writing(
+    hass, enable_custom_integrations, creating, date_only, same_end
+):
+    entry, coordinator = _entry_with_writable_holiday(hass)
+    coordinator.async_create_holiday = AsyncMock()
+    if date_only:
+        coordinator.data[HOLIDAY_CONFIGURATION_PATH].resource.value["values"]["date"][
+            "allowedValues"
+        ] = ["date"]
+    result = (
+        await _open_new_holiday(hass, entry)
+        if creating
+        else await _open_existing_holiday(hass, entry)
+    )
+    values = {
+        **_holiday_form_input(result),
+        "holiday_name": "My holiday",
+        "holiday_start": "2030-10-28",
+        "holiday_end": "2030-10-28" if same_end else "2030-10-27",
+        "holiday_fix_temperature": 18.5,
+    }
+    if not date_only:
+        values.update(
+            holiday_start=values["holiday_start"] + "T08:00",
+            holiday_end=values["holiday_end"] + "T08:00",
+        )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], values
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"holiday_end": "holiday_end_not_after_start"}
+    assert _holiday_form_input(result) == values
+    coordinator.async_create_holiday.assert_not_awaited()
+    coordinator.async_update_holiday.assert_not_awaited()
+    coordinator.async_delete_holiday.assert_not_awaited()
+
+
+@pytest.mark.parametrize("creating", [False, True])
+async def test_common_form_saves_directly_without_an_action_menu(
+    hass, enable_custom_integrations, creating
+):
+    entry, coordinator = _entry_with_writable_holiday(hass)
+    coordinator.async_create_holiday = AsyncMock()
+    result = (
+        await _open_new_holiday(hass, entry)
+        if creating
+        else await _open_existing_holiday(hass, entry)
+    )
+    values = _new_holiday_input(
+        result, holiday_name="Unsaved holiday", holiday_start="2030-08-01T10:15"
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], values
+    )
+    assert result["reason"] == ("holiday_created" if creating else "holiday_updated")
+    writer = (
+        coordinator.async_create_holiday
+        if creating
+        else coordinator.async_update_holiday
+    )
+    writer.assert_awaited_once()
+    written = writer.await_args.args[0 if creating else 1]
+    assert written.start_date == "2030-08-01T10:15:00"
+
+
+async def test_cancel_delete_keeps_the_original_baseline_after_polling(
+    hass, enable_custom_integrations
+):
+    entry, coordinator = _entry_with_writable_holiday(hass)
+    result = await _open_existing_holiday(hass, entry)
+    draft = {**_holiday_form_input(result), "holiday_dhw_mode": "low"}
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {**draft, "holiday_delete": True}
+    )
+    original = coordinator.data[HOLIDAY_LIST_PATH].resource.value[0]
+    coordinator.data[HOLIDAY_LIST_PATH].resource = Resource(
+        path=HOLIDAY_LIST_PATH,
+        value=[{**original, "fixTemperature": 19.0}],
+        has_value=True,
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"confirm_delete": False}
+    )
+    assert _holiday_form_input(result) == draft
+    result = await _configure_options(hass, result["flow_id"], draft)
+    assert result["reason"] == "holiday_updated"
+    call = coordinator.async_update_holiday.await_args
+    baseline = call.kwargs["expected"]
+    assert baseline.fix_temperature == 17.0
+    merged = _merge_holiday_changes(
+        baseline, call.args[1], replace(baseline, fix_temperature=19.0)
+    )
+    assert merged.fix_temperature == 19.0
+    assert merged.dhw_mode == "LOW"
+
+
+@pytest.mark.parametrize("creating", [False, True])
+async def test_save_button_rechecks_capabilities_before_any_write(
+    hass, enable_custom_integrations, creating
+):
+    entry, coordinator = _entry_with_writable_holiday(hass)
+    coordinator.async_create_holiday = AsyncMock()
+    result = (
+        await _open_new_holiday(hass, entry)
+        if creating
+        else await _open_existing_holiday(hass, entry)
+    )
+    draft = _new_holiday_input(result, holiday_heating_mode="eco")
+    coordinator.data[HOLIDAY_CONFIGURATION_PATH].resource.value["values"][
+        "heatingMode"
+    ]["allowedValues"] = ["OFF"]
+    result = await hass.config_entries.options.async_configure(result["flow_id"], draft)
+    assert result["errors"] == {"base": "write_validation_failed"}
+    coordinator.async_create_holiday.assert_not_awaited()
+    coordinator.async_update_holiday.assert_not_awaited()
+
+
+async def test_hiding_legacy_seconds_does_not_rewrite_an_unchanged_timestamp(
+    hass, enable_custom_integrations
+):
+    entry, coordinator = _entry_with_writable_holiday(hass)
+    original = "2030-08-01T08:38:37"
+    coordinator.data[HOLIDAY_LIST_PATH].resource.value[0]["startDate"] = original
+    result = await _open_existing_holiday(hass, entry)
+    draft = _holiday_form_input(result)
+    assert draft["holiday_start"] == "2030-08-01T08:38"
+    draft["holiday_fix_temperature"] = 18.5
+    result = await _configure_options(hass, result["flow_id"], draft)
+    assert result["reason"] == "holiday_updated"
+    assert coordinator.async_update_holiday.await_args.args[1].start_date == original
+
+
+async def test_editing_requires_the_saved_clock_instead_of_defaulting_to_eight(
+    hass, enable_custom_integrations
+):
+    from homeassistant.data_entry_flow import InvalidData
+
+    entry, coordinator = _entry_with_writable_holiday(hass)
+    result = await _open_existing_holiday(hass, entry)
+    draft = _holiday_form_input(result)
+    assert draft.pop("holiday_end") == "2030-08-08T18:00"
+    with pytest.raises(InvalidData):
+        await hass.config_entries.options.async_configure(result["flow_id"], draft)
+    coordinator.async_update_holiday.assert_not_awaited()
+
+
+@pytest.mark.parametrize("draft_date", ["", "2030-10-28T08:00", "not a date"])
+async def test_inline_delete_restores_invalid_draft_without_writing(
+    hass, enable_custom_integrations, draft_date
+):
+    entry, coordinator = _entry_with_writable_holiday(hass)
+    result = await _open_existing_holiday(hass, entry)
+    draft = {
+        **_holiday_form_input(result),
+        "holiday_name": "Unsaved holiday",
+        "holiday_start": draft_date,
+        "holiday_end": "2030-10-27T08:00",
+    }
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {**draft, "holiday_delete": True}
+    )
+    assert result["step_id"] == "delete_holiday"
+    coordinator.async_update_holiday.assert_not_awaited()
+    coordinator.async_delete_holiday.assert_not_awaited()
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"confirm_delete": False}
+    )
+    assert result["step_id"] == "holiday"
+    assert _holiday_form_input(result) == draft
+    coordinator.async_update_holiday.assert_not_awaited()
+    coordinator.async_delete_holiday.assert_not_awaited()
+
+
+@pytest.mark.parametrize("value", ["", "2030-08-01", "invalid"])
+async def test_datetime_input_requires_an_explicit_date_and_time(
+    hass, enable_custom_integrations, value
+):
+    entry, coordinator = _entry_with_writable_holiday(hass)
+    result = await _open_existing_holiday(hass, entry)
+    draft = {**_holiday_form_input(result), "holiday_start": value}
+    result = await hass.config_entries.options.async_configure(result["flow_id"], draft)
+    assert result["errors"] == {"base": "invalid_holiday_details"}
+    assert _holiday_form_input(result)["holiday_start"] == value
+    coordinator.async_update_holiday.assert_not_awaited()
 
 
 def _redirect_from_result(result: dict[str, object], brand: Brand) -> str:
@@ -472,6 +845,7 @@ def _entry_with_writable_holiday(hass: HomeAssistant) -> tuple[MockConfigEntry, 
             ),
         },
         async_update_holiday=AsyncMock(),
+        async_delete_holiday=AsyncMock(),
     )
     entry.runtime_data = BoschBuderusRuntimeData(
         client=AsyncMock(),
@@ -482,18 +856,409 @@ def _entry_with_writable_holiday(hass: HomeAssistant) -> tuple[MockConfigEntry, 
     return entry, coordinator
 
 
+async def test_existing_holiday_edits_name_dates_and_settings_together(
+    hass, enable_custom_integrations
+):
+    entry, coordinator = _entry_with_writable_holiday(hass)
+    result = await _open_existing_holiday(hass, entry)
+    values = _holiday_form_input(result)
+    assert values["holiday_name"] == "Urlaub"
+    assert values["holiday_start"] == "2030-08-01T08:00"
+    assert values["holiday_end"] == "2030-08-08T18:00"
+    assert list(values)[:3] == ["holiday_name", "holiday_start", "holiday_end"]
+    coordinator.async_update_holiday.assert_not_awaited()
+    coordinator.async_delete_holiday.assert_not_awaited()
+    values.update(
+        holiday_name="Urlaub im Grünen",
+        holiday_start="2030-08-02T09:15",
+        holiday_end="2030-08-10T18:45",
+        holiday_fix_temperature=18.5,
+    )
+    result = await _configure_options(hass, result["flow_id"], values)
+    assert result["reason"] == "holiday_updated"
+    coordinator.async_update_holiday.assert_awaited_once()
+    holiday_id, written = coordinator.async_update_holiday.await_args.args
+    baseline = coordinator.async_update_holiday.await_args.kwargs["expected"]
+    assert holiday_id == 7
+    assert written.start_date == "2030-08-02T09:15:00"
+    assert written.end_date == "2030-08-10T18:45:00"
+    assert base64.b64decode(written.name).decode() == "Urlaub im Grünen"
+    assert written.fix_temperature == 18.5
+    assert written.assigned_to == baseline.assigned_to
+    assert written.dhw_mode == baseline.dhw_mode
+    assert written.ventilation_mode == baseline.ventilation_mode
+    assert written.thermal_disinfection == baseline.thermal_disinfection
+
+
+@pytest.mark.parametrize("date_only", [False, True])
+async def test_existing_holiday_preserves_midnight_and_exclusive_end_dates(
+    hass, enable_custom_integrations, date_only
+):
+    entry, coordinator = _entry_with_writable_holiday(hass)
+    original = coordinator.data[HOLIDAY_LIST_PATH].resource.value[0]
+    original["startDate"] = "2030-08-01" if date_only else "2030-08-01T08:00:00"
+    original["endDate"] = "2030-08-08" if date_only else "2030-08-09T00:00:00"
+    if date_only:
+        coordinator.data[HOLIDAY_CONFIGURATION_PATH].resource.value["values"]["date"][
+            "allowedValues"
+        ] = ["date"]
+    result = await _open_existing_holiday(hass, entry)
+    values = _holiday_form_input(result)
+    assert values["holiday_end"] == ("2030-08-09" if date_only else "2030-08-09T00:00")
+    values[CONF_HOLIDAY_FIX_TEMPERATURE] = 18.0
+    result = await _configure_options(hass, result["flow_id"], values)
+    assert result["reason"] == "holiday_updated"
+    written = coordinator.async_update_holiday.await_args.args[1]
+    assert written.start_date == original["startDate"]
+    assert written.end_date == original["endDate"]
+
+    result = await _open_existing_holiday(hass, entry)
+    values = _holiday_form_input(result)
+    values["holiday_end"] = "2030-08-10" if date_only else "2030-08-10T00:00"
+    result = await _configure_options(hass, result["flow_id"], values)
+    assert result["reason"] == "holiday_updated"
+    written = coordinator.async_update_holiday.await_args.args[1]
+    assert written.end_date == ("2030-08-09" if date_only else "2030-08-10T00:00:00")
+
+
+@pytest.mark.parametrize(
+    ("changes", "errors"),
+    [
+        (
+            {"holiday_start": "2030-08-01T22:38"},
+            {"holiday_start": "holiday_time_step"},
+        ),
+        (
+            {"holiday_end": "2030-08-08T18:45:01"},
+            {"holiday_end": "holiday_time_step"},
+        ),
+        (
+            {"holiday_end": "2030-07-01T18:00"},
+            {"holiday_end": "holiday_end_not_after_start"},
+        ),
+        ({"holiday_name": "x" * 33}, {"base": "invalid_holiday_details"}),
+        ({"holiday_name": "   "}, {"base": "invalid_holiday_details"}),
+        (
+            {"holiday_start": "2030-03-31T02:30"},
+            {"base": "holiday_time_nonexistent"},
+        ),
+        (
+            {"holiday_start": "2030-10-27T02:30", "holiday_end": "2030-11-01T12:00"},
+            {"base": "holiday_time_ambiguous"},
+        ),
+    ],
+)
+async def test_existing_holiday_keeps_input_after_invalid_name_or_dates(
+    hass, enable_custom_integrations, changes, errors
+):
+    await hass.config.async_set_time_zone("Europe/Berlin")
+    entry, coordinator = _entry_with_writable_holiday(hass)
+    result = await _open_existing_holiday(hass, entry)
+    values = {**_holiday_form_input(result), "holiday_fix_temperature": 18.5, **changes}
+    result = await _configure_options(hass, result["flow_id"], values)
+    assert result["step_id"] == "holiday"
+    assert result["errors"] == errors
+    assert _holiday_form_input(result) == values
+    coordinator.async_update_holiday.assert_not_awaited()
+    values.update(
+        holiday_name="Corrected holiday",
+        holiday_start="2030-08-01T09:15",
+        holiday_end="2030-08-08T18:45",
+    )
+    result = await _configure_options(hass, result["flow_id"], values)
+    assert result["reason"] == "holiday_updated"
+    coordinator.async_update_holiday.assert_awaited_once()
+
+
+async def test_existing_holiday_retry_keeps_baseline_and_unrelated_app_changes(
+    hass, enable_custom_integrations
+):
+    entry, coordinator = _entry_with_writable_holiday(hass)
+    result = await _open_existing_holiday(hass, entry)
+    values = _holiday_form_input(result)
+    values["holiday_start"] = "2030-08-01"
+    values["holiday_start"] = values["holiday_start"].split("T")[0] + "T" + "22:38:00"
+    original = coordinator.data[HOLIDAY_LIST_PATH].resource.value[0]
+    coordinator.data[HOLIDAY_LIST_PATH].resource = Resource(
+        path=HOLIDAY_LIST_PATH,
+        value=[{**original, "fixTemperature": 19.0}],
+        has_value=True,
+    )
+    result = await _configure_options(hass, result["flow_id"], values)
+    assert result["errors"] == {"holiday_start": "holiday_time_step"}
+    values = {**_holiday_form_input(result), "holiday_start": "2030-08-02T09:00"}
+    result = await _configure_options(hass, result["flow_id"], values)
+    assert result["reason"] == "holiday_updated"
+    call = coordinator.async_update_holiday.await_args
+    baseline = call.kwargs["expected"]
+    assert baseline.fix_temperature == 17.0
+    merged = _merge_holiday_changes(
+        baseline, call.args[1], replace(baseline, fix_temperature=19.0)
+    )
+    assert merged.fix_temperature == 19.0
+    assert merged.start_date == "2030-08-02T09:00:00"
+
+
+async def test_settings_only_edit_preserves_an_existing_non_quarter_hour_time(
+    hass, enable_custom_integrations
+):
+    entry, coordinator = _entry_with_writable_holiday(hass)
+    coordinator.data[HOLIDAY_LIST_PATH].resource.value[0]["startDate"] = (
+        "2030-08-01T08:38:00"
+    )
+    result = await _open_existing_holiday(hass, entry)
+    values = {**_holiday_form_input(result), "holiday_fix_temperature": 18.5}
+    result = await _configure_options(hass, result["flow_id"], values)
+    assert result["reason"] == "holiday_updated"
+    written = coordinator.async_update_holiday.await_args.args[1]
+    assert written.start_date == "2030-08-01T08:38:00"
+    assert written.fix_temperature == 18.5
+
+
+async def test_existing_holiday_offset_inputs_use_the_installation_timezone(
+    hass, enable_custom_integrations
+):
+    await hass.config.async_set_time_zone("Europe/Berlin")
+    entry, coordinator = _entry_with_writable_holiday(hass)
+    result = await _open_existing_holiday(hass, entry)
+    values = {
+        **_holiday_form_input(result),
+        "holiday_start": "2030-08-02T07:15:00+00:00",
+        "holiday_end": "2030-08-10T16:45:00+00:00",
+    }
+    result = await _configure_options(hass, result["flow_id"], values)
+    assert result["reason"] == "holiday_updated"
+    written = coordinator.async_update_holiday.await_args.args[1]
+    assert written.start_date == "2030-08-02T09:15:00"
+    assert written.end_date == "2030-08-10T18:45:00"
+
+
+async def test_existing_holiday_without_name_storage_still_allows_date_changes(
+    hass, enable_custom_integrations
+):
+    entry, coordinator = _entry_with_writable_holiday(hass)
+    del coordinator.data[HOLIDAY_CONFIGURATION_PATH].resource.value["values"]["name"]
+    result = await _open_existing_holiday(hass, entry)
+    values = _holiday_form_input(result)
+    assert "holiday_name" not in values
+    values["holiday_start"] = "2030-08-02"
+    values["holiday_start"] = values["holiday_start"].split("T")[0] + "T" + "09:00:00"
+    result = await _configure_options(hass, result["flow_id"], values)
+    assert result["reason"] == "holiday_updated"
+    call = coordinator.async_update_holiday.await_args
+    assert call.args[1].name == call.kwargs["expected"].name
+
+
+async def test_holiday_delete_requires_confirmation_and_can_return_to_editing(
+    hass, enable_custom_integrations
+):
+    entry, coordinator = _entry_with_writable_holiday(hass)
+    result = await _open_existing_holiday(hass, entry, action="delete_holiday")
+    assert result["step_id"] == "delete_holiday"
+    assert "Urlaub" in result["description_placeholders"]["holiday"]
+    assert "2030-08-01 08:00" in result["description_placeholders"]["holiday"]
+    assert "2030-08-08 18:00" in result["description_placeholders"]["holiday"]
+    assert _holiday_form_input(result) == {"confirm_delete": False}
+    coordinator.async_delete_holiday.assert_not_awaited()
+    result = await _configure_options(
+        hass, result["flow_id"], {"confirm_delete": False}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert "holiday_delete" not in _holiday_form_input(result)
+    coordinator.async_delete_holiday.assert_not_awaited()
+    assert result["step_id"] == "holiday"
+    coordinator.async_update_holiday.assert_not_awaited()
+
+
+async def test_delete_from_edit_preserves_draft_on_cancel_and_never_saves_it_first(
+    hass, enable_custom_integrations
+):
+    entry, coordinator = _entry_with_writable_holiday(hass)
+    result = await _open_existing_holiday(hass, entry)
+    draft = _holiday_form_input(result)
+    assert "holiday_delete" not in draft
+    draft.update(
+        holiday_name="Noch nicht gespeichert",
+        holiday_end="2030-08-10T09:15",
+        holiday_fix_temperature=18.5,
+    )
+    result = await _configure_options(
+        hass, result["flow_id"], draft, action="delete_holiday"
+    )
+    assert result["step_id"] == "delete_holiday"
+    assert "Urlaub" in result["description_placeholders"]["holiday"]
+    assert "2030-08-08 18:00" in result["description_placeholders"]["holiday"]
+    assert "Noch nicht gespeichert" not in result["description_placeholders"]["holiday"]
+    coordinator.async_update_holiday.assert_not_awaited()
+    coordinator.async_delete_holiday.assert_not_awaited()
+    result = await _configure_options(
+        hass, result["flow_id"], {"confirm_delete": False}
+    )
+    assert result["step_id"] == "holiday"
+    assert _holiday_form_input(result) == draft
+    coordinator.async_update_holiday.assert_not_awaited()
+    coordinator.async_delete_holiday.assert_not_awaited()
+    result = await _configure_options(hass, result["flow_id"], draft)
+    assert result["reason"] == "holiday_updated"
+    call = coordinator.async_update_holiday.await_args
+    assert call.args[1].end_date == "2030-08-10T09:15:00"
+    assert call.args[1].fix_temperature == 18.5
+    assert call.kwargs["expected"].end_date == "2030-08-08T18:00:00"
+    assert call.kwargs["expected"].fix_temperature == 17.0
+    coordinator.async_delete_holiday.assert_not_awaited()
+
+
+async def test_delete_from_edit_confirms_saved_values_not_the_unsaved_draft(
+    hass, enable_custom_integrations
+):
+    entry, coordinator = _entry_with_writable_holiday(hass)
+    result = await _open_existing_holiday(hass, entry)
+    draft = _holiday_form_input(result)
+    draft["holiday_name"] = "Unsent name"
+    original = coordinator.data[HOLIDAY_LIST_PATH].resource.value[0]
+    updated = {**original, "startDate": "2030-08-02T08:00:00"}
+    coordinator.data[HOLIDAY_LIST_PATH].resource = Resource(
+        path=HOLIDAY_LIST_PATH, value=[updated], has_value=True
+    )
+    result = await _configure_options(
+        hass, result["flow_id"], draft, action="delete_holiday"
+    )
+    assert result["step_id"] == "delete_holiday"
+    assert "2030-08-02 08:00" in result["description_placeholders"]["holiday"]
+    assert "Unsent name" not in result["description_placeholders"]["holiday"]
+    result = await _configure_options(hass, result["flow_id"], {"confirm_delete": True})
+    assert result["reason"] == "holiday_deleted"
+    coordinator.async_update_holiday.assert_not_awaited()
+    coordinator.async_delete_holiday.assert_awaited_once()
+    assert coordinator.async_delete_holiday.await_args.kwargs[
+        "expected"
+    ].start_date == ("2030-08-02T08:00:00")
+
+
+async def test_new_holiday_has_no_delete_option(hass, enable_custom_integrations):
+    from homeassistant.data_entry_flow import InvalidData
+
+    entry, coordinator = _entry_with_writable_holiday(hass)
+    coordinator.async_create_holiday = AsyncMock()
+    result = await _open_new_holiday(hass, entry)
+    values = _new_holiday_input(result)
+    assert "holiday_delete" not in values
+    with pytest.raises(InvalidData):
+        await hass.config_entries.options.async_configure(
+            result["flow_id"], {**values, "holiday_delete": True}
+        )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], values
+    )
+    assert result["reason"] == "holiday_created"
+    assert "menu_options" not in result
+    coordinator.async_create_holiday.assert_awaited_once()
+    coordinator.async_update_holiday.assert_not_awaited()
+    coordinator.async_delete_holiday.assert_not_awaited()
+
+
+@pytest.mark.parametrize("action", ["holiday", "delete_holiday"])
+async def test_existing_holiday_uses_the_selected_gateway(
+    hass, enable_custom_integrations, action
+):
+    entry, first = _entry_with_writable_holiday(hass)
+    second = SimpleNamespace(
+        hass=hass,
+        holiday_timezones={},
+        gateway=Gateway("gateway-two", model="Second installation"),
+        data=deepcopy(first.data),
+        async_update_holiday=AsyncMock(),
+        async_delete_holiday=AsyncMock(),
+    )
+    entry.runtime_data.coordinators = (first, second)
+    result = await _open_existing_holiday(
+        hass, entry, gateway_id="gateway-two", action=action
+    )
+    assert "Second installation" in result["description_placeholders"]["holiday"]
+    values = (
+        {"confirm_delete": True}
+        if action == "delete_holiday"
+        else {**_holiday_form_input(result), "holiday_name": "Second trip"}
+    )
+    result = await _configure_options(hass, result["flow_id"], values)
+    assert result["reason"] == (
+        "holiday_deleted" if action == "delete_holiday" else "holiday_updated"
+    )
+    write = (
+        second.async_delete_holiday
+        if action == "delete_holiday"
+        else second.async_update_holiday
+    )
+    write.assert_awaited_once()
+    assert write.await_args.args[0] == 7
+    assert write.await_args.kwargs["expected"].name == "VXJsYXVi"
+    first.async_delete_holiday.assert_not_awaited()
+    first.async_update_holiday.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "change", ["removed", "dates", "settings", "stale", "unloaded"]
+)
+async def test_delete_stops_when_confirmation_is_outdated(
+    hass, enable_custom_integrations, change
+):
+    entry, coordinator = _entry_with_writable_holiday(hass)
+    result = await _open_existing_holiday(hass, entry, action="delete_holiday")
+    original = coordinator.data[HOLIDAY_LIST_PATH].resource.value[0]
+    if change == "unloaded":
+        entry.runtime_data = None
+    elif change == "stale":
+        coordinator.data[HOLIDAY_LIST_PATH].freshness = Freshness.STALE
+    else:
+        updated = (
+            {**original, "startDate": "2030-08-02T08:00:00"}
+            if change == "dates"
+            else {**original, "fixTemperature": 19.0}
+        )
+        coordinator.data[HOLIDAY_LIST_PATH].resource = Resource(
+            path=HOLIDAY_LIST_PATH,
+            value=[] if change == "removed" else [updated],
+            has_value=True,
+        )
+    result = await _configure_options(hass, result["flow_id"], {"confirm_delete": True})
+    assert result["reason"] == "holiday_changed"
+    coordinator.async_delete_holiday.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (WriteNotConfirmed("missing"), "delete_not_confirmed"),
+        (RateLimited(60), "write_rate_limited"),
+        (AuthenticationError("expired"), "write_authentication_failed"),
+        (WriteValidationError("stale"), "holiday_changed"),
+        (InvalidPayload("bad"), "delete_failed"),
+        (HolidayChangedError("changed"), "holiday_changed"),
+    ],
+)
+async def test_holiday_delete_reports_failure_without_retrying(
+    hass, enable_custom_integrations, error, expected
+):
+    entry, coordinator = _entry_with_writable_holiday(hass)
+    coordinator.async_delete_holiday.side_effect = error
+    result = await _open_existing_holiday(hass, entry, action="delete_holiday")
+    result = await _configure_options(hass, result["flow_id"], {"confirm_delete": True})
+    if isinstance(error, HolidayChangedError):
+        assert result["reason"] == expected
+    else:
+        assert result["step_id"] == "delete_holiday"
+        assert result["errors"] == {"base": expected}
+        assert _holiday_form_input(result) == {"confirm_delete": False}
+    coordinator.async_delete_holiday.assert_awaited_once()
+    coordinator.async_update_holiday.assert_not_awaited()
+
+
 async def test_options_flow_configures_only_advertised_holiday_fields(
     hass: HomeAssistant, enable_custom_integrations: None
 ) -> None:
     entry, coordinator = _entry_with_writable_holiday(hass)
-    result = await _start_holiday_options(hass, entry)
-
-    assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "holidays"
-    selection = hashlib.sha256(b"gateway-one\x007").hexdigest()[:24]
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {CONF_HOLIDAY_PERIOD: selection}
-    )
+    result = await _open_existing_holiday(hass, entry)
+    form_values = _holiday_form_input(result)
 
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "holiday"
@@ -501,9 +1266,11 @@ async def test_options_flow_configures_only_advertised_holiday_fields(
     assert field_order.index(CONF_HOLIDAY_FIX_TEMPERATURE) < field_order.index(
         CONF_HOLIDAY_DHW_MODE
     )
-    result = await hass.config_entries.options.async_configure(
+    result = await _configure_options(
+        hass,
         result["flow_id"],
         {
+            **form_values,
             CONF_HOLIDAY_ASSIGNED_TO: ["hc1", "vent1"],
             CONF_HOLIDAY_HEATING_MODE: "eco",
             CONF_HOLIDAY_DHW_MODE: "low",
@@ -567,8 +1334,8 @@ async def test_options_flow_rejects_a_changed_selection(
         has_value=True,
     )
 
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {CONF_HOLIDAY_PERIOD: selection}
+    result = await _configure_options(
+        hass, result["flow_id"], {CONF_HOLIDAY_PERIOD: selection}
     )
 
     assert result["type"] is FlowResultType.FORM
@@ -580,18 +1347,17 @@ async def test_options_flow_stops_if_selected_holiday_disappears(
     hass: HomeAssistant, enable_custom_integrations: None
 ) -> None:
     entry, coordinator = _entry_with_writable_holiday(hass)
-    result = await _start_holiday_options(hass, entry)
-    selection = hashlib.sha256(b"gateway-one\x007").hexdigest()[:24]
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {CONF_HOLIDAY_PERIOD: selection}
-    )
+    result = await _open_existing_holiday(hass, entry)
+    form_values = _holiday_form_input(result)
     coordinator.data[HOLIDAY_LIST_PATH].resource = Resource(
         path=HOLIDAY_LIST_PATH, value=[], has_value=True
     )
 
-    result = await hass.config_entries.options.async_configure(
+    result = await _configure_options(
+        hass,
         result["flow_id"],
         {
+            **form_values,
             CONF_HOLIDAY_ASSIGNED_TO: ["hc1"],
             CONF_HOLIDAY_HEATING_MODE: "off",
             CONF_HOLIDAY_DHW_MODE: "off",
@@ -623,15 +1389,14 @@ async def test_options_flow_reports_holiday_write_errors(
 ) -> None:
     entry, coordinator = _entry_with_writable_holiday(hass)
     coordinator.async_update_holiday.side_effect = error
-    result = await _start_holiday_options(hass, entry)
-    selection = hashlib.sha256(b"gateway-one\x007").hexdigest()[:24]
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {CONF_HOLIDAY_PERIOD: selection}
-    )
+    result = await _open_existing_holiday(hass, entry)
+    form_values = _holiday_form_input(result)
 
-    result = await hass.config_entries.options.async_configure(
+    result = await _configure_options(
+        hass,
         result["flow_id"],
         {
+            **form_values,
             CONF_HOLIDAY_ASSIGNED_TO: ["hc1", "dhw1", "vent1"],
             CONF_HOLIDAY_HEATING_MODE: "fix_temperature",
             CONF_HOLIDAY_DHW_MODE: "off",
@@ -829,18 +1594,17 @@ async def test_holiday_form_preserves_its_original_baseline_during_polling(
     )
 
     entry, coordinator = _entry_with_writable_holiday(hass)
-    result = await _start_holiday_options(hass, entry)
-    selection = hashlib.sha256(b"gateway-one\x007").hexdigest()[:24]
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {CONF_HOLIDAY_PERIOD: selection}
-    )
+    result = await _open_existing_holiday(hass, entry)
+    form_values = _holiday_form_input(result)
     old = coordinator.data[HOLIDAY_LIST_PATH].resource.value[0]
     coordinator.data[HOLIDAY_LIST_PATH].resource = Resource(
         path=HOLIDAY_LIST_PATH, value=[{**old, "fixTemperature": 19.0}], has_value=True
     )
-    result = await hass.config_entries.options.async_configure(
+    result = await _configure_options(
+        hass,
         result["flow_id"],
         {
+            **form_values,
             CONF_HOLIDAY_ASSIGNED_TO: ["hc1", "dhw1", "vent1"],
             CONF_HOLIDAY_HEATING_MODE: "fix_temperature",
             CONF_HOLIDAY_DHW_MODE: "low",
@@ -864,9 +1628,7 @@ async def test_holiday_form_preserves_its_original_baseline_during_polling(
 async def test_new_holiday_requires_explicit_offered_modes(
     hass, enable_custom_integrations
 ):
-    from custom_components.bosch_buderus_heating.holidays import (
-        HOLIDAY_CONFIGURATION_PATH,
-    )
+    from homeassistant.data_entry_flow import InvalidData
 
     entry, coordinator = _entry_with_writable_holiday(hass)
     coordinator.async_create_holiday = AsyncMock()
@@ -875,39 +1637,25 @@ async def test_new_holiday_requires_explicit_offered_modes(
     config["dhwMode"]["allowedValues"] = ["LOW"]
     config["ventilationMode"]["allowedValues"] = ["NOM"]
     config["thermalDesinfection"]["allowedValues"] = ["OFF"]
-    result = await _start_holiday_options(hass, entry)
-    selection = "create"
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {CONF_HOLIDAY_PERIOD: selection}
-    )
-    assert result["step_id"] == "new_holiday"
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {
-            "holiday_name": "Variant holiday",
-            "holiday_start": "2030-08-01T08:00:00",
-            "holiday_end": "2030-08-08T18:00:00",
-        },
-    )
-    assert result["step_id"] == "holiday"
+    result = await _open_new_holiday(hass, entry)
+    values = _new_holiday_input(result)
+    with pytest.raises(InvalidData):
+        await hass.config_entries.options.async_configure(result["flow_id"], values)
     coordinator.async_create_holiday.assert_not_awaited()
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {
-            CONF_HOLIDAY_ASSIGNED_TO: ["hc1", "dhw1", "vent1"],
-            CONF_HOLIDAY_HEATING_MODE: "NewVendorMode",
-            CONF_HOLIDAY_DHW_MODE: "low",
-            CONF_HOLIDAY_VENTILATION_MODE: "nom",
-            CONF_HOLIDAY_THERMAL_DISINFECTION: "off",
-            CONF_HOLIDAY_FIX_TEMPERATURE: 18.0,
-        },
+    values.update(
+        holiday_heating_mode="NewVendorMode",
+        holiday_dhw_mode="low",
+        holiday_ventilation_mode="nom",
+        holiday_thermal_disinfection="off",
+        holiday_fix_temperature=18.0,
     )
+    result = await _configure_options(hass, result["flow_id"], values)
     assert result["reason"] == "holiday_created"
-    values = coordinator.async_create_holiday.await_args.args[0]
-    assert values.heating_mode == "NewVendorMode"
-    assert values.dhw_mode == "LOW"
-    assert values.ventilation_mode == "NOM"
-    assert values.thermal_disinfection == "OFF"
+    written = coordinator.async_create_holiday.await_args.args[0]
+    assert written.heating_mode == "NewVendorMode"
+    assert written.dhw_mode == "LOW"
+    assert written.ventilation_mode == "NOM"
+    assert written.thermal_disinfection == "OFF"
     coordinator.async_update_holiday.assert_not_awaited()
 
 
@@ -919,50 +1667,32 @@ async def test_new_holiday_time_error_can_be_corrected_without_losing_input(
     await hass.config.async_set_time_zone("Europe/Berlin")
     entry, coordinator = _entry_with_writable_holiday(hass)
     coordinator.async_create_holiday = AsyncMock()
-    result = await _start_holiday_options(hass, entry)
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {CONF_HOLIDAY_PERIOD: "create"}
+    result = await _open_new_holiday(hass, entry)
+    values = _new_holiday_input(
+        result,
+        holiday_name="Urlaub im Grünen",
+        holiday_start="2026-09-20T22:45",
+        holiday_end="2026-09-24T15:00",
     )
-    values = {
-        "holiday_name": "Urlaub im Grünen",
-        "holiday_start": "2026-09-20 22:45:00",
-        "holiday_end": "2026-09-24 15:00:00",
-    }
-    values[field] = values[field][:11] + clock
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], values
-    )
+    values[field] = values[field][:10] + "T" + clock
+    result = await _configure_options(hass, result["flow_id"], values)
     assert result["step_id"] == "new_holiday"
     assert result["errors"] == {field: "holiday_time_step"}
-    suggestions = {
-        key.schema: key.description["suggested_value"]
-        for key in result["data_schema"].schema
+    expected = {
+        **values,
+        field: values[field][:10]
+        + "T"
+        + (clock[:5] if clock.endswith(":00") else clock),
     }
-    assert suggestions == values
+    assert _holiday_form_input(result) == expected
     coordinator.async_create_holiday.assert_not_awaited()
-    values[field] = values[field][:11] + "22:45:00"
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], values
-    )
-    assert result["step_id"] == "holiday"
-    assert result["description_placeholders"]["holiday"] == values["holiday_name"]
-    coordinator.async_create_holiday.assert_not_awaited()
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {
-            CONF_HOLIDAY_ASSIGNED_TO: ["hc1"],
-            CONF_HOLIDAY_HEATING_MODE: "eco",
-            CONF_HOLIDAY_DHW_MODE: "off",
-            CONF_HOLIDAY_VENTILATION_MODE: "off",
-            CONF_HOLIDAY_THERMAL_DISINFECTION: "on",
-            CONF_HOLIDAY_FIX_TEMPERATURE: 17.0,
-        },
-    )
+    values[field] = values[field][:10] + "T22:45"
+    result = await _configure_options(hass, result["flow_id"], values)
     assert result["reason"] == "holiday_created"
     coordinator.async_create_holiday.assert_awaited_once()
     written = coordinator.async_create_holiday.await_args.args[0]
-    assert written.start_date == values["holiday_start"].replace(" ", "T")
-    assert written.end_date == values["holiday_end"].replace(" ", "T")
+    assert written.start_date == values["holiday_start"] + ":00"
+    assert written.end_date == values["holiday_end"] + ":00"
 
 
 @pytest.mark.parametrize(
@@ -1003,8 +1733,8 @@ async def test_new_holiday_selector_uses_profile_translations(
     existing = hashlib.sha256(b"gateway-one\x007").hexdigest()[:24]
     assert labels[existing].startswith("Urlaub ")
     assert len(labels) == 2
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {CONF_HOLIDAY_PERIOD: "create"}
+    result = await _configure_options(
+        hass, result["flow_id"], {CONF_HOLIDAY_PERIOD: "create"}
     )
     assert result["step_id"] == "new_holiday"
 
@@ -1028,8 +1758,8 @@ async def test_new_holiday_routes_to_explicit_gateway(
     entry.runtime_data.coordinators = (first, second)
     entry.runtime_data.gateways = (first.gateway, second.gateway)
     result = await _start_holiday_options(hass, entry)
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {CONF_HOLIDAY_PERIOD: "create"}
+    result = await _configure_options(
+        hass, result["flow_id"], {CONF_HOLIDAY_PERIOD: "create"}
     )
     assert result["step_id"] == "holiday_gateway"
     options = next(iter(result["data_schema"].schema.values())).config["options"]
@@ -1040,8 +1770,8 @@ async def test_new_holiday_routes_to_explicit_gateway(
     ).startswith("MX400")
     if remove_selected:
         entry.runtime_data.coordinators = (first,)
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"holiday_gateway": selected}
+    result = await _configure_options(
+        hass, result["flow_id"], {"holiday_gateway": selected}
     )
     if remove_selected:
         assert result["step_id"] == "holiday_gateway"
@@ -1050,25 +1780,10 @@ async def test_new_holiday_routes_to_explicit_gateway(
         second.async_create_holiday.assert_not_awaited()
         return
     assert result["step_id"] == "new_holiday"
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {
-            "holiday_name": "Trip",
-            "holiday_start": "2030-08-01 08:00:00",
-            "holiday_end": "2030-08-08 18:00:00",
-        },
+    values = _new_holiday_input(
+        result, holiday_assigned_to=["hc1"], holiday_heating_mode="eco"
     )
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {
-            CONF_HOLIDAY_ASSIGNED_TO: ["hc1"],
-            CONF_HOLIDAY_HEATING_MODE: "eco",
-            CONF_HOLIDAY_DHW_MODE: "off",
-            CONF_HOLIDAY_VENTILATION_MODE: "off",
-            CONF_HOLIDAY_THERMAL_DISINFECTION: "on",
-            CONF_HOLIDAY_FIX_TEMPERATURE: 17.0,
-        },
-    )
+    result = await _configure_options(hass, result["flow_id"], values)
     assert result["reason"] == "holiday_created"
     first.async_create_holiday.assert_not_awaited()
     second.async_create_holiday.assert_awaited_once()
@@ -1079,7 +1794,6 @@ async def test_new_holiday_routes_to_explicit_gateway(
 async def test_new_holiday_dates_start_empty_and_remain_required(
     hass, enable_custom_integrations, date_mode, language
 ):
-    import voluptuous as vol
     from homeassistant.helpers import config_validation as cv
     from probatio import to_field_list
 
@@ -1089,11 +1803,7 @@ async def test_new_holiday_dates_start_empty_and_remain_required(
     coordinator.data[HOLIDAY_CONFIGURATION_PATH].resource.value["values"]["date"][
         "allowedValues"
     ] = [date_mode]
-    result = await _start_holiday_options(hass, entry)
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_HOLIDAY_PERIOD: "create"},
-    )
+    result = await _open_new_holiday(hass, entry)
     schema = result["data_schema"]
     serialized = {
         field["name"]: field
@@ -1103,47 +1813,32 @@ async def test_new_holiday_dates_start_empty_and_remain_required(
         marker = next(key for key in schema.schema if key.schema == field)
         assert isinstance(marker, vol.Required)
         assert marker.description == {"suggested_value": ""}
-        assert serialized[field]["description"]["suggested_value"] == ""
         assert serialized[field]["required"] is True
-        assert ("date" if date_mode == "date" else "datetime") in serialized[field][
-            "selector"
-        ]
+        if date_mode == "date":
+            assert "date" in serialized[field]["selector"]
+        else:
+            assert serialized[field]["selector"]["bosch-buderus-holiday-datetime"] == {
+                "default_time": "08:00"
+            }
+        assert f"{field}_time" not in serialized
+    assert "holiday_heating_mode" in serialized
+    assert "holiday_dhw_mode" in serialized
     with pytest.raises(vol.Invalid):
-        schema({"holiday_name": "Trip", "holiday_start": "", "holiday_end": ""})
-    assert not result.get("description_placeholders")
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {
-            "holiday_name": "Urlaub im Grünen",
-            "holiday_start": "2026-09-20"
-            if date_mode == "date"
-            else "2026-09-20 22:00:00",
-            "holiday_end": "2026-09-24"
-            if date_mode == "date"
-            else "2026-09-24 15:00:00",
-        },
+        schema({})
+    values = _new_holiday_input(
+        result,
+        holiday_start="2026-09-20" if date_mode == "date" else "2026-09-20T08:00",
+        holiday_end="2026-09-24" if date_mode == "date" else "2026-09-24T08:00",
     )
-    assert result["step_id"] == "holiday"
-    coordinator.async_create_holiday.assert_not_awaited()
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {
-            CONF_HOLIDAY_ASSIGNED_TO: ["hc1"],
-            CONF_HOLIDAY_HEATING_MODE: "fix_temperature",
-            CONF_HOLIDAY_DHW_MODE: "off",
-            CONF_HOLIDAY_VENTILATION_MODE: "off",
-            CONF_HOLIDAY_THERMAL_DISINFECTION: "on",
-            CONF_HOLIDAY_FIX_TEMPERATURE: 17.0,
-        },
-    )
+    result = await _configure_options(hass, result["flow_id"], values)
     assert result["reason"] == "holiday_created"
     coordinator.async_create_holiday.assert_awaited_once()
-    values = coordinator.async_create_holiday.await_args.args[0]
-    assert values.start_date == (
-        "2026-09-20" if date_mode == "date" else "2026-09-20T22:00:00"
+    written = coordinator.async_create_holiday.await_args.args[0]
+    assert written.start_date == (
+        "2026-09-20" if date_mode == "date" else "2026-09-20T08:00:00"
     )
-    assert values.end_date == (
-        "2026-09-23" if date_mode == "date" else "2026-09-24T15:00:00"
+    assert written.end_date == (
+        "2026-09-23" if date_mode == "date" else "2026-09-24T08:00:00"
     )
 
 
@@ -1163,8 +1858,8 @@ async def test_new_holiday_dates_start_empty_and_remain_required(
             "2026-10-25 02:30:00",
         ),
         (
-            "2026-09-24T13:00:00+00:00",
-            "2026-09-20T20:00:00+00:00",
+            "2026-09-24T15:00:00",
+            "2026-09-20T22:00:00",
             "write_validation_failed",
             "2026-09-24 15:00:00",
         ),
@@ -1176,110 +1871,96 @@ async def test_new_holiday_error_preserves_name_and_canonical_dates(
     await hass.config.async_set_time_zone("Europe/Berlin")
     entry, coordinator = _entry_with_writable_holiday(hass)
     coordinator.async_create_holiday = AsyncMock()
-    result = await _start_holiday_options(hass, entry)
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_HOLIDAY_PERIOD: "create"},
+    result = await _open_new_holiday(hass, entry)
+    values = _new_holiday_input(
+        result,
+        holiday_name="Urlaub im Grünen",
+        holiday_start=start[:10] + "T" + start[11:],
+        holiday_end=end[:10] + "T" + end[11:],
     )
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {
-            "holiday_name": "Urlaub im Grünen",
-            "holiday_start": start,
-            "holiday_end": end,
-        },
-    )
+    result = await _configure_options(hass, result["flow_id"], values)
     assert result["step_id"] == "new_holiday"
-    assert result["errors"] == {"base": expected_error}
-    suggestions = {
-        key.schema: key.description["suggested_value"]
-        for key in result["data_schema"].schema
-    }
+    expected = (
+        {"holiday_end": "holiday_end_not_after_start"}
+        if expected_error == "write_validation_failed"
+        else {"base": expected_error}
+    )
+    assert result["errors"] == expected
+    suggestions = _holiday_form_input(result)
     assert suggestions["holiday_name"] == "Urlaub im Grünen"
-    assert suggestions["holiday_start"] == suggested_start
+    assert suggestions["holiday_start"] == suggested_start[:16].replace(" ", "T")
     coordinator.async_create_holiday.assert_not_awaited()
+
+
+@pytest.mark.parametrize("clock", ["00:00:00", "09:15:00"])
+@pytest.mark.parametrize("timezone", ["Europe/Berlin", "America/New_York"])
+async def test_new_holiday_clock_override_is_not_replaced_by_eight(
+    hass, enable_custom_integrations, clock, timezone
+):
+    await hass.config.async_set_time_zone(timezone)
+    entry, coordinator = _entry_with_writable_holiday(hass)
+    coordinator.async_create_holiday = AsyncMock()
+    result = await _open_new_holiday(hass, entry)
+    values = _new_holiday_input(
+        result,
+        holiday_start="2030-08-01" + "T" + clock[:5],
+        holiday_end="2030-08-08" + "T" + clock[:5],
+    )
+    result = await _configure_options(hass, result["flow_id"], values)
+    assert result["reason"] == "holiday_created"
+    written = coordinator.async_create_holiday.await_args.args[0]
+    assert written.start_date == "2030-08-01T" + clock
+    assert written.end_date == "2030-08-08T" + clock
 
 
 async def test_new_holiday_malformed_datetime_never_reaches_a_write(
     hass, enable_custom_integrations
 ):
-    from homeassistant.data_entry_flow import InvalidData
-
     entry, coordinator = _entry_with_writable_holiday(hass)
     coordinator.async_create_holiday = AsyncMock()
     result = await _start_holiday_options(hass, entry)
-    result = await hass.config_entries.options.async_configure(
+    result = await _configure_options(
+        hass,
         result["flow_id"],
         {CONF_HOLIDAY_PERIOD: "create"},
     )
-    with pytest.raises(InvalidData):
-        await hass.config_entries.options.async_configure(
-            result["flow_id"],
-            {
-                "holiday_name": "Trip",
-                "holiday_start": "2026-09-20T00:00:00 22:00:00",
-                "holiday_end": "2026-09-24 15:00:00",
-            },
-        )
+    result = await _configure_options(
+        hass,
+        result["flow_id"],
+        _new_holiday_input(result, holiday_start="2026-09-20T00:00:00 22:00:00"),
+    )
+    assert result["errors"] == {"base": "invalid_holiday_details"}
     coordinator.async_create_holiday.assert_not_awaited()
 
 
 async def test_new_holiday_date_only_gateway_rejects_reversed_dates(
     hass, enable_custom_integrations
 ):
-    from custom_components.bosch_buderus_heating.holidays import (
-        HOLIDAY_CONFIGURATION_PATH,
-    )
-
     entry, coordinator = _entry_with_writable_holiday(hass)
     coordinator.async_create_holiday = AsyncMock()
     config = coordinator.data[HOLIDAY_CONFIGURATION_PATH].resource.value["values"]
     config["date"]["allowedValues"] = ["date"]
     config["fixTemperature"] = {"minValue": 18, "maxValue": 26}
-    result = await _start_holiday_options(hass, entry)
-    selection = "create"
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {CONF_HOLIDAY_PERIOD: selection}
-    )
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {
-            "holiday_name": "Dates",
-            "holiday_start": "2030-08-03",
-            "holiday_end": "2030-08-01",
-        },
-    )
-    assert result["errors"] == {"base": "write_validation_failed"}
-    coordinator.async_create_holiday.assert_not_awaited()
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {
-            "holiday_name": "Dates",
-            "holiday_start": "2030-08-01",
-            "holiday_end": "2030-08-03",
-        },
-    )
-    assert result["step_id"] == "holiday"
-    import voluptuous as vol
-
+    result = await _open_new_holiday(hass, entry)
     temperature = next(
         marker
         for marker in result["data_schema"].schema
         if marker.schema == CONF_HOLIDAY_FIX_TEMPERATURE
     )
     assert temperature.default is vol.UNDEFINED
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {
-            CONF_HOLIDAY_ASSIGNED_TO: ["hc1"],
-            CONF_HOLIDAY_HEATING_MODE: "fix_temperature",
-            CONF_HOLIDAY_DHW_MODE: "off",
-            CONF_HOLIDAY_VENTILATION_MODE: "off",
-            CONF_HOLIDAY_THERMAL_DISINFECTION: "on",
-            CONF_HOLIDAY_FIX_TEMPERATURE: 19.0,
-        },
+    values = _new_holiday_input(
+        result,
+        holiday_name="Dates",
+        holiday_start="2030-08-03",
+        holiday_end="2030-08-01",
+        holiday_fix_temperature=19.0,
     )
+    result = await _configure_options(hass, result["flow_id"], values)
+    assert result["errors"] == {"holiday_end": "holiday_end_not_after_start"}
+    coordinator.async_create_holiday.assert_not_awaited()
+    values.update(holiday_start="2030-08-01", holiday_end="2030-08-03")
+    result = await _configure_options(hass, result["flow_id"], values)
     assert result["reason"] == "holiday_created"
-    values = coordinator.async_create_holiday.await_args.args[0]
-    assert values.start_date == "2030-08-01" and values.end_date == "2030-08-02"
-    assert values.fix_temperature == 19.0
+    written = coordinator.async_create_holiday.await_args.args[0]
+    assert written.start_date == "2030-08-01" and written.end_date == "2030-08-02"
+    assert written.fix_temperature == 19.0

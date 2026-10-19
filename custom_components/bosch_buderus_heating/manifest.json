@@ -1,6 +1,7 @@
 {
   "domain": "bosch_buderus_heating",
   "name": "Bosch/Buderus Heating",
+  "after_dependencies": ["frontend", "http"],
   "codeowners": ["@SoftwareSchmied"],
   "config_flow": true,
   "dependencies": ["persistent_notification"],

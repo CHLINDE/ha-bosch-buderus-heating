@@ -137,7 +137,7 @@ async def test_profile_language_uses_translated_menu_independent_of_system_langu
     prefix = f"component.{DOMAIN}.options.step.init.menu_options"
     assert german[f"{prefix}.notifications"] == "Benachrichtigungen"
     assert english[f"{prefix}.notifications"] == "Notifications"
-    assert german[f"{prefix}.holidays"] == "Urlaubszeiten"
+    assert german[f"{prefix}.holidays"] == "Urlaubszeiten verwalten"
 
 
 @pytest.mark.parametrize(

@@ -16,6 +16,78 @@ consistently with the calendar. Daylight-saving transitions, explicit offsets,
 and Home Assistant's fallback zone keep their existing semantics. These changes
 add no cloud requests. Thank you to Frenck for identifying the blocking lookups.
 
+I set the start and end time for new holidays in the integration's management
+dialog to 08:00. Separate date and time fields keep the dates empty and required
+while allowing the clock values to be prefilled. I can still choose another
+time, including 00:00. Existing holidays open with their saved times; date-only
+installations and the standard calendar editor retain their existing behavior.
+
+I unified creation and editing in the existing configuration dialog. Both
+forms show the name, dates and supported heating settings together. Each date
+has its clock directly beside it, including on narrow screens. The clock
+fields omit seconds; entered times are sent with seconds 00. Existing
+timestamps remain intact when only heating settings change.
+
+I added a specific error at the end field when the end is before or equal to
+the start. The calendar reports the same cause. Entered values remain available
+for correction.
+
+I replaced the delete switch with a red button directly in the edit form.
+The form saves directly without an additional action menu. The delete button
+opens confirmation without saving the draft, even when the unsaved dates are
+incomplete or invalid. Returning preserves those inputs. New holidays have no
+delete action. A small frontend module renders these two controls within the
+existing dialog; it adds no sidebar panel or cloud endpoint.
+
+I kept entered values after validation or write errors and preserved the
+original comparison values across corrections, so an unrelated change in the
+manufacturer app is not overwritten. Before deletion from the options dialog,
+I added a current-list check against the confirmed details. Writes still run
+once and require read-back confirmation. No additional requests are made when
+opening these dialogs.
+
+I now send a selected midnight as 00:00 on the selected date. For example,
+October 29 at 00:00 is no longer converted to October 28 at 24:00. In my
+installation test, the earlier 24:00 request was returned as 23:45. Existing
+24:00 responses remain readable, but subsequent writes use the equivalent
+00:00 timestamp without shortening the holiday.
+
+I made an unconfirmed write show the actual returned holiday immediately.
+When the returned settings differ, the dialog shows the requested and
+returned periods and directs me to edit the existing entry. A valid HTTP
+response alone still does not count as a confirmed save.
+
+I added protection against repeated creation: a current holiday with the
+same start and circuit selection directs me to edit that entry.
+While a creation request is unresolved, another attempt only checks that
+request. This guard is shared by the options dialog and calendar during the
+loaded integration session. It is not persistent across a reload or restart.
+I added regression tests for exact midnight writes, calendar and dialog
+feedback, partial saves, interrupted responses, retries and concurrent calls.
+
+I checked the revised controls in a local browser component test at desktop
+and mobile widths, including keyboard activation, repeated clicks, error
+recovery, empty new dates, editable 08:00 defaults and retained saved times.
+I also verified the installed dialog in Home Assistant 2026.10.2 at desktop
+and mobile widths. Date and time stay beside each other, the delete button
+opens confirmation directly, and cancelling preserves every form value.
+The new-period form starts with empty dates and 08:00 clocks. Submitting an
+end before its start displays the specific error and retains the name and
+dates. I created, saved or deleted no holiday during this browser check.
+
+I verified the combined holiday and timezone changes with Home Assistant
+2026.10.1: 1,287 automated test cases passed with 96.45% combined statement and
+branch coverage. Formatting, linting and strict type checking passed. The local
+browser component checks also passed on the combined source. No additional
+appliance writes were performed for this combined verification.
+
+In the earlier installation test, after installing the local build and restarting,
+I changed an existing test holiday to end at midnight on my installation.
+PointT returned the exact requested timestamp and the dialog confirmed the
+save without an error. Reopening the list showed the midnight end and the
+other existing test holiday unchanged. This physical test covered editing
+one existing holiday; creation and deletion were not repeated on the appliance.
+
 ## [0.8.1-beta.2] - 2026-10-11
 
 I added a **Season switching** control so the central heating season can be

@@ -27,7 +27,12 @@ from .discovery import (
 )
 from .faults import FaultTracker, fault_resource_candidates, is_fault_resource_path
 from .holiday_timezones import async_resolve_holiday_timezones
-from .holiday_writes import HolidayWriteService, holiday_resources_from_snapshots
+from .holiday_writes import (
+    HolidayAlreadyExists,
+    HolidayWriteNotConfirmed,
+    HolidayWriteService,
+    holiday_resources_from_snapshots,
+)
 from .holidays import (
     HOLIDAY_CONFIGURATION_PATH,
     HOLIDAY_LIST_PATH,
@@ -336,9 +341,13 @@ class BoschBuderusDataUpdateCoordinator(
             "update", holiday_id, values, expected=expected
         )
 
-    async def async_delete_holiday(self, holiday_id: int) -> Resource:
+    async def async_delete_holiday(
+        self, holiday_id: int, *, expected: HolidayWriteValues | None = None
+    ) -> Resource:
         """Delete one holiday and publish its confirmed list read-back."""
-        return await self._async_write_holiday("delete", holiday_id, None)
+        return await self._async_write_holiday(
+            "delete", holiday_id, None, expected=expected
+        )
 
     async def _async_write_holiday(
         self,
@@ -401,6 +410,7 @@ class BoschBuderusDataUpdateCoordinator(
                         resources,
                         holiday_id,
                         fallback_timezone=dt_util.get_default_time_zone(),
+                        expected=expected,
                     )
                 else:
                     raise WriteValidationError("Invalid holiday write request")
@@ -418,6 +428,14 @@ class BoschBuderusDataUpdateCoordinator(
                 )
                 self._config_entry.async_start_reauth(self.hass)
                 raise
+            except (HolidayWriteNotConfirmed, HolidayAlreadyExists) as err:
+                if err.resource is not None:
+                    await self._async_publish_holiday_readback(err.resource)
+                if isinstance(err, HolidayWriteNotConfirmed):
+                    self._record_capability(
+                        HOLIDAY_LIST_PATH, "write_not_confirmed", SnapshotSource.WRITE
+                    )
+                raise
             except WriteValidationError:
                 raise
             except PointTError as err:
@@ -426,21 +444,25 @@ class BoschBuderusDataUpdateCoordinator(
                 )
                 raise
 
-            confirmed_at = datetime.now(UTC)
-            updated = dict(snapshots)
-            updated[HOLIDAY_LIST_PATH] = ResourceSnapshot(
-                resource=confirmed,
-                available=True,
-                last_success=confirmed_at,
-                last_attempt=confirmed_at,
-                source=SnapshotSource.WRITE,
-            )
-            self.resources[HOLIDAY_LIST_PATH] = confirmed
-            self._negative_until.pop(HOLIDAY_LIST_PATH, None)
+            await self._async_publish_holiday_readback(confirmed)
             self._record_capability(HOLIDAY_LIST_PATH, "success", SnapshotSource.WRITE)
-            await self._async_prepare_holiday_timezones()
-            self.async_set_updated_data(updated)
             return confirmed
+
+    async def _async_publish_holiday_readback(self, resource: Resource) -> None:
+        """Expose the actual list, independently of whether a write matched it."""
+        received_at = datetime.now(UTC)
+        updated = dict(self.data or {})
+        updated[HOLIDAY_LIST_PATH] = ResourceSnapshot(
+            resource=resource,
+            available=True,
+            last_success=received_at,
+            last_attempt=received_at,
+            source=SnapshotSource.WRITE,
+        )
+        self.resources[HOLIDAY_LIST_PATH] = resource
+        self._negative_until.pop(HOLIDAY_LIST_PATH, None)
+        await self._async_prepare_holiday_timezones()
+        self.async_set_updated_data(updated)
 
     async def _async_update_data(self) -> dict[str, ResourceSnapshot]:
         started = monotonic()

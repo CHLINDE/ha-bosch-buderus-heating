@@ -24,7 +24,6 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
     BooleanSelector,
     DateSelector,
-    DateTimeSelector,
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
@@ -54,16 +53,28 @@ from .coordinator import BoschBuderusDataUpdateCoordinator, Freshness
 from .data import tokens_from_data, tokens_to_data
 from .enum_translation import writable_enum_options
 from .ha_schema import validation as vol
+from .holiday_ui import (
+    DELETE_FIELD,
+    HolidayDateTimeSelector,
+    HolidayDeleteSelector,
+    HolidayFormSchema,
+)
 from .holiday_writes import (
+    HolidayAlreadyExists,
+    HolidayChangedError,
     HolidayTimeError,
+    HolidayTimeRangeError,
     HolidayTimeStepError,
+    HolidayWriteNotConfirmed,
     configure_holiday_values,
     create_holiday_values,
     holiday_resources_from_snapshots,
+    update_holiday_values,
 )
 from .holidays import (
     HolidayPeriod,
     HolidayWriteConfiguration,
+    HolidayWriteValues,
     holiday_period_id,
     holiday_timezone,
     parse_holiday_state,
@@ -499,13 +510,15 @@ class _HolidayChoice:
 
 
 class BoschBuderusOptionsFlow(OptionsFlow):
-    """Configure PointT-specific fields that the HA calendar cannot display."""
+    """Manage holidays and installation-specific notification settings."""
 
     def __init__(self, config_entry: ConfigEntry) -> None:
         self._entry = config_entry
         self._selected_key: str | None = None
         self._displayed_choice: _HolidayChoice | None = None
-        self._creation_period: HolidayPeriod | None = None
+        self._holiday_draft: dict[str, Any] | None = None
+        self._delete_choice: _HolidayChoice | None = None
+        self._delete_return_input: dict[str, Any] | None = None
         self._notification_gateway_keys: tuple[str, ...] | None = None
 
     async def async_step_init(
@@ -624,10 +637,77 @@ class BoschBuderusOptionsFlow(OptionsFlow):
             if isinstance(selected, str) and selected in choices:
                 self._selected_key = selected
                 self._displayed_choice = None
-                self._creation_period = None
+                self._holiday_draft = None
+                self._delete_choice = None
+                self._delete_return_input = None
                 return await self.async_step_holiday()
             return self._show_holiday_selection(choices, error="holiday_changed")
         return self._show_holiday_selection(choices)
+
+    async def async_step_delete_holiday(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Delete only the period whose details the user has confirmed."""
+        choice = (self._holiday_choices() or {}).get(self._selected_key or "")
+        if choice is None or (self._selected_key or "").startswith("create:"):
+            return self.async_abort(reason="holiday_changed")
+        if user_input is not None and not user_input.get("confirm_delete"):
+            displayed = self._displayed_choice
+            if (
+                displayed is None
+                or displayed.coordinator is not choice.coordinator
+                or holiday_period_id(displayed.period)
+                != holiday_period_id(choice.period)
+            ):
+                return self.async_abort(reason="holiday_changed")
+            draft = self._delete_return_input
+            self._delete_return_input = None
+            self._delete_choice = None
+            return self._show_holiday_form(displayed, suggested_values=draft)
+        if user_input is None:
+            self._delete_return_input = dict(self._holiday_draft or {})
+        errors: dict[str, str] | None = None
+        if user_input is not None:
+            displayed = self._delete_choice
+            if (
+                displayed is None
+                or displayed.coordinator is not choice.coordinator
+                or displayed.period.write_values != choice.period.write_values
+                or holiday_period_id(displayed.period)
+                != holiday_period_id(choice.period)
+            ):
+                return self.async_abort(reason="holiday_changed")
+            holiday_id = holiday_period_id(displayed.period)
+            if holiday_id is None or displayed.period.write_values is None:
+                return self.async_abort(reason="holiday_changed")
+            try:
+                await choice.coordinator.async_delete_holiday(
+                    holiday_id, expected=displayed.period.write_values
+                )
+            except HolidayChangedError:
+                return self.async_abort(reason="holiday_changed")
+            except WriteNotConfirmed:
+                errors = {"base": "delete_not_confirmed"}
+            except RateLimited:
+                errors = {"base": "write_rate_limited"}
+            except AuthenticationError:
+                errors = {"base": "write_authentication_failed"}
+            except WriteValidationError:
+                errors = {"base": "holiday_changed"}
+            except PointTError:
+                errors = {"base": "delete_failed"}
+            else:
+                return self.async_abort(reason="holiday_deleted")
+        self._delete_choice = choice
+        return self.async_show_form(
+            step_id="delete_holiday",
+            data_schema=vol.Schema(
+                {vol.Required("confirm_delete", default=False): BooleanSelector()}
+            ),
+            description_placeholders={"holiday": choice.label},
+            errors=errors,
+            last_step=True,
+        )
 
     async def async_step_holiday_gateway(
         self, user_input: dict[str, Any] | None = None
@@ -646,7 +726,7 @@ class BoschBuderusOptionsFlow(OptionsFlow):
         if isinstance(selected, str) and selected in choices:
             self._selected_key = selected
             self._displayed_choice = None
-            self._creation_period = None
+            self._holiday_draft = None
             return await self.async_step_new_holiday()
         return self.async_show_form(
             step_id="holiday_gateway",
@@ -669,76 +749,24 @@ class BoschBuderusOptionsFlow(OptionsFlow):
     async def async_step_new_holiday(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Collect dates before explicitly choosing installation-specific modes."""
-        choices = self._holiday_choices()
-        choice = (choices or {}).get(self._selected_key or "")
-        if choice is None or not (self._selected_key or "").startswith("create:"):
-            return self.async_abort(reason="holiday_changed")
-        errors: dict[str, str] | None = None
-        date_only = choice.configuration.date_time_mode == "date"
-        suggested_values: dict[str, Any] = {"holiday_start": "", "holiday_end": ""}
-        if user_input is not None:
-            suggested_values.update(user_input)
-            try:
-                parse_date = date.fromisoformat if date_only else datetime.fromisoformat
-                start = parse_date(user_input["holiday_start"])
-                end = parse_date(user_input["holiday_end"])
-                resources = holiday_resources_from_snapshots(
-                    choice.coordinator.data or {}
-                )
-                timezone = holiday_timezone(
-                    resources,
-                    dt_util.get_default_time_zone(),
-                    timezones=choice.coordinator.holiday_timezones,
-                )
-                for field, value in (("holiday_start", start), ("holiday_end", end)):
-                    if isinstance(value, datetime):
-                        if value.tzinfo is not None:
-                            value = value.astimezone(timezone).replace(tzinfo=None)
-                        suggested_values[field] = value.isoformat(
-                            sep=" ", timespec="seconds"
-                        )
-                values = create_holiday_values(
-                    start,
-                    end,
-                    user_input["holiday_name"],
-                    choice.configuration,
-                    timezone,
-                    validate_defaults=False,
-                )
-                self._creation_period = replace(
-                    choice.period, name=user_input["holiday_name"], write_values=values
-                )
-            except HolidayTimeStepError as err:
-                errors = {err.field: err.translation_key}
-            except HolidayTimeError as err:
-                errors = {"base": err.translation_key}
-            except KeyError, TypeError, ValueError, WriteValidationError:
-                errors = {"base": "write_validation_failed"}
-            else:
-                return await self.async_step_holiday()
-        selector = DateSelector() if date_only else DateTimeSelector()
-        return self.async_show_form(
-            step_id="new_holiday",
-            # Explicit empty suggestions bypass the malformed date/datetime
-            # defaults in affected HA frontends without relaxing validation.
-            data_schema=self.add_suggested_values_to_schema(
-                vol.Schema(
-                    {
-                        vol.Required("holiday_name"): TextSelector(),
-                        vol.Required("holiday_start"): selector,
-                        vol.Required("holiday_end"): selector,
-                    }
-                ),
-                suggested_values,
-            ),
-            errors=errors,
-        )
+        """Use the same fields and validation when creating a holiday."""
+        return await self._async_process_holiday(user_input)
 
     async def async_step_holiday(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Validate, write, and confirm PointT-specific holiday settings."""
+        """Save directly, or open confirmation from the inline delete button."""
+        if user_input is not None and user_input.get(DELETE_FIELD) is True:
+            self._holiday_draft = {
+                key: value for key, value in user_input.items() if key != DELETE_FIELD
+            }
+            return await self.async_step_delete_holiday()
+        return await self._async_process_holiday(user_input)
+
+    async def _async_process_holiday(
+        self, user_input: dict[str, Any] | None
+    ) -> ConfigFlowResult:
+        """Validate the common form and save through the confirmed writer."""
         choices = self._holiday_choices()
         if choices is None:
             return self.async_abort(reason="not_loaded")
@@ -747,36 +775,119 @@ class BoschBuderusOptionsFlow(OptionsFlow):
             return self.async_abort(reason="holiday_changed")
         creating = (self._selected_key or "").startswith("create:")
         if creating:
-            if self._creation_period is None:
-                return self.async_abort(reason="holiday_changed")
+            configuration = choice.configuration
             choice = replace(
                 choice,
-                period=self._creation_period,
-                label=self._creation_period.name or choice.label,
+                period=replace(
+                    choice.period,
+                    write_values=HolidayWriteValues(
+                        start_date="",
+                        end_date="",
+                        heating_mode=configuration.heating_mode,
+                        dhw_mode=configuration.dhw_mode,
+                        ventilation_mode=configuration.ventilation_mode,
+                        assigned_to=configuration.assigned_to,
+                        name=None,
+                        thermal_disinfection=configuration.thermal_disinfection,
+                        fix_temperature=configuration.fix_temperature,
+                    ),
+                ),
             )
 
+        errors: dict[str, str] | None = None
+        suggested_values = dict(user_input) if user_input is not None else None
         if user_input is not None:
             displayed = self._displayed_choice
             if (
                 displayed is None
                 or displayed.coordinator is not choice.coordinator
-                or (
-                    holiday_period_id(displayed.period)
-                    != holiday_period_id(choice.period)
-                )
+                or holiday_period_id(displayed.period)
+                != holiday_period_id(choice.period)
             ):
                 return self.async_abort(reason="holiday_changed")
             current = displayed.period.write_values
             if current is None:
                 return self.async_abort(reason="holiday_changed")
+            validation_error = "invalid_holiday_details"
             try:
+                assert suggested_values is not None
+                timezone = holiday_timezone(
+                    holiday_resources_from_snapshots(choice.coordinator.data or {}),
+                    dt_util.get_default_time_zone(),
+                    timezones=choice.coordinator.holiday_timezones,
+                )
+                date_only = choice.configuration.date_time_mode == "date"
+                start: date | datetime
+                end: date | datetime
+                if date_only:
+                    start = date.fromisoformat(user_input["holiday_start"])
+                    end = date.fromisoformat(user_input["holiday_end"])
+                else:
+                    start = _holiday_datetime_input(user_input["holiday_start"])
+                    end = _holiday_datetime_input(user_input["holiday_end"])
+                    # Compare the same local minute shown in the browser. Keep
+                    # invalid seconds intact until validation rejects them.
+                    for field, value in (
+                        ("holiday_start", start),
+                        ("holiday_end", end),
+                    ):
+                        if value.tzinfo is not None:
+                            value = value.astimezone(timezone).replace(tzinfo=None)
+                        suggested_values[field] = value.isoformat(
+                            timespec="minutes"
+                            if value.second == value.microsecond == 0
+                            else "auto"
+                        )
+                summary = user_input.get("holiday_name", displayed.period.name or "")
+                if creating:
+                    values = create_holiday_values(
+                        start,
+                        end,
+                        summary,
+                        choice.configuration,
+                        timezone,
+                        validate_defaults=False,
+                    )
+                else:
+                    values = current
+                    original_dates = _holiday_date_suggestions(displayed)
+                    name_changed = summary != (displayed.period.name or "")
+                    if name_changed or any(
+                        suggested_values[field] != original_dates[field]
+                        for field in original_dates
+                    ):
+                        values = update_holiday_values(
+                            displayed.period,
+                            start,
+                            end,
+                            summary,
+                            choice.configuration,
+                            timezone,
+                            change_name=name_changed,
+                        )
+                    # An unchanged displayed endpoint preserves the complete
+                    # wire value, including legacy seconds and inclusive dates.
+                    for field, wire_field in (
+                        ("holiday_start", "start_date"),
+                        ("holiday_end", "end_date"),
+                    ):
+                        fields = [field]
+                        if all(
+                            suggested_values[key] == original_dates[key]
+                            for key in fields
+                        ):
+                            values = replace(
+                                values, **{wire_field: getattr(current, wire_field)}
+                            )
+
+                validation_error = "write_validation_failed"
                 assigned_to = user_input[CONF_HOLIDAY_ASSIGNED_TO]
                 if not isinstance(assigned_to, list) or not all(
                     isinstance(item, str) for item in assigned_to
                 ):
                     raise WriteValidationError("Invalid holiday assignments")
                 values = configure_holiday_values(
-                    displayed.period,
+                    replace(displayed.period, write_values=values),
                     choice.configuration,
                     assigned_to=assigned_to,
                     heating_mode=_holiday_mode_from_form(
@@ -801,8 +912,7 @@ class BoschBuderusOptionsFlow(OptionsFlow):
                     ),
                     fix_temperature=float(
                         user_input.get(
-                            CONF_HOLIDAY_FIX_TEMPERATURE,
-                            current.fix_temperature,
+                            CONF_HOLIDAY_FIX_TEMPERATURE, current.fix_temperature
                         )
                     ),
                 )
@@ -815,23 +925,55 @@ class BoschBuderusOptionsFlow(OptionsFlow):
                     await choice.coordinator.async_update_holiday(
                         holiday_id, values, expected=current
                     )
-            except WriteNotConfirmed:
-                return self._show_holiday_form(choice, error="write_not_confirmed")
-            except RateLimited:
-                return self._show_holiday_form(choice, error="write_rate_limited")
-            except AuthenticationError:
-                return self._show_holiday_form(
-                    choice, error="write_authentication_failed"
+            except HolidayTimeRangeError as err:
+                errors = {"holiday_end": err.translation_key}
+            except HolidayTimeStepError as err:
+                errors = {err.field: err.translation_key}
+            except HolidayTimeError as err:
+                errors = {"base": err.translation_key}
+            except HolidayAlreadyExists as err:
+                return self.async_abort(
+                    reason="holiday_previous_request_found"
+                    if err.previous_request
+                    else "holiday_already_exists"
                 )
+            except HolidayWriteNotConfirmed as err:
+                if err.actual is not None and err.requested is not None:
+                    return self.async_abort(
+                        reason="holiday_create_adjusted"
+                        if creating
+                        else "holiday_update_adjusted",
+                        description_placeholders={
+                            "requested": _holiday_timespan_label(err.requested),
+                            "actual": _holiday_timespan_label(err.actual),
+                        },
+                    )
+                if creating:
+                    return self.async_abort(reason="holiday_create_unconfirmed")
+                errors = {"base": "write_not_confirmed"}
+            except WriteNotConfirmed:
+                if creating:
+                    return self.async_abort(reason="holiday_create_unconfirmed")
+                errors = {"base": "write_not_confirmed"}
+            except RateLimited:
+                errors = {"base": "write_rate_limited"}
+            except AuthenticationError:
+                errors = {"base": "write_authentication_failed"}
             except KeyError, TypeError, ValueError, WriteValidationError:
-                return self._show_holiday_form(choice, error="write_validation_failed")
+                errors = {"base": validation_error}
             except PointTError:
-                return self._show_holiday_form(choice, error="write_failed")
-            return self.async_abort(
-                reason="holiday_created" if creating else "holiday_updated"
-            )
+                errors = {"base": "write_failed"}
+            else:
+                return self.async_abort(
+                    reason="holiday_created" if creating else "holiday_updated"
+                )
+            # A correction must still compare with the values originally shown,
+            # even if polling has since received changes from the appliance app.
+            choice = replace(choice, period=displayed.period, label=displayed.label)
 
-        return self._show_holiday_form(choice)
+        return self._show_holiday_form(
+            choice, errors=errors, suggested_values=suggested_values
+        )
 
     def _holiday_choices(self) -> dict[str, _HolidayChoice] | None:
         runtime = getattr(self._entry, "runtime_data", None)
@@ -913,32 +1055,48 @@ class BoschBuderusOptionsFlow(OptionsFlow):
         )
 
     def _show_holiday_form(
-        self, choice: _HolidayChoice, *, error: str | None = None
+        self,
+        choice: _HolidayChoice,
+        *,
+        errors: dict[str, str] | None = None,
+        suggested_values: dict[str, Any] | None = None,
     ) -> ConfigFlowResult:
         current = choice.period.write_values
         if current is None:
             return self.async_abort(reason="holiday_changed")
         self._displayed_choice = choice
         configuration = choice.configuration
-        fields: dict[vol.Marker, object] = {
-            vol.Required(
-                CONF_HOLIDAY_ASSIGNED_TO, default=list(current.assigned_to)
-            ): SelectSelector(
-                SelectSelectorConfig(
-                    options=[
-                        SelectOptionDict(
-                            value=value,
-                            label=_holiday_circuit_label(
-                                value, self.hass.config.language
-                            ),
-                        )
-                        for value in configuration.assigned_to
-                    ],
-                    multiple=True,
-                    mode=SelectSelectorMode.LIST,
-                )
+        fields: dict[vol.Marker, object] = {}
+        suggestions: dict[str, Any] = {}
+        creating = (self._selected_key or "").startswith("create:")
+        if creating or configuration.name_codec is not None:
+            fields[vol.Required("holiday_name")] = TextSelector()
+            suggestions["holiday_name"] = "" if creating else choice.period.name or ""
+        for field in ("holiday_start", "holiday_end"):
+            fields[vol.Required(field)] = (
+                DateSelector()
+                if configuration.date_time_mode == "date"
+                else HolidayDateTimeSelector(creating=creating)
             )
-        }
+        if creating:
+            suggestions.update(holiday_start="", holiday_end="")
+        else:
+            suggestions.update(_holiday_date_suggestions(choice))
+        fields[
+            vol.Required(CONF_HOLIDAY_ASSIGNED_TO, default=list(current.assigned_to))
+        ] = SelectSelector(
+            SelectSelectorConfig(
+                options=[
+                    SelectOptionDict(
+                        value=value,
+                        label=_holiday_circuit_label(value, self.hass.config.language),
+                    )
+                    for value in configuration.assigned_to
+                ],
+                multiple=True,
+                mode=SelectSelectorMode.LIST,
+            )
+        )
         _add_mode_field(
             fields,
             CONF_HOLIDAY_HEATING_MODE,
@@ -992,12 +1150,40 @@ class BoschBuderusOptionsFlow(OptionsFlow):
             configuration.thermal_disinfection_modes,
             "holiday_thermal_disinfection",
         )
-        return self.async_show_form(
-            step_id="holiday",
-            data_schema=vol.Schema(fields),
-            description_placeholders={"holiday": choice.label},
-            errors={"base": error} if error else None,
+        if not creating:
+            fields[vol.Optional(DELETE_FIELD)] = HolidayDeleteSelector()
+        schema = self.add_suggested_values_to_schema(
+            vol.Schema(fields), {**suggestions, **(suggested_values or {})}
         )
+        return self.async_show_form(
+            step_id="new_holiday" if creating else "holiday",
+            data_schema=HolidayFormSchema(schema.schema),
+            description_placeholders=None if creating else {"holiday": choice.label},
+            errors=errors,
+            last_step=True,
+        )
+
+
+def _holiday_date_suggestions(choice: _HolidayChoice) -> dict[str, str]:
+    """Use selector-compatible local dates, including exclusive end dates."""
+    suggestions: dict[str, str] = {}
+    for field, value in (
+        ("holiday_start", choice.period.start),
+        ("holiday_end", choice.period.end),
+    ):
+        suggestions[field] = (
+            value.date().isoformat()
+            if choice.configuration.date_time_mode == "date"
+            else value.replace(tzinfo=None).isoformat(timespec="minutes")
+        )
+    return suggestions
+
+
+def _holiday_datetime_input(value: str) -> datetime:
+    """Require both a date and an explicit clock in the shared input."""
+    if not isinstance(value, str) or ("T" not in value and " " not in value):
+        raise ValueError("A holiday date and time are required")
+    return datetime.fromisoformat(value)
 
 
 def _add_mode_field(
@@ -1036,6 +1222,11 @@ def _holiday_mode_from_form(
     if not isinstance(submitted, str):
         raise WriteValidationError("Invalid holiday mode")
     return writable_enum_options("holiday_mode", allowed).get(submitted, submitted)
+
+
+def _holiday_timespan_label(period: HolidayPeriod) -> str:
+    """Display the exact exclusive period without exposing it in diagnostics."""
+    return f"{period.start:%Y-%m-%d %H:%M} / {period.end:%Y-%m-%d %H:%M}"
 
 
 def _holiday_label(

@@ -222,12 +222,16 @@ def test_holiday_options_are_translated_and_structurally_aligned() -> None:
         "AUS bei thermischer Desinfektion"
     )
     assert german["options"]["step"]["holiday"]["data"] == {
+        "holiday_name": "Name",
+        "holiday_start": "Beginn",
+        "holiday_end": "Ende (exklusiv)",
         "holiday_assigned_to": "Anwenden auf",
         "holiday_heating_mode": "Heizung",
         "holiday_dhw_mode": "Warmwasser",
         "holiday_ventilation_mode": "Lüftung",
         "holiday_thermal_disinfection": "Thermische Desinfektion",
         "holiday_fix_temperature": "Konstante Temperatur",
+        "holiday_delete": "Urlaubszeit vollständig löschen",
     }
     for translations in (source, german, english):
         for selector in translations["selector"].values():

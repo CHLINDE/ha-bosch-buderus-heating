@@ -28,8 +28,11 @@ from .const import DOMAIN
 from .coordinator import BoschBuderusDataUpdateCoordinator, Freshness
 from .device import device_info_for_resource
 from .holiday_writes import (
+    HolidayAlreadyExists,
     HolidayTimeError,
+    HolidayTimeRangeError,
     HolidayTimeStepError,
+    HolidayWriteNotConfirmed,
     create_holiday_values,
     update_holiday_values,
 )
@@ -44,7 +47,7 @@ from .holidays import (
     parse_holiday_state,
     parse_holiday_write_configuration,
 )
-from .pointt import PointTError, Resource
+from .pointt import PointTError, Resource, WriteNotConfirmed
 
 
 async def async_setup_entry(
@@ -131,7 +134,21 @@ class BoschBuderusHolidayCalendar(
                 self._timezone,
             )
             await self.coordinator.async_create_holiday(values)
-        except (HolidayTimeError, HolidayTimeStepError) as err:
+        except HolidayAlreadyExists as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="holiday_previous_request_found"
+                if err.previous_request
+                else "holiday_already_exists",
+            ) from err
+        except WriteNotConfirmed as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="holiday_write_adjusted"
+                if isinstance(err, HolidayWriteNotConfirmed) and err.actual is not None
+                else "holiday_create_unconfirmed",
+            ) from err
+        except (HolidayTimeError, HolidayTimeRangeError, HolidayTimeStepError) as err:
             raise HomeAssistantError(
                 translation_domain=DOMAIN, translation_key=err.translation_key
             ) from err
@@ -169,7 +186,14 @@ class BoschBuderusHolidayCalendar(
             await self.coordinator.async_update_holiday(
                 holiday_id, values, expected=period.write_values
             )
-        except (HolidayTimeError, HolidayTimeStepError) as err:
+        except WriteNotConfirmed as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="holiday_write_adjusted"
+                if isinstance(err, HolidayWriteNotConfirmed) and err.actual is not None
+                else "holiday_update_unconfirmed",
+            ) from err
+        except (HolidayTimeError, HolidayTimeRangeError, HolidayTimeStepError) as err:
             raise HomeAssistantError(
                 translation_domain=DOMAIN, translation_key=err.translation_key
             ) from err

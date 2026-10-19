@@ -258,17 +258,39 @@ preserved. A newly created period uses the defaults also used by MyBuderus and
 HomeCom Easy: all advertised circuits, 17 °C constant-temperature heating when
 supported, hot water off, ventilation off when supported, and thermal
 disinfection on when supported. These defaults are checked against the actual
-configuration. If a default is not offered, use **Configure → New holiday** to
+configuration. If a default is not offered, use **Configure → Manage holiday
+periods → New holiday** to
 choose dates and the modes provided by your installation before creating it.
 
-To adjust these details in Home Assistant, open **Settings → Devices &
-services → Bosch/Buderus Heating → Configure**, select the holiday, and then
-choose its assigned circuits, heating mode, hot-water mode, ventilation mode,
-thermal-disinfection setting, and constant temperature. The dialog is
-generated from `/holidayMode/configuration`: options not advertised by the
-connected system are not shown. Dates and the name remain in the calendar
-dialog. Every change is read back from PointT before Home Assistant accepts it
-as successful.
+To manage a holiday, open the integration's **Configure → Manage holiday
+periods** dialog. Selecting a saved holiday opens its details directly.
+Change its prefilled name, start and end,
+assigned circuits, heating mode, hot-water mode, ventilation mode,
+thermal-disinfection setting, and constant temperature. Only settings
+supported by the connected system are shown.
+
+When creating a holiday here, start and end times default to **08:00** and
+remain editable. Both dates must be selected explicitly. Existing holidays
+retain their saved times when opened for editing. Creating and editing use
+the same form with supported settings together. Each date has its clock
+directly beside it. The clock fields omit seconds. An end before or equal to the start produces
+a clear message at the end field, while the entered values remain available.
+
+The form saves directly. For an existing holiday, the red **Delete holiday
+period completely** button at the bottom opens confirmation without saving
+the draft. Check the saved name and dates before confirming. Declining
+returns to editing with your unsaved inputs preserved. This also works when
+the unsaved dates are incomplete or invalid.
+The calendar remains an additional way to create, move, rename, or delete
+periods. Every change is read back from PointT before Home Assistant accepts
+it as successful. Notification settings remain accessible from the
+integration's configuration dialog.
+
+Midnight remains 00:00 on the selected date, without conversion to 24:00 or
+rounding. If the system returns different settings, the actual holiday appears
+immediately and the dialog shows the requested and returned periods. An
+unresolved creation is checked again without sending another creation request
+during the same loaded session.
 
 The step-by-step [holiday-period guide](docs/holiday-periods.md) shows how to
 create, configure, move, rename, and delete a period and explains every
@@ -377,7 +399,7 @@ gateway IDs, serial numbers, network identifiers, or unredacted API responses.
 | [Entities and polling](docs/entities.md) | Entity names, API resources, write access, and intervals |
 | [Request behavior and recovery](docs/request-behavior.md) | Exact startup order, successful-once reads, retries, limits and cloud-load savings |
 | [Faults and notifications](docs/faults.md) | Fault entities, lifecycle behavior, and automation examples |
-| [Holiday periods](docs/holiday-periods.md) | Creating calendar entries and configuring heating behavior |
+| [Holiday periods](docs/holiday-periods.md) | Creating, editing, and deleting holidays with their heating settings |
 | [Resource catalog](docs/resource-catalog.md) | Observed PointT resources and terminology |
 | [Reconfiguration](docs/reconfiguration.md) | Gateway selection, rediscovery, and polling profiles |
 | [Diagnostics](docs/diagnostics.md) | Redacted diagnostics and request metrics |

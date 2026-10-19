@@ -75,7 +75,7 @@
         "title": "Settings",
         "menu_options": {
           "notifications": "Notifications",
-          "holidays": "Holiday periods"
+          "holidays": "Manage holiday periods"
         }
       },
       "notifications": {
@@ -86,22 +86,33 @@
         }
       },
       "holidays": {
-        "title": "Configure a holiday",
-        "description": "Select an existing holiday or create a new one. You will choose its heating settings next. You can rename, move, or delete existing holidays in the Holiday periods calendar.",
+        "title": "Manage holiday periods",
+        "description": "Create a holiday or select an existing one to change its name, dates and heating settings, or delete it. The Holiday periods calendar remains available too.",
         "data": {
           "holiday_period": "Holiday"
         }
       },
-      "holiday": {
-        "title": "Configure holiday",
-        "description": "Change the PointT settings for **{holiday}**. Only options advertised by this heating system are shown. The integration writes once and reports success only after every field has been read back and confirmed.",
+      "delete_holiday": {
+        "title": "Delete holiday",
+        "description": "**{holiday}**\n\nDelete this holiday completely? It will also be removed from the heating system and the calendar. Leave the confirmation unchecked to return without deleting.",
         "data": {
+          "confirm_delete": "Delete this holiday completely"
+        }
+      },
+      "holiday": {
+        "title": "Holiday period",
+        "description": "Set the name, period and settings. Choose quarter-hour times: minutes 00, 15, 30 or 45. Normal operation resumes at the end.",
+        "data": {
+          "holiday_name": "Name",
+          "holiday_start": "Start",
+          "holiday_end": "End (exclusive)",
           "holiday_assigned_to": "Apply for",
           "holiday_heating_mode": "Central Heating",
           "holiday_dhw_mode": "Hot Water",
           "holiday_ventilation_mode": "Ventilation",
           "holiday_thermal_disinfection": "Thermal disinfection",
-          "holiday_fix_temperature": "Constant temperature"
+          "holiday_fix_temperature": "Constant temperature",
+          "holiday_delete": "Delete holiday period completely"
         }
       },
       "holiday_gateway": {
@@ -112,34 +123,50 @@
         }
       },
       "new_holiday": {
-        "title": "Create holiday",
-        "description": "Set the period. Times must fall on a quarter hour: minutes 00, 15, 30, or 45 and seconds 00. In the next step, choose the operating modes for your installation.",
+        "title": "Holiday period",
+        "description": "Set the name, period and settings. Choose quarter-hour times: minutes 00, 15, 30 or 45. Normal operation resumes at the end.",
         "data": {
           "holiday_name": "Name",
           "holiday_start": "Start",
-          "holiday_end": "End (exclusive)"
+          "holiday_end": "End (exclusive)",
+          "holiday_assigned_to": "Apply for",
+          "holiday_heating_mode": "Central Heating",
+          "holiday_dhw_mode": "Hot Water",
+          "holiday_ventilation_mode": "Ventilation",
+          "holiday_thermal_disinfection": "Thermal disinfection",
+          "holiday_fix_temperature": "Constant temperature"
         }
       }
     },
     "error": {
       "holiday_changed": "The selected holiday changed while this dialog was open. Close the dialog and try again.",
-      "holiday_time_step": "Choose a quarter-hour time: minutes 00, 15, 30, or 45 and seconds 00.",
+      "invalid_holiday_details": "Please check the name, dates and times you entered.",
+      "delete_failed": "The holiday could not be deleted. Check the connection and open the holiday again before trying to delete it.",
+      "delete_not_confirmed": "The deletion could not be confirmed. Check whether the holiday still exists before trying again.",
+      "holiday_time_step": "Please choose a quarter-hour time: minutes 00, 15, 30 or 45.",
       "holiday_time_nonexistent": "The selected start or end time does not exist because the clock moves forward in the heating system's time zone. Choose another time.",
       "holiday_time_ambiguous": "The selected start or end time occurs twice because the clock moves back in the heating system's time zone. Choose an unambiguous time.",
       "write_authentication_failed": "The cloud sign-in is no longer valid. Reauthenticate Bosch/Buderus Heating before trying again.",
       "write_failed": "The holiday settings could not be changed.",
-      "write_not_confirmed": "The heating system did not confirm every holiday setting. No success was reported.",
+      "write_not_confirmed": "The change could not be fully confirmed. Some settings may already have been saved. Reopen the holiday and check its current settings.",
       "write_rate_limited": "The PointT cloud is currently limiting requests. Wait before trying again.",
-      "write_validation_failed": "At least one selection is no longer supported by the heating system. Close the dialog, refresh the integration, and try again."
+      "write_validation_failed": "At least one selection is no longer supported by the heating system. Close the dialog, refresh the integration, and try again.",
+      "holiday_end_not_after_start": "The end must be after the start. Please choose a later end."
     },
     "abort": {
       "no_notification_gateways": "No heating system is configured.",
       "notification_gateways_changed": "The installation selection changed. Open the settings again.",
-      "holiday_changed": "The selected holiday is no longer available or writable.",
+      "holiday_changed": "The selected holiday has changed or is no longer available for editing. Open the holiday again to review its current details.",
       "holiday_updated": "The holiday settings were saved and confirmed by the heating system.",
-      "no_writable_holidays": "No writable holiday exists. Create one in the Holiday periods calendar first, or wait until the holiday resources are available.",
+      "no_writable_holidays": "Holiday management is currently unavailable. Wait until the installation has provided its holiday settings.",
+      "holiday_deleted": "The holiday was deleted and its removal was confirmed by the heating system.",
       "not_loaded": "Bosch/Buderus Heating must be loaded before a holiday can be configured.",
-      "holiday_created": "The holiday was created and confirmed by reading it back."
+      "holiday_created": "The holiday was created and confirmed by reading it back.",
+      "holiday_previous_request_found": "The earlier unresolved request is now confirmed. Your new inputs were not sent. Check the existing holiday under Manage holiday periods first.",
+      "holiday_already_exists": "A holiday with this start and circuit selection already exists. No additional holiday was created. Open Manage holiday periods and edit the existing entry.",
+      "holiday_create_unconfirmed": "The creation request could not be confirmed. The holiday may already exist. Check Manage holiday periods or the manufacturer app. While this request remains unresolved, another attempt checks its result without creating a second holiday.",
+      "holiday_create_adjusted": "The heating system returned a new holiday, but its settings differ from your request. Requested period: {requested}. Returned period: {actual}. Open Manage holiday periods to check and edit this entry.",
+      "holiday_update_adjusted": "The heating system returned settings that differ from your requested change. Requested period: {requested}. Returned period: {actual}. Open Manage holiday periods to check and edit the current entry."
     }
   },
   "issues": {
@@ -173,18 +200,54 @@
     }
   },
   "exceptions": {
-    "holiday_time_step": { "message": "Choose a quarter-hour time: minutes 00, 15, 30, or 45 and seconds 00." },
-    "holiday_time_nonexistent": { "message": "The selected start or end time does not exist because the clock moves forward in the heating system's time zone. Choose another time." },
-    "holiday_time_ambiguous": { "message": "The selected start or end time occurs twice because the clock moves back in the heating system's time zone. Choose an unambiguous time." },
-    "write_validation_failed": { "message": "This setting is not currently safe to change. Refresh or reconfigure the integration and try again." },
-    "write_not_confirmed": { "message": "The heating system did not confirm the new operating mode. Its previous displayed state has been retained." },
-    "write_authentication_failed": { "message": "The cloud sign-in is no longer valid. Reauthenticate Bosch/Buderus Heating before trying again." },
-    "write_rate_limited": { "message": "The PointT cloud is currently limiting requests. Wait before trying the change again." },
-    "write_failed": { "message": "The operating mode could not be changed. No success was reported because the heating system did not confirm the value." }
+    "holiday_previous_request_found": {
+      "message": "The earlier unresolved request is now confirmed. Your new inputs were not sent. Check the existing holiday under Configure → Manage holiday periods."
+    },
+    "holiday_already_exists": {
+      "message": "A holiday with this start and circuit selection already exists. Edit that entry under Configure → Manage holiday periods."
+    },
+    "holiday_create_unconfirmed": {
+      "message": "Creation could not be confirmed. The holiday may already exist. Check Manage holiday periods or the manufacturer app. Another attempt checks the unresolved request without creating a second holiday."
+    },
+    "holiday_update_unconfirmed": {
+      "message": "The change could not be fully confirmed. Some settings may already have been saved. Check the current holiday under Configure → Manage holiday periods."
+    },
+    "holiday_write_adjusted": {
+      "message": "The heating system returned holiday settings that differ from your request. Check the returned dates and settings under Configure → Manage holiday periods and edit that entry."
+    },
+    "holiday_time_step": {
+      "message": "Choose a quarter-hour time: minutes 00, 15, 30, or 45 and seconds 00."
+    },
+    "holiday_time_nonexistent": {
+      "message": "The selected start or end time does not exist because the clock moves forward in the heating system's time zone. Choose another time."
+    },
+    "holiday_time_ambiguous": {
+      "message": "The selected start or end time occurs twice because the clock moves back in the heating system's time zone. Choose an unambiguous time."
+    },
+    "write_validation_failed": {
+      "message": "This setting is not currently safe to change. Refresh or reconfigure the integration and try again."
+    },
+    "write_not_confirmed": {
+      "message": "The heating system did not confirm the new operating mode. Its previous displayed state has been retained."
+    },
+    "write_authentication_failed": {
+      "message": "The cloud sign-in is no longer valid. Reauthenticate Bosch/Buderus Heating before trying again."
+    },
+    "write_rate_limited": {
+      "message": "The PointT cloud is currently limiting requests. Wait before trying the change again."
+    },
+    "write_failed": {
+      "message": "The operating mode could not be changed. No success was reported because the heating system did not confirm the value."
+    },
+    "holiday_end_not_after_start": {
+      "message": "The end must be after the start. Please choose a later end."
+    }
   },
   "selector": {
     "holiday_period": {
-      "options": { "create": "New holiday" }
+      "options": {
+        "create": "New holiday"
+      }
     },
     "polling_profile": {
       "options": {
@@ -230,60 +293,139 @@
   },
   "entity": {
     "number": {
-      "manual_room_setpoint": { "name": "Manual setpoint" },
-      "heating_temperature": { "name": "Heating" },
-      "reduced_temperature": { "name": "Reduced" },
-      "extra_hot_water_duration": { "name": "Extra hot water duration" },
-      "extra_hot_water_setpoint": { "name": "Extra hot water setpoint" },
-      "hot_water_eco_plus": { "name": "Eco+ start temperature" },
-      "hot_water_comfort": { "name": "Comfort start temperature" },
-      "hot_water_eco": { "name": "Eco start temperature" },
-      "maximum_supply_temperature": { "name": "Maximum supply temperature" }
+      "manual_room_setpoint": {
+        "name": "Manual setpoint"
+      },
+      "heating_temperature": {
+        "name": "Heating"
+      },
+      "reduced_temperature": {
+        "name": "Reduced"
+      },
+      "extra_hot_water_duration": {
+        "name": "Extra hot water duration"
+      },
+      "extra_hot_water_setpoint": {
+        "name": "Extra hot water setpoint"
+      },
+      "hot_water_eco_plus": {
+        "name": "Eco+ start temperature"
+      },
+      "hot_water_comfort": {
+        "name": "Comfort start temperature"
+      },
+      "hot_water_eco": {
+        "name": "Eco start temperature"
+      },
+      "maximum_supply_temperature": {
+        "name": "Maximum supply temperature"
+      }
     },
     "select": {
       "heating_circuit_operation_mode": {
         "name": "Heating circuit operation mode",
-        "state": { "off": "Off", "manual": "Manual", "auto": "Auto" }
+        "state": {
+          "off": "Off",
+          "manual": "Manual",
+          "auto": "Auto"
+        }
       },
       "hot_water_operation_mode": {
         "name": "Hot water operation mode",
-        "state": { "off": "Off", "low": "Eco", "high": "Comfort", "ownprogram": "Auto", "eco": "Eco+" }
+        "state": {
+          "off": "Off",
+          "low": "Eco",
+          "high": "Comfort",
+          "ownprogram": "Auto",
+          "eco": "Eco+"
+        }
       },
       "season_switching": {
         "name": "Season switching",
-        "state": { "off": "Heating/cooling off", "automatic": "Automatic", "forced_heat": "Heating only", "forced_cool": "Cooling only" }
+        "state": {
+          "off": "Heating/cooling off",
+          "automatic": "Automatic",
+          "forced_heat": "Heating only",
+          "forced_cool": "Cooling only"
+        }
       },
       "silent_mode": {
         "name": "Silent mode",
-        "state": { "off": "Off", "auto": "Automatic", "on": "On" }
+        "state": {
+          "off": "Off",
+          "auto": "Automatic",
+          "on": "On"
+        }
       },
       "auxiliary_heater_operation_mode": {
         "name": "Auxiliary heater operation mode",
-        "state": { "off": "Off", "manual": "On", "auto": "Auto" }
+        "state": {
+          "off": "Off",
+          "manual": "On",
+          "auto": "Auto"
+        }
       }
     },
     "switch": {
-      "extra_hot_water": { "name": "Extra hot water" },
-      "reduce_temperature_on_alarm": { "name": "Temperature reduction during fault" },
-      "away_mode": { "name": "Away mode" }
+      "extra_hot_water": {
+        "name": "Extra hot water"
+      },
+      "reduce_temperature_on_alarm": {
+        "name": "Temperature reduction during fault"
+      },
+      "away_mode": {
+        "name": "Away mode"
+      }
     },
     "sensor": {
-      "outdoor_temperature": { "name": "Outdoor temperature" },
-      "supply_temperature": { "name": "Supply temperature" },
-      "return_temperature": { "name": "Return temperature" },
-      "hot_water_temperature": { "name": "Hot water temperature" },
-      "modulation": { "name": "Actual modulation" },
-      "system_pressure": { "name": "System pressure" },
-      "heating_status": { "name": "Heating status" },
-      "hot_water_status": { "name": "Hot water status" },
-      "total_electricity": { "name": "Total – Electricity consumption" },
-      "total_heat_produced": { "name": "Total – Heat produced" },
-      "environmental_energy": { "name": "Total – Environmental energy (calculated)" },
-      "heating_electricity": { "name": "Heating – Electricity consumption" },
-      "heating_heat_produced": { "name": "Heating – Heat produced" },
-      "hot_water_electricity": { "name": "Hot water – Electricity consumption" },
-      "hot_water_heat_produced": { "name": "Hot water – Heat produced" },
-      "calculated_dew_point": { "name": "Dew point (calculated)" },
+      "outdoor_temperature": {
+        "name": "Outdoor temperature"
+      },
+      "supply_temperature": {
+        "name": "Supply temperature"
+      },
+      "return_temperature": {
+        "name": "Return temperature"
+      },
+      "hot_water_temperature": {
+        "name": "Hot water temperature"
+      },
+      "modulation": {
+        "name": "Actual modulation"
+      },
+      "system_pressure": {
+        "name": "System pressure"
+      },
+      "heating_status": {
+        "name": "Heating status"
+      },
+      "hot_water_status": {
+        "name": "Hot water status"
+      },
+      "total_electricity": {
+        "name": "Total – Electricity consumption"
+      },
+      "total_heat_produced": {
+        "name": "Total – Heat produced"
+      },
+      "environmental_energy": {
+        "name": "Total – Environmental energy (calculated)"
+      },
+      "heating_electricity": {
+        "name": "Heating – Electricity consumption"
+      },
+      "heating_heat_produced": {
+        "name": "Heating – Heat produced"
+      },
+      "hot_water_electricity": {
+        "name": "Hot water – Electricity consumption"
+      },
+      "hot_water_heat_produced": {
+        "name": "Hot water – Heat produced"
+      },
+      "calculated_dew_point": {
+        "name": "Dew point (calculated)"
+      },
       "heating_circuit_switch_program_mode": {
         "name": "Heating circuit schedule type",
         "state": {
@@ -294,7 +436,11 @@
       },
       "heating_circuit_operation_mode": {
         "name": "Heating circuit operation mode",
-        "state": { "off": "Off", "manual": "Manual", "auto": "Auto" }
+        "state": {
+          "off": "Off",
+          "manual": "Manual",
+          "auto": "Auto"
+        }
       },
       "heating_circuit_overall_status": {
         "name": "Heating circuit status",
@@ -316,19 +462,36 @@
       },
       "heating_circuit_summer_winter_mode": {
         "name": "Current heating/cooling status",
-        "state": { "off": "Idle", "forced": "Heating", "cooling": "Cooling" }
+        "state": {
+          "off": "Idle",
+          "forced": "Heating",
+          "cooling": "Cooling"
+        }
       },
       "heating_circuit_summer_winter_switch_mode": {
         "name": "Heating/cooling switching",
-        "state": { "off": "Idle", "automatic": "Automatic switching", "forced": "Always heating", "cooling": "Always cooling" }
+        "state": {
+          "off": "Idle",
+          "automatic": "Automatic switching",
+          "forced": "Always heating",
+          "cooling": "Always cooling"
+        }
       },
       "heating_circuit_heat_cool_mode": {
         "name": "Heating/cooling support",
-        "state": { "heat": "Heating only", "cool": "Cooling only", "heat_cool": "Heating and cooling" }
+        "state": {
+          "heat": "Heating only",
+          "cool": "Cooling only",
+          "heat_cool": "Heating and cooling"
+        }
       },
       "heating_circuit_type": {
         "name": "Heating circuit type",
-        "state": { "floor": "Underfloor heating", "radiator": "Radiators", "convector": "Convectors" }
+        "state": {
+          "floor": "Underfloor heating",
+          "radiator": "Radiators",
+          "convector": "Convectors"
+        }
       },
       "heating_circuit_control_type": {
         "name": "Control type",
@@ -358,90 +521,196 @@
       },
       "hot_water_temperature_level": {
         "name": "Hot water temperature level",
-        "state": { "off": "Off", "low": "Eco", "high": "Comfort", "eco": "Eco+" }
+        "state": {
+          "off": "Off",
+          "low": "Eco",
+          "high": "Comfort",
+          "eco": "Eco+"
+        }
       },
       "hot_water_operation_mode": {
         "name": "Hot water operation mode",
-        "state": { "off": "Off", "low": "Eco", "high": "Comfort", "ownprogram": "Auto", "eco": "Eco+", "follow_heating_program": "Follow Heating Program" }
+        "state": {
+          "off": "Off",
+          "low": "Eco",
+          "high": "Comfort",
+          "ownprogram": "Auto",
+          "eco": "Eco+",
+          "follow_heating_program": "Follow Heating Program"
+        }
       },
       "hot_water_overall_status": {
         "name": "Hot water status",
         "state": {
-          "dhw_enabled": "Hot water enabled", "dhw_disabled": "Hot water disabled",
-          "auto": "Automatic", "manual_off": "Off", "manual_on_low": "Eco",
-          "manual_on_eco": "Eco+", "manual_on_high": "Comfort", "extra": "Extra hot water",
-          "away": "Away", "holiday": "Holiday", "floor_drying": "Floor drying",
+          "dhw_enabled": "Hot water enabled",
+          "dhw_disabled": "Hot water disabled",
+          "auto": "Automatic",
+          "manual_off": "Off",
+          "manual_on_low": "Eco",
+          "manual_on_eco": "Eco+",
+          "manual_on_high": "Comfort",
+          "extra": "Extra hot water",
+          "away": "Away",
+          "holiday": "Holiday",
+          "floor_drying": "Floor drying",
           "td": "Thermal disinfection"
         }
       },
       "on_off_state": {
         "name": "Status",
-        "state": { "off": "Off", "on": "On", "stop": "Off", "start": "On" }
+        "state": {
+          "off": "Off",
+          "on": "On",
+          "stop": "Off",
+          "start": "On"
+        }
       },
       "heat_demand": {
         "name": "Current heat demand",
         "state": {
-          "none": "None", "ch": "Heating", "dhw": "Hot water", "frost": "Frost protection",
-          "ch_dhw": "Heating and hot water", "ch_frost": "Heating and frost protection",
+          "none": "None",
+          "ch": "Heating",
+          "dhw": "Hot water",
+          "frost": "Frost protection",
+          "ch_dhw": "Heating and hot water",
+          "ch_frost": "Heating and frost protection",
           "dhw_frost": "Hot water and frost protection",
           "ch_dhw_frost": "Heating, hot water and frost protection"
         }
       },
       "compressor_status": {
         "name": "Compressor status",
-        "state": { "off": "Off", "heating": "Home heating", "cooling": "Home cooling", "dhw": "Hot water", "pool": "Swimming pool heating", "pool_heat": "Home + swimming pool heating", "defrost": "Defrost", "alarm": "Blocked" }
+        "state": {
+          "off": "Off",
+          "heating": "Home heating",
+          "cooling": "Home cooling",
+          "dhw": "Hot water",
+          "pool": "Swimming pool heating",
+          "pool_heat": "Home + swimming pool heating",
+          "defrost": "Defrost",
+          "alarm": "Blocked"
+        }
       },
       "electric_auxiliary_heater_status": {
         "name": "Auxiliary heater status",
-        "state": { "off": "Off", "heating": "Home heating", "dhw": "Hot water", "pool": "Swimming pool heating", "pool_heat": "Home + swimming pool heating", "defrost": "Defrost", "alarm": "Blocked" }
+        "state": {
+          "off": "Off",
+          "heating": "Home heating",
+          "dhw": "Hot water",
+          "pool": "Swimming pool heating",
+          "pool_heat": "Home + swimming pool heating",
+          "defrost": "Defrost",
+          "alarm": "Blocked"
+        }
       },
       "auxiliary_heater_operation_mode": {
         "name": "Auxiliary heater operation mode",
-        "state": { "off": "Off", "manual": "On", "auto": "Auto" }
+        "state": {
+          "off": "Off",
+          "manual": "On",
+          "auto": "Auto"
+        }
       },
       "pv_contact_state": {
         "name": "PV contact status",
-        "state": { "inactive": "Inactive", "active": "Active" }
+        "state": {
+          "inactive": "Inactive",
+          "active": "Active"
+        }
       },
       "data_processing_status": {
         "name": "Data processing status",
-        "state": { "in_progress": "In progress", "completed": "Completed" }
+        "state": {
+          "in_progress": "In progress",
+          "completed": "Completed"
+        }
       },
       "season_optimizer_mode": {
         "name": "Current heating/cooling status",
-        "state": { "off": "Idle", "heating": "Heating", "cooling": "Cooling", "automatic": "Automatic switching", "forced_heat": "Always heating", "forced_cool": "Always cooling" }
+        "state": {
+          "off": "Idle",
+          "heating": "Heating",
+          "cooling": "Cooling",
+          "automatic": "Automatic switching",
+          "forced_heat": "Always heating",
+          "forced_cool": "Always cooling"
+        }
       },
       "isrc_support_status": {
         "name": "iSRC support",
-        "state": { "not_supported_incompatible_controller": "Not supported: incompatible controller", "not_supported_pairing_enabled": "Not supported: pairing enabled", "supported": "Supported", "in_evaluation": "Being evaluated" }
+        "state": {
+          "not_supported_incompatible_controller": "Not supported: incompatible controller",
+          "not_supported_pairing_enabled": "Not supported: pairing enabled",
+          "supported": "Supported",
+          "in_evaluation": "Being evaluated"
+        }
       },
       "heat_pump_type": {
         "name": "Heat pump type",
-        "state": { "air_water": "Air/water", "brine_water": "Brine/water", "exhaust_air": "Exhaust air/water" }
+        "state": {
+          "air_water": "Air/water",
+          "brine_water": "Brine/water",
+          "exhaust_air": "Exhaust air/water"
+        }
       },
       "heat_source_type": {
         "name": "Heat source type",
-        "state": { "no_appliance": "No appliance", "heatpump": "Heat pump", "boiler": "Boiler", "boiler_oil": "Oil boiler", "boiler_gas": "Gas boiler", "boiler_unknown": "Unknown boiler", "hybrid": "Hybrid system" }
+        "state": {
+          "no_appliance": "No appliance",
+          "heatpump": "Heat pump",
+          "boiler": "Boiler",
+          "boiler_oil": "Oil boiler",
+          "boiler_gas": "Gas boiler",
+          "boiler_unknown": "Unknown boiler",
+          "hybrid": "Hybrid system"
+        }
       },
       "system_type": {
         "name": "System type",
-        "state": { "heatpump_single": "Single heat pump", "heatpump_cascade": "Heat pump cascade", "boiler_single": "Single boiler", "hybrid": "Hybrid system" }
+        "state": {
+          "heatpump_single": "Single heat pump",
+          "heatpump_cascade": "Heat pump cascade",
+          "boiler_single": "Single boiler",
+          "hybrid": "Hybrid system"
+        }
       },
       "energy_management_status": {
         "name": "Energy management status",
-        "state": { "not_connected": "Not connected", "inactive": "Inactive", "active_ch": "Active for heating", "active_dhw": "Active for hot water", "active_em": "Active energy management", "connected": "Connected", "active": "Active", "error": "Error" }
+        "state": {
+          "not_connected": "Not connected",
+          "inactive": "Inactive",
+          "active_ch": "Active for heating",
+          "active_dhw": "Active for hot water",
+          "active_em": "Active energy management",
+          "connected": "Connected",
+          "active": "Active",
+          "error": "Error"
+        }
       },
       "outdoor_temperature_source": {
         "name": "Outdoor temperature source",
-        "state": { "appliance": "Heating system", "internet": "Internet", "roomcontroller": "Room controller" }
+        "state": {
+          "appliance": "Heating system",
+          "internet": "Internet",
+          "roomcontroller": "Room controller"
+        }
       },
       "support_status": {
         "name": "Support status",
-        "state": { "not_supported": "Not supported", "supported": "Supported", "active": "Active" }
+        "state": {
+          "not_supported": "Not supported",
+          "supported": "Supported",
+          "active": "Active"
+        }
       },
       "update_status": {
         "name": "Update status",
-        "state": { "idle": "Idle", "running": "Running", "success": "Successful", "failed": "Failed" }
+        "state": {
+          "idle": "Idle",
+          "running": "Running",
+          "success": "Successful",
+          "failed": "Failed"
+        }
       },
       "pressure_status": {
         "name": "System pressure status (calculated)",
@@ -453,22 +722,42 @@
           "critical_high": "Critically high"
         }
       },
-      "active_faults": { "name": "Active faults" },
-      "active_notifications": { "name": "Active notifications" },
-      "next_holiday": { "name": "Next holiday" },
-      "pointt_api_requests_total": { "name": "PointT API requests total" },
-      "pointt_api_requests_last_hour": { "name": "PointT API requests – last hour" },
-      "pointt_api_response_time_last_hour": { "name": "PointT API response time – last hour" }
+      "active_faults": {
+        "name": "Active faults"
+      },
+      "active_notifications": {
+        "name": "Active notifications"
+      },
+      "next_holiday": {
+        "name": "Next holiday"
+      },
+      "pointt_api_requests_total": {
+        "name": "PointT API requests total"
+      },
+      "pointt_api_requests_last_hour": {
+        "name": "PointT API requests – last hour"
+      },
+      "pointt_api_response_time_last_hour": {
+        "name": "PointT API response time – last hour"
+      }
     },
     "binary_sensor": {
-      "holiday_active": { "name": "Holiday mode active" },
-      "system_fault": { "name": "System fault" }
+      "holiday_active": {
+        "name": "Holiday mode active"
+      },
+      "system_fault": {
+        "name": "System fault"
+      }
     },
     "calendar": {
-      "holiday_periods": { "name": "Holiday periods" }
+      "holiday_periods": {
+        "name": "Holiday periods"
+      }
     },
     "event": {
-      "system_notifications": { "name": "System notifications" }
+      "system_notifications": {
+        "name": "System notifications"
+      }
     }
   }
 }

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, cast
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -23,6 +24,7 @@ from .const import (
 from .coordinator import BoschBuderusDataUpdateCoordinator
 from .data import tokens_from_data, tokens_to_data
 from .device import device_info_for_resource
+from .holiday_ui import async_setup_holiday_ui
 from .notifications import async_setup_notifications, async_update_notification_options
 from .pointt import (
     AuthenticationError,
@@ -45,9 +47,16 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 type BoschBuderusConfigEntry = ConfigEntry[BoschBuderusRuntimeData]
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 _ACCOUNT_BACKOFFS: HassKey[dict[str, RateLimitBackoff]] = HassKey(
     f"{DOMAIN}.account_backoffs"
 )
+
+
+async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
+    """Register the holiday form selector when the frontend is available."""
+    await async_setup_holiday_ui(hass)
+    return True
 
 
 async def async_setup_entry(

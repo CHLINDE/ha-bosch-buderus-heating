@@ -5,12 +5,16 @@
       "user": {
         "title": "Heizkonto verbinden",
         "description": "Wähle die Marke der Smartphone-App, mit der deine Heizung bereits verbunden ist. Wähle **Bosch** für die Bosch-App oder **Buderus** für die Buderus-App. Entscheidend ist die App, nicht nur das Logo auf dem Heizgerät.",
-        "data": { "brand": "Marke" }
+        "data": {
+          "brand": "Marke"
+        }
       },
       "auth": {
         "title": "Mit SingleKey ID anmelden",
         "description": "SingleKey ID ist dieselbe Anmeldung, die auch deine Bosch- beziehungsweise Buderus-App verwendet. Nutze dieselbe E-Mail-Adresse oder Mobilnummer und dasselbe Passwort. Du benötigst kein neues Konto; dein Passwort wird **nicht** in Home Assistant eingegeben.\n\n1. Lasse diesen Dialog geöffnet und öffne [SingleKey ID]({authorization_url}) in einem neuen Chrome-Tab. Verwende immer diesen neu erzeugten Link.\n2. Drücke dort `F12` und öffne in den Entwicklertools **Console** beziehungsweise **Konsole**.\n3. Melde dich mit den SingleKey-ID-Zugangsdaten deiner Heizungs-App an.\n4. Nach der Anmeldung kann die Meldung „Haben Sie Netzwerkprobleme?“ erscheinen. Das bedeutet hier normalerweise nur, dass Chrome die `{redirect_scheme}://`-App-Adresse nicht öffnen konnte.\n5. Suche in der Konsole die rote Meldung **Failed to launch** beziehungsweise **Connecting to**. Klicke mit der rechten Maustaste auf die darin blau dargestellte `{redirect_scheme}://`-Adresse und wähle **Linkadresse kopieren** beziehungsweise **Copy link address**.\n6. Kehre zu diesem Dialog zurück, füge die vollständige Adresse unten ein und wähle **OK**. Das Eingabefeld zeigt aus Sicherheitsgründen möglicherweise nur Punkte an.\n\nVerwende die Adresse aus genau diesem Anmeldeversuch und kopiere nicht nur den Parameter `code`. Die vollständige Adresse enthält einen kurzlebigen Einmalcode und darf niemals in einem Issue, Chat, Screenshot oder Protokoll veröffentlicht werden.",
-        "data": { "redirect_url": "Vollständige Weiterleitungsadresse" }
+        "data": {
+          "redirect_url": "Vollständige Weiterleitungsadresse"
+        }
       },
       "auth_wait": {
         "title": "Vor der erneuten Anmeldung warten",
@@ -23,7 +27,9 @@
       "gateways": {
         "title": "Gateways auswählen",
         "description": "Wähle alle Heizungs-Gateways aus, die Home Assistant verwenden soll. In den meisten Häusern gibt es nur ein Gateway; wähle dann einfach den einzigen Eintrag. Die letzten vier Zeichen helfen, Geräte mit gleichem Modellnamen zu unterscheiden.",
-        "data": { "gateway_ids": "Gateways" }
+        "data": {
+          "gateway_ids": "Gateways"
+        }
       },
       "reauth_confirm": {
         "title": "Erneut anmelden",
@@ -32,7 +38,11 @@
       "reconfigure": {
         "title": "Neu konfigurieren und suchen",
         "description": "Wähle App-Marke, Gateways und Abfrageprofil. Beim Speichern wird die Integration neu geladen und sucht alle Ressourcen vollständig neu. Nutze dies nach einem Firmwareupdate oder wenn sich Heizkreise, Warmwassersysteme, Wärmeerzeuger oder Gateways geändert haben. **Standard** liest aktuelle Betriebswerte jede Minute. **Cloud-schonend** reduziert die Cloudzugriffe: Betriebswerte alle zwei Minuten, andere veränderliche Werte seltener. Beim Wechsel der App-Marke ist eine neue SingleKey-ID-Anmeldung erforderlich.",
-        "data": { "brand": "App-Marke", "gateway_ids": "Gateways", "polling_profile": "Abfrageprofil" }
+        "data": {
+          "brand": "App-Marke",
+          "gateway_ids": "Gateways",
+          "polling_profile": "Abfrageprofil"
+        }
       },
       "reconfigure_retry": {
         "title": "Gateway-Suche wiederholen",
@@ -65,7 +75,7 @@
         "title": "Einstellungen",
         "menu_options": {
           "notifications": "Benachrichtigungen",
-          "holidays": "Urlaubszeiten"
+          "holidays": "Urlaubszeiten verwalten"
         }
       },
       "notifications": {
@@ -76,22 +86,33 @@
         }
       },
       "holidays": {
-        "title": "Urlaub konfigurieren",
-        "description": "Wähle eine vorhandene Urlaubszeit oder lege eine neue an. Die Heizungseinstellungen legst du anschließend fest. Vorhandene Urlaubszeiten kannst du im Kalender Urlaubszeiten umbenennen, verschieben oder löschen.",
+        "title": "Urlaubszeiten verwalten",
+        "description": "Lege eine neue Urlaubszeit an oder wähle einen vorhandenen Urlaub aus. Du kannst hier Name, Zeitraum und Heizungseinstellungen ändern oder den Urlaub löschen. Der Kalender Urlaubszeiten steht dir zusätzlich zur Verfügung.",
         "data": {
           "holiday_period": "Urlaub"
         }
       },
-      "holiday": {
-        "title": "Urlaub konfigurieren",
-        "description": "Ändere die PointT-Einstellungen für **{holiday}**. Es werden nur Optionen angezeigt, die diese Heizungsanlage bereitstellt. Die Integration schreibt genau einmal und meldet erst Erfolg, nachdem alle Felder zurückgelesen und bestätigt wurden.",
+      "delete_holiday": {
+        "title": "Urlaubszeit löschen",
+        "description": "**{holiday}**\n\nMöchtest du diesen Urlaub vollständig löschen? Er wird auch aus der Heizungsanlage und dem Kalender entfernt. Lasse die Bestätigung frei, um ohne Löschen zurückzukehren.",
         "data": {
+          "confirm_delete": "Diese Urlaubszeit vollständig löschen"
+        }
+      },
+      "holiday": {
+        "title": "Urlaubszeit",
+        "description": "Lege Name, Zeitraum und Einstellungen fest. Wähle Uhrzeiten in Viertelstunden: Minuten 00, 15, 30 oder 45. Ab dem Ende gilt wieder der normale Betrieb.",
+        "data": {
+          "holiday_name": "Name",
+          "holiday_start": "Beginn",
+          "holiday_end": "Ende (exklusiv)",
           "holiday_assigned_to": "Anwenden auf",
           "holiday_heating_mode": "Heizung",
           "holiday_dhw_mode": "Warmwasser",
           "holiday_ventilation_mode": "Lüftung",
           "holiday_thermal_disinfection": "Thermische Desinfektion",
-          "holiday_fix_temperature": "Konstante Temperatur"
+          "holiday_fix_temperature": "Konstante Temperatur",
+          "holiday_delete": "Urlaubszeit vollständig löschen"
         }
       },
       "holiday_gateway": {
@@ -102,34 +123,50 @@
         }
       },
       "new_holiday": {
-        "title": "Urlaubszeit anlegen",
-        "description": "Lege den Zeitraum fest. Uhrzeiten müssen auf einer vollen Viertelstunde liegen: Minuten 00, 15, 30 oder 45 und Sekunden 00. Im nächsten Schritt wählst du die Betriebsarten deiner Anlage.",
+        "title": "Urlaubszeit",
+        "description": "Lege Name, Zeitraum und Einstellungen fest. Wähle Uhrzeiten in Viertelstunden: Minuten 00, 15, 30 oder 45. Ab dem Ende gilt wieder der normale Betrieb.",
         "data": {
           "holiday_name": "Name",
           "holiday_start": "Beginn",
-          "holiday_end": "Ende (exklusiv)"
+          "holiday_end": "Ende (exklusiv)",
+          "holiday_assigned_to": "Anwenden auf",
+          "holiday_heating_mode": "Heizung",
+          "holiday_dhw_mode": "Warmwasser",
+          "holiday_ventilation_mode": "Lüftung",
+          "holiday_thermal_disinfection": "Thermische Desinfektion",
+          "holiday_fix_temperature": "Konstante Temperatur"
         }
       }
     },
     "error": {
       "holiday_changed": "Der ausgewählte Urlaub wurde geändert, während dieser Dialog geöffnet war. Schließe den Dialog und versuche es erneut.",
-      "holiday_time_step": "Bitte wähle eine volle Viertelstunde: Minuten 00, 15, 30 oder 45 und Sekunden 00.",
+      "invalid_holiday_details": "Bitte prüfe den Namen und die eingegebenen Datums- und Uhrzeitangaben.",
+      "delete_failed": "Die Urlaubszeit konnte nicht gelöscht werden. Prüfe die Verbindung und öffne den Urlaub erneut, bevor du das Löschen wiederholst.",
+      "delete_not_confirmed": "Das Löschen konnte nicht bestätigt werden. Prüfe bitte zuerst, ob die Urlaubszeit noch vorhanden ist.",
+      "holiday_time_step": "Bitte wähle eine volle Viertelstunde: Minuten 00, 15, 30 oder 45.",
       "holiday_time_nonexistent": "Die gewählte Start- oder Endzeit existiert wegen der Zeitumstellung in der Zeitzone der Heizungsanlage nicht. Bitte wähle eine andere Uhrzeit.",
       "holiday_time_ambiguous": "Die gewählte Start- oder Endzeit kommt wegen der Zeitumstellung in der Zeitzone der Heizungsanlage zweimal vor. Bitte wähle eine eindeutige Uhrzeit.",
       "write_authentication_failed": "Die Cloud-Anmeldung ist nicht mehr gültig. Authentifiziere Bosch/Buderus Heating erneut und versuche es danach noch einmal.",
       "write_failed": "Die Urlaubseinstellungen konnten nicht geändert werden.",
-      "write_not_confirmed": "Die Heizungsanlage hat nicht alle Urlaubseinstellungen bestätigt. Es wurde kein Erfolg gemeldet.",
+      "write_not_confirmed": "Die Änderung konnte nicht vollständig bestätigt werden. Einzelne Einstellungen können bereits gespeichert sein. Öffne die Urlaubszeit erneut und prüfe die aktuellen Angaben.",
       "write_rate_limited": "Die PointT-Cloud begrenzt derzeit die Anfragen. Warte, bevor du die Änderung erneut versuchst.",
-      "write_validation_failed": "Mindestens eine Auswahl wird von der Heizungsanlage nicht mehr unterstützt. Schließe den Dialog, aktualisiere die Integration und versuche es erneut."
+      "write_validation_failed": "Mindestens eine Auswahl wird von der Heizungsanlage nicht mehr unterstützt. Schließe den Dialog, aktualisiere die Integration und versuche es erneut.",
+      "holiday_end_not_after_start": "Das Ende muss nach dem Beginn liegen. Bitte wähle ein späteres Ende."
     },
     "abort": {
       "no_notification_gateways": "Es ist keine Anlage konfiguriert.",
       "notification_gateways_changed": "Die Anlagenauswahl wurde geändert. Öffne die Einstellungen erneut.",
-      "holiday_changed": "Der ausgewählte Urlaub ist nicht mehr verfügbar oder schreibbar.",
+      "holiday_changed": "Der ausgewählte Urlaub wurde inzwischen geändert oder kann nicht mehr bearbeitet werden. Öffne ihn erneut, um die aktuellen Angaben zu prüfen.",
       "holiday_updated": "Die Urlaubseinstellungen wurden gespeichert und von der Heizungsanlage bestätigt.",
-      "no_writable_holidays": "Es gibt keinen schreibbaren Urlaub. Erstelle zuerst einen im Kalender Urlaubszeiten oder warte, bis die Urlaubsressourcen verfügbar sind.",
+      "no_writable_holidays": "Die Urlaubsverwaltung ist gerade nicht verfügbar. Warte bitte, bis die Anlage ihre Urlaubseinstellungen bereitgestellt hat.",
+      "holiday_deleted": "Die Urlaubszeit wurde gelöscht. Die Heizungsanlage hat das Entfernen bestätigt.",
       "not_loaded": "Bosch/Buderus Heating muss geladen sein, bevor ein Urlaub konfiguriert werden kann.",
-      "holiday_created": "Die Urlaubszeit wurde angelegt und durch Rücklesen bestätigt."
+      "holiday_created": "Die Urlaubszeit wurde angelegt und durch Rücklesen bestätigt.",
+      "holiday_previous_request_found": "Der zuvor ungeklärte Auftrag ist jetzt bestätigt. Deine neuen Eingaben wurden nicht gesendet. Prüfe zuerst die vorhandene Urlaubszeit unter Urlaubszeiten verwalten.",
+      "holiday_already_exists": "Eine Urlaubszeit mit diesem Beginn und dieser Kreisauswahl ist bereits vorhanden. Es wurde keine weitere angelegt. Öffne Urlaubszeiten verwalten und bearbeite den vorhandenen Eintrag.",
+      "holiday_create_unconfirmed": "Das Anlegen konnte nicht bestätigt werden. Die Urlaubszeit kann bereits vorhanden sein. Prüfe Urlaubszeiten verwalten oder die Hersteller-App. Solange dieser Auftrag ungeklärt ist, prüft ein weiterer Versuch dessen Ergebnis, ohne eine zweite Urlaubszeit anzulegen.",
+      "holiday_create_adjusted": "Die Heizungsanlage meldet eine neue Urlaubszeit zurück, deren Einstellungen von deiner Eingabe abweichen. Gewünschter Zeitraum: {requested}. Zurückgemeldeter Zeitraum: {actual}. Öffne Urlaubszeiten verwalten, um diesen Eintrag zu prüfen und zu bearbeiten.",
+      "holiday_update_adjusted": "Die Heizungsanlage meldet Einstellungen zurück, die von deiner gewünschten Änderung abweichen. Gewünschter Zeitraum: {requested}. Zurückgemeldeter Zeitraum: {actual}. Öffne Urlaubszeiten verwalten, um den aktuellen Eintrag zu prüfen und zu bearbeiten."
     }
   },
   "issues": {
@@ -142,7 +179,9 @@
             "description": "Wähle **Senden**, um diese Integration auf das cloud-schonende Abfrageprofil umzustellen. Aktuelle Betriebswerte werden dann alle zwei statt jede Minute gelesen, Steuerungs- und Energiewerte alle zehn Minuten und langsame Zähler alle dreißig Minuten. Anschließend wird die Integration neu geladen und führt eine vollständige Ressourcensuche aus."
           }
         },
-        "abort": { "entry_not_found": "Der betroffene Bosch/Buderus-Heating-Eintrag existiert nicht mehr." }
+        "abort": {
+          "entry_not_found": "Der betroffene Bosch/Buderus-Heating-Eintrag existiert nicht mehr."
+        }
       }
     },
     "incompatible_firmware": {
@@ -154,26 +193,67 @@
             "description": "Bosch/Buderus Heating hat {conflict_count} bekannte Fähigkeiten gefunden, deren Datentyp oder Einheit nicht mehr zum sicher unterstützten PointT-Schema passt. Wähle **Senden**, um die Integration neu zu laden und alle Fähigkeiten erneut zu prüfen. Falls die Warnung wiederkehrt, lade die Integrationsdiagnose herunter und melde das geänderte Schema, ohne Zugangsdaten oder Rohwerte zu teilen."
           }
         },
-        "abort": { "entry_not_found": "Der betroffene Bosch/Buderus-Heating-Eintrag existiert nicht mehr." }
+        "abort": {
+          "entry_not_found": "Der betroffene Bosch/Buderus-Heating-Eintrag existiert nicht mehr."
+        }
       }
     }
   },
   "exceptions": {
-    "holiday_time_step": { "message": "Bitte wähle eine volle Viertelstunde: Minuten 00, 15, 30 oder 45 und Sekunden 00." },
-    "holiday_time_nonexistent": { "message": "Die gewählte Start- oder Endzeit existiert wegen der Zeitumstellung in der Zeitzone der Heizungsanlage nicht. Bitte wähle eine andere Uhrzeit." },
-    "holiday_time_ambiguous": { "message": "Die gewählte Start- oder Endzeit kommt wegen der Zeitumstellung in der Zeitzone der Heizungsanlage zweimal vor. Bitte wähle eine eindeutige Uhrzeit." },
-    "write_validation_failed": { "message": "Diese Einstellung kann derzeit nicht sicher geändert werden. Aktualisiere oder konfiguriere die Integration neu und versuche es erneut." },
-    "write_not_confirmed": { "message": "Die Heizungsanlage hat die neue Betriebsart nicht bestätigt. Der zuvor angezeigte Zustand bleibt erhalten." },
-    "write_authentication_failed": { "message": "Die Cloud-Anmeldung ist nicht mehr gültig. Authentifiziere Bosch/Buderus Heating erneut und versuche es danach noch einmal." },
-    "write_rate_limited": { "message": "Die PointT-Cloud begrenzt derzeit die Anfragen. Warte, bevor du die Änderung erneut versuchst." },
-    "write_failed": { "message": "Die Betriebsart konnte nicht geändert werden. Es wird kein Erfolg gemeldet, weil die Heizungsanlage den Wert nicht bestätigt hat." }
+    "holiday_previous_request_found": {
+      "message": "Der zuvor ungeklärte Auftrag ist jetzt bestätigt. Deine neuen Eingaben wurden nicht gesendet. Prüfe die vorhandene Urlaubszeit unter Konfigurieren → Urlaubszeiten verwalten."
+    },
+    "holiday_already_exists": {
+      "message": "Eine Urlaubszeit mit diesem Beginn und dieser Kreisauswahl ist bereits vorhanden. Bearbeite diesen Eintrag unter Konfigurieren → Urlaubszeiten verwalten."
+    },
+    "holiday_create_unconfirmed": {
+      "message": "Das Anlegen konnte nicht bestätigt werden. Die Urlaubszeit kann bereits vorhanden sein. Prüfe Urlaubszeiten verwalten oder die Hersteller-App. Ein weiterer Versuch prüft den ungeklärten Auftrag, ohne eine zweite Urlaubszeit anzulegen."
+    },
+    "holiday_update_unconfirmed": {
+      "message": "Die Änderung konnte nicht vollständig bestätigt werden. Einzelne Einstellungen können bereits gespeichert sein. Prüfe die aktuelle Urlaubszeit unter Konfigurieren → Urlaubszeiten verwalten."
+    },
+    "holiday_write_adjusted": {
+      "message": "Die Heizungsanlage meldet Urlaubseinstellungen zurück, die von deiner Eingabe abweichen. Prüfe die zurückgemeldeten Datumsangaben und Einstellungen unter Konfigurieren → Urlaubszeiten verwalten und bearbeite diesen Eintrag."
+    },
+    "holiday_time_step": {
+      "message": "Bitte wähle eine volle Viertelstunde: Minuten 00, 15, 30 oder 45 und Sekunden 00."
+    },
+    "holiday_time_nonexistent": {
+      "message": "Die gewählte Start- oder Endzeit existiert wegen der Zeitumstellung in der Zeitzone der Heizungsanlage nicht. Bitte wähle eine andere Uhrzeit."
+    },
+    "holiday_time_ambiguous": {
+      "message": "Die gewählte Start- oder Endzeit kommt wegen der Zeitumstellung in der Zeitzone der Heizungsanlage zweimal vor. Bitte wähle eine eindeutige Uhrzeit."
+    },
+    "write_validation_failed": {
+      "message": "Diese Einstellung kann derzeit nicht sicher geändert werden. Aktualisiere oder konfiguriere die Integration neu und versuche es erneut."
+    },
+    "write_not_confirmed": {
+      "message": "Die Heizungsanlage hat die neue Betriebsart nicht bestätigt. Der zuvor angezeigte Zustand bleibt erhalten."
+    },
+    "write_authentication_failed": {
+      "message": "Die Cloud-Anmeldung ist nicht mehr gültig. Authentifiziere Bosch/Buderus Heating erneut und versuche es danach noch einmal."
+    },
+    "write_rate_limited": {
+      "message": "Die PointT-Cloud begrenzt derzeit die Anfragen. Warte, bevor du die Änderung erneut versuchst."
+    },
+    "write_failed": {
+      "message": "Die Betriebsart konnte nicht geändert werden. Es wird kein Erfolg gemeldet, weil die Heizungsanlage den Wert nicht bestätigt hat."
+    },
+    "holiday_end_not_after_start": {
+      "message": "Das Ende muss nach dem Beginn liegen. Bitte wähle ein späteres Ende."
+    }
   },
   "selector": {
     "holiday_period": {
-      "options": { "create": "Neue Urlaubszeit" }
+      "options": {
+        "create": "Neue Urlaubszeit"
+      }
     },
     "polling_profile": {
-      "options": { "standard": "Standard", "cloud_friendly": "Cloud-schonend" }
+      "options": {
+        "standard": "Standard",
+        "cloud_friendly": "Cloud-schonend"
+      }
     },
     "holiday_heating_mode": {
       "options": {
@@ -205,65 +285,147 @@
       }
     },
     "holiday_thermal_disinfection": {
-      "options": { "on": "EIN", "off": "AUS" }
+      "options": {
+        "on": "EIN",
+        "off": "AUS"
+      }
     }
   },
   "entity": {
     "number": {
-      "manual_room_setpoint": { "name": "Manueller Sollwert" },
-      "heating_temperature": { "name": "Heizen" },
-      "reduced_temperature": { "name": "Absenken" },
-      "extra_hot_water_duration": { "name": "Dauer Extra-Warmwasser" },
-      "extra_hot_water_setpoint": { "name": "Solltemperatur Extra-Warmwasser" },
-      "hot_water_eco_plus": { "name": "Eco+ Starttemperatur" },
-      "hot_water_comfort": { "name": "Komfort Starttemperatur" },
-      "hot_water_eco": { "name": "Eco Starttemperatur" },
-      "maximum_supply_temperature": { "name": "Maximale Vorlauftemperatur" }
+      "manual_room_setpoint": {
+        "name": "Manueller Sollwert"
+      },
+      "heating_temperature": {
+        "name": "Heizen"
+      },
+      "reduced_temperature": {
+        "name": "Absenken"
+      },
+      "extra_hot_water_duration": {
+        "name": "Dauer Extra-Warmwasser"
+      },
+      "extra_hot_water_setpoint": {
+        "name": "Solltemperatur Extra-Warmwasser"
+      },
+      "hot_water_eco_plus": {
+        "name": "Eco+ Starttemperatur"
+      },
+      "hot_water_comfort": {
+        "name": "Komfort Starttemperatur"
+      },
+      "hot_water_eco": {
+        "name": "Eco Starttemperatur"
+      },
+      "maximum_supply_temperature": {
+        "name": "Maximale Vorlauftemperatur"
+      }
     },
     "select": {
       "heating_circuit_operation_mode": {
         "name": "Betriebsart",
-        "state": { "off": "Aus", "manual": "Manuell", "auto": "Auto" }
+        "state": {
+          "off": "Aus",
+          "manual": "Manuell",
+          "auto": "Auto"
+        }
       },
       "hot_water_operation_mode": {
         "name": "Betriebsart",
-        "state": { "off": "Aus", "low": "Eco", "high": "Komfort", "ownprogram": "Auto", "eco": "Eco+" }
+        "state": {
+          "off": "Aus",
+          "low": "Eco",
+          "high": "Komfort",
+          "ownprogram": "Auto",
+          "eco": "Eco+"
+        }
       },
       "season_switching": {
         "name": "Saisonumschaltung",
-        "state": { "off": "Heizen/Kühlen aus", "automatic": "Automatisch", "forced_heat": "Nur Heizbetrieb", "forced_cool": "Nur Kühlbetrieb" }
+        "state": {
+          "off": "Heizen/Kühlen aus",
+          "automatic": "Automatisch",
+          "forced_heat": "Nur Heizbetrieb",
+          "forced_cool": "Nur Kühlbetrieb"
+        }
       },
       "silent_mode": {
         "name": "Silent Mode",
-        "state": { "off": "Aus", "auto": "Automatisch", "on": "Ein" }
+        "state": {
+          "off": "Aus",
+          "auto": "Automatisch",
+          "on": "Ein"
+        }
       },
       "auxiliary_heater_operation_mode": {
         "name": "Betriebsart des Zuheizers",
-        "state": { "off": "Aus", "manual": "Ein", "auto": "Auto" }
+        "state": {
+          "off": "Aus",
+          "manual": "Ein",
+          "auto": "Auto"
+        }
       }
     },
     "switch": {
-      "extra_hot_water": { "name": "Extra-Warmwasser" },
-      "reduce_temperature_on_alarm": { "name": "Temperaturabsenkung bei Störung" },
-      "away_mode": { "name": "Abwesenheitsmodus" }
+      "extra_hot_water": {
+        "name": "Extra-Warmwasser"
+      },
+      "reduce_temperature_on_alarm": {
+        "name": "Temperaturabsenkung bei Störung"
+      },
+      "away_mode": {
+        "name": "Abwesenheitsmodus"
+      }
     },
     "sensor": {
-      "outdoor_temperature": { "name": "Außentemperatur" },
-      "supply_temperature": { "name": "Vorlauftemperatur" },
-      "return_temperature": { "name": "Rücklauftemperatur" },
-      "hot_water_temperature": { "name": "Warmwassertemperatur" },
-      "modulation": { "name": "Aktuelle Modulation" },
-      "system_pressure": { "name": "Systemdruck" },
-      "heating_status": { "name": "Heizstatus" },
-      "hot_water_status": { "name": "Warmwasserstatus" },
-      "total_electricity": { "name": "Gesamt – Stromverbrauch" },
-      "total_heat_produced": { "name": "Gesamt – Erzeugte Wärme" },
-      "environmental_energy": { "name": "Gesamt – Umweltenergie (berechnet)" },
-      "heating_electricity": { "name": "Heizung – Stromverbrauch" },
-      "heating_heat_produced": { "name": "Heizung – Erzeugte Wärme" },
-      "hot_water_electricity": { "name": "Warmwasser – Stromverbrauch" },
-      "hot_water_heat_produced": { "name": "Warmwasser – Erzeugte Wärme" },
-      "calculated_dew_point": { "name": "Taupunkt (berechnet)" },
+      "outdoor_temperature": {
+        "name": "Außentemperatur"
+      },
+      "supply_temperature": {
+        "name": "Vorlauftemperatur"
+      },
+      "return_temperature": {
+        "name": "Rücklauftemperatur"
+      },
+      "hot_water_temperature": {
+        "name": "Warmwassertemperatur"
+      },
+      "modulation": {
+        "name": "Aktuelle Modulation"
+      },
+      "system_pressure": {
+        "name": "Systemdruck"
+      },
+      "heating_status": {
+        "name": "Heizstatus"
+      },
+      "hot_water_status": {
+        "name": "Warmwasserstatus"
+      },
+      "total_electricity": {
+        "name": "Gesamt – Stromverbrauch"
+      },
+      "total_heat_produced": {
+        "name": "Gesamt – Erzeugte Wärme"
+      },
+      "environmental_energy": {
+        "name": "Gesamt – Umweltenergie (berechnet)"
+      },
+      "heating_electricity": {
+        "name": "Heizung – Stromverbrauch"
+      },
+      "heating_heat_produced": {
+        "name": "Heizung – Erzeugte Wärme"
+      },
+      "hot_water_electricity": {
+        "name": "Warmwasser – Stromverbrauch"
+      },
+      "hot_water_heat_produced": {
+        "name": "Warmwasser – Erzeugte Wärme"
+      },
+      "calculated_dew_point": {
+        "name": "Taupunkt (berechnet)"
+      },
       "heating_circuit_switch_program_mode": {
         "name": "Art des Zeitprogramms",
         "state": {
@@ -272,46 +434,330 @@
           "absolute": "Frei einstellbare Temperaturen"
         }
       },
-      "heating_circuit_operation_mode": { "name": "Betriebsart", "state": { "off": "Aus", "manual": "Manuell", "auto": "Auto" } },
-      "heating_circuit_overall_status": { "name": "Betriebsstatus", "state": { "ch_enabled": "Heizen aktiviert", "ch_disabled": "Heizen deaktiviert", "emergency_mode": "Notbetrieb", "floor_drying": "Estrichtrocknung", "summer_idle": "Sommerpause", "boost": "Schnellaufheizung", "away": "Abwesend", "holiday": "Urlaub", "cooling_manual_on": "Kühlen manuell aktiv", "cooling_manual_off": "Kühlen manuell aus", "heating_manual_on": "Heizen manuell aktiv", "heating_manual_off": "Heizen manuell aus", "heating_auto": "Heizen automatisch" } },
-      "heating_circuit_summer_winter_mode": { "name": "Aktueller Heiz-/Kühlstatus", "state": { "off": "Standby", "forced": "Heizen", "cooling": "Kühlen" } },
-      "heating_circuit_summer_winter_switch_mode": { "name": "Heiz-/Kühlumschaltung", "state": { "off": "Standby", "automatic": "Automatische Umschaltung", "forced": "Nur Heizbetrieb", "cooling": "Nur Kühlbetrieb" } },
-      "heating_circuit_heat_cool_mode": { "name": "Unterstützte Betriebsarten", "state": { "heat": "Nur Heizen", "cool": "Nur Kühlen", "heat_cool": "Heizen und Kühlen" } },
-      "heating_circuit_type": { "name": "Heizsystem", "state": { "floor": "Fußbodenheizung", "radiator": "Heizkörper", "convector": "Konvektoren" } },
-      "heating_circuit_control_type": { "name": "Regelungsart", "state": { "room": "Raumtemperaturgeführt", "outdoor": "Außentemperaturgeführt", "wdc": "Witterungsgeführt", "wdcoptimized": "Witterungsgeführt optimiert", "wdcsimplified": "Witterungsgeführt vereinfacht", "mpc": "Modellprädiktive Regelung", "room_flow_temperature": "Raumgeführte Vorlauftemperatur", "room_power": "Raumgeführte Leistung", "constant": "Konstantregelung", "valve_feedback_control": "Ventilrückführungsregelung", "isrc": "Einzelraumregelung (iSRC)", "vbh": "VBH", "external": "Externe Regelung" } },
-      "heating_circuit_cooling_control_type": { "name": "Kühlungs-Regelungsart", "state": { "constant": "Konstante Temperatur", "rtcc_with_dewpoint": "Raumtemperaturregelung mit Taupunktüberwachung", "rtcc_no_dewpoint": "Raumtemperaturregelung ohne Taupunktüberwachung" } },
-      "hot_water_temperature_level": { "name": "Warmwasser-Temperaturniveau", "state": { "off": "Aus", "low": "Eco", "high": "Komfort", "eco": "Eco+" } },
-      "hot_water_operation_mode": { "name": "Warmwasser-Betriebsart", "state": { "off": "Aus", "low": "Eco", "high": "Komfort", "ownprogram": "Auto", "eco": "Eco+", "follow_heating_program": "Wie Zeitprogramm für Heizung" } },
-      "hot_water_overall_status": { "name": "Warmwasserstatus", "state": { "dhw_enabled": "Warmwasser aktiviert", "dhw_disabled": "Warmwasser deaktiviert", "auto": "Automatisch", "manual_off": "Aus", "manual_on_low": "Eco", "manual_on_eco": "Eco+", "manual_on_high": "Komfort", "extra": "Extra-Warmwasser", "away": "Abwesend", "holiday": "Urlaub", "floor_drying": "Estrichtrocknung", "td": "Thermische Desinfektion" } },
-      "on_off_state": { "name": "Status", "state": { "off": "Aus", "on": "Ein", "stop": "Aus", "start": "Ein" } },
-      "heat_demand": { "name": "Aktuelle Wärmeanforderung", "state": { "none": "Keine", "ch": "Heizung", "dhw": "Warmwasser", "frost": "Frostschutz", "ch_dhw": "Heizung und Warmwasser", "ch_frost": "Heizung und Frostschutz", "dhw_frost": "Warmwasser und Frostschutz", "ch_dhw_frost": "Heizung, Warmwasser und Frostschutz" } },
-      "compressor_status": { "name": "Status Kompressor", "state": { "off": "AUS", "heating": "Heizen", "cooling": "Kühlung Zuhause", "dhw": "Warmwasser", "pool": "Heizung Pool", "pool_heat": "Heizen + Pool", "defrost": "Abtauen", "alarm": "Blockiert" } },
-      "electric_auxiliary_heater_status": { "name": "Status elektrischer Zuheizer", "state": { "off": "AUS", "heating": "Heizen", "dhw": "Warmwasser", "pool": "Poolheizung", "pool_heat": "Heizen + Pool", "defrost": "Abtauen", "alarm": "Blockiert" } },
-      "auxiliary_heater_operation_mode": { "name": "Betriebsart des Zuheizers", "state": { "off": "AUS", "manual": "EIN", "auto": "Auto" } },
-      "pv_contact_state": { "name": "PV-Kontaktstatus", "state": { "inactive": "Inaktiv", "active": "Aktiv" } },
-      "data_processing_status": { "name": "Datenverarbeitungsstatus", "state": { "in_progress": "In Bearbeitung", "completed": "Abgeschlossen" } },
-      "season_optimizer_mode": { "name": "Aktueller Heiz-/Kühlstatus", "state": { "off": "Inaktiv", "heating": "Heizen", "cooling": "Kühlen", "automatic": "Automatische Umschaltung", "forced_heat": "Nur Heizbetrieb", "forced_cool": "Nur Kühlbetrieb" } },
-      "isrc_support_status": { "name": "iSRC-Unterstützung", "state": { "not_supported_incompatible_controller": "Nicht unterstützt: inkompatibler Regler", "not_supported_pairing_enabled": "Nicht unterstützt: Kopplungsmodus aktiv", "supported": "Unterstützt", "in_evaluation": "Wird geprüft" } },
-      "heat_pump_type": { "name": "Wärmepumpentyp", "state": { "air_water": "Luft/Wasser", "brine_water": "Sole/Wasser", "exhaust_air": "Abluft/Wasser" } },
-      "heat_source_type": { "name": "Wärmeerzeugertyp", "state": { "no_appliance": "Kein Wärmeerzeuger", "heatpump": "Wärmepumpe", "boiler": "Heizkessel", "boiler_oil": "Öl-Heizkessel", "boiler_gas": "Gas-Heizkessel", "boiler_unknown": "Unbekannter Heizkessel", "hybrid": "Hybridsystem" } },
-      "system_type": { "name": "Anlagentyp", "state": { "heatpump_single": "Einzelne Wärmepumpe", "heatpump_cascade": "Wärmepumpenkaskade", "boiler_single": "Einzelner Heizkessel", "hybrid": "Hybridsystem" } },
-      "energy_management_status": { "name": "Energiemanagement-Status", "state": { "not_connected": "Nicht verbunden", "inactive": "Inaktiv", "active_ch": "Aktiv für Heizung", "active_dhw": "Aktiv für Warmwasser", "active_em": "Energiemanagement aktiv", "connected": "Verbunden", "active": "Aktiv", "error": "Fehler" } },
-      "outdoor_temperature_source": { "name": "Quelle der Außentemperatur", "state": { "appliance": "Heizungsanlage", "internet": "Internet", "roomcontroller": "Raumregler" } },
-      "support_status": { "name": "Unterstützungsstatus", "state": { "not_supported": "Nicht unterstützt", "supported": "Unterstützt", "active": "Aktiv" } },
-      "update_status": { "name": "Updatestatus", "state": { "idle": "Bereit", "running": "Läuft", "success": "Erfolgreich", "failed": "Fehlgeschlagen" } },
-      "pressure_status": { "name": "Systemdruckstatus (berechnet)", "state": { "critical_low": "Kritisch niedrig", "low": "Niedrig", "normal": "Normal", "high": "Hoch", "critical_high": "Kritisch hoch" } },
-      "active_faults": { "name": "Aktive Störungen" },
-      "active_notifications": { "name": "Aktive Meldungen" },
-      "next_holiday": { "name": "Nächster Urlaub" },
-      "pointt_api_requests_total": { "name": "PointT-API-Aufrufe gesamt" },
-      "pointt_api_requests_last_hour": { "name": "PointT-API-Aufrufe – letzte Stunde" },
-      "pointt_api_response_time_last_hour": { "name": "PointT-API-Antwortzeit – letzte Stunde" }
+      "heating_circuit_operation_mode": {
+        "name": "Betriebsart",
+        "state": {
+          "off": "Aus",
+          "manual": "Manuell",
+          "auto": "Auto"
+        }
+      },
+      "heating_circuit_overall_status": {
+        "name": "Betriebsstatus",
+        "state": {
+          "ch_enabled": "Heizen aktiviert",
+          "ch_disabled": "Heizen deaktiviert",
+          "emergency_mode": "Notbetrieb",
+          "floor_drying": "Estrichtrocknung",
+          "summer_idle": "Sommerpause",
+          "boost": "Schnellaufheizung",
+          "away": "Abwesend",
+          "holiday": "Urlaub",
+          "cooling_manual_on": "Kühlen manuell aktiv",
+          "cooling_manual_off": "Kühlen manuell aus",
+          "heating_manual_on": "Heizen manuell aktiv",
+          "heating_manual_off": "Heizen manuell aus",
+          "heating_auto": "Heizen automatisch"
+        }
+      },
+      "heating_circuit_summer_winter_mode": {
+        "name": "Aktueller Heiz-/Kühlstatus",
+        "state": {
+          "off": "Standby",
+          "forced": "Heizen",
+          "cooling": "Kühlen"
+        }
+      },
+      "heating_circuit_summer_winter_switch_mode": {
+        "name": "Heiz-/Kühlumschaltung",
+        "state": {
+          "off": "Standby",
+          "automatic": "Automatische Umschaltung",
+          "forced": "Nur Heizbetrieb",
+          "cooling": "Nur Kühlbetrieb"
+        }
+      },
+      "heating_circuit_heat_cool_mode": {
+        "name": "Unterstützte Betriebsarten",
+        "state": {
+          "heat": "Nur Heizen",
+          "cool": "Nur Kühlen",
+          "heat_cool": "Heizen und Kühlen"
+        }
+      },
+      "heating_circuit_type": {
+        "name": "Heizsystem",
+        "state": {
+          "floor": "Fußbodenheizung",
+          "radiator": "Heizkörper",
+          "convector": "Konvektoren"
+        }
+      },
+      "heating_circuit_control_type": {
+        "name": "Regelungsart",
+        "state": {
+          "room": "Raumtemperaturgeführt",
+          "outdoor": "Außentemperaturgeführt",
+          "wdc": "Witterungsgeführt",
+          "wdcoptimized": "Witterungsgeführt optimiert",
+          "wdcsimplified": "Witterungsgeführt vereinfacht",
+          "mpc": "Modellprädiktive Regelung",
+          "room_flow_temperature": "Raumgeführte Vorlauftemperatur",
+          "room_power": "Raumgeführte Leistung",
+          "constant": "Konstantregelung",
+          "valve_feedback_control": "Ventilrückführungsregelung",
+          "isrc": "Einzelraumregelung (iSRC)",
+          "vbh": "VBH",
+          "external": "Externe Regelung"
+        }
+      },
+      "heating_circuit_cooling_control_type": {
+        "name": "Kühlungs-Regelungsart",
+        "state": {
+          "constant": "Konstante Temperatur",
+          "rtcc_with_dewpoint": "Raumtemperaturregelung mit Taupunktüberwachung",
+          "rtcc_no_dewpoint": "Raumtemperaturregelung ohne Taupunktüberwachung"
+        }
+      },
+      "hot_water_temperature_level": {
+        "name": "Warmwasser-Temperaturniveau",
+        "state": {
+          "off": "Aus",
+          "low": "Eco",
+          "high": "Komfort",
+          "eco": "Eco+"
+        }
+      },
+      "hot_water_operation_mode": {
+        "name": "Warmwasser-Betriebsart",
+        "state": {
+          "off": "Aus",
+          "low": "Eco",
+          "high": "Komfort",
+          "ownprogram": "Auto",
+          "eco": "Eco+",
+          "follow_heating_program": "Wie Zeitprogramm für Heizung"
+        }
+      },
+      "hot_water_overall_status": {
+        "name": "Warmwasserstatus",
+        "state": {
+          "dhw_enabled": "Warmwasser aktiviert",
+          "dhw_disabled": "Warmwasser deaktiviert",
+          "auto": "Automatisch",
+          "manual_off": "Aus",
+          "manual_on_low": "Eco",
+          "manual_on_eco": "Eco+",
+          "manual_on_high": "Komfort",
+          "extra": "Extra-Warmwasser",
+          "away": "Abwesend",
+          "holiday": "Urlaub",
+          "floor_drying": "Estrichtrocknung",
+          "td": "Thermische Desinfektion"
+        }
+      },
+      "on_off_state": {
+        "name": "Status",
+        "state": {
+          "off": "Aus",
+          "on": "Ein",
+          "stop": "Aus",
+          "start": "Ein"
+        }
+      },
+      "heat_demand": {
+        "name": "Aktuelle Wärmeanforderung",
+        "state": {
+          "none": "Keine",
+          "ch": "Heizung",
+          "dhw": "Warmwasser",
+          "frost": "Frostschutz",
+          "ch_dhw": "Heizung und Warmwasser",
+          "ch_frost": "Heizung und Frostschutz",
+          "dhw_frost": "Warmwasser und Frostschutz",
+          "ch_dhw_frost": "Heizung, Warmwasser und Frostschutz"
+        }
+      },
+      "compressor_status": {
+        "name": "Status Kompressor",
+        "state": {
+          "off": "AUS",
+          "heating": "Heizen",
+          "cooling": "Kühlung Zuhause",
+          "dhw": "Warmwasser",
+          "pool": "Heizung Pool",
+          "pool_heat": "Heizen + Pool",
+          "defrost": "Abtauen",
+          "alarm": "Blockiert"
+        }
+      },
+      "electric_auxiliary_heater_status": {
+        "name": "Status elektrischer Zuheizer",
+        "state": {
+          "off": "AUS",
+          "heating": "Heizen",
+          "dhw": "Warmwasser",
+          "pool": "Poolheizung",
+          "pool_heat": "Heizen + Pool",
+          "defrost": "Abtauen",
+          "alarm": "Blockiert"
+        }
+      },
+      "auxiliary_heater_operation_mode": {
+        "name": "Betriebsart des Zuheizers",
+        "state": {
+          "off": "AUS",
+          "manual": "EIN",
+          "auto": "Auto"
+        }
+      },
+      "pv_contact_state": {
+        "name": "PV-Kontaktstatus",
+        "state": {
+          "inactive": "Inaktiv",
+          "active": "Aktiv"
+        }
+      },
+      "data_processing_status": {
+        "name": "Datenverarbeitungsstatus",
+        "state": {
+          "in_progress": "In Bearbeitung",
+          "completed": "Abgeschlossen"
+        }
+      },
+      "season_optimizer_mode": {
+        "name": "Aktueller Heiz-/Kühlstatus",
+        "state": {
+          "off": "Inaktiv",
+          "heating": "Heizen",
+          "cooling": "Kühlen",
+          "automatic": "Automatische Umschaltung",
+          "forced_heat": "Nur Heizbetrieb",
+          "forced_cool": "Nur Kühlbetrieb"
+        }
+      },
+      "isrc_support_status": {
+        "name": "iSRC-Unterstützung",
+        "state": {
+          "not_supported_incompatible_controller": "Nicht unterstützt: inkompatibler Regler",
+          "not_supported_pairing_enabled": "Nicht unterstützt: Kopplungsmodus aktiv",
+          "supported": "Unterstützt",
+          "in_evaluation": "Wird geprüft"
+        }
+      },
+      "heat_pump_type": {
+        "name": "Wärmepumpentyp",
+        "state": {
+          "air_water": "Luft/Wasser",
+          "brine_water": "Sole/Wasser",
+          "exhaust_air": "Abluft/Wasser"
+        }
+      },
+      "heat_source_type": {
+        "name": "Wärmeerzeugertyp",
+        "state": {
+          "no_appliance": "Kein Wärmeerzeuger",
+          "heatpump": "Wärmepumpe",
+          "boiler": "Heizkessel",
+          "boiler_oil": "Öl-Heizkessel",
+          "boiler_gas": "Gas-Heizkessel",
+          "boiler_unknown": "Unbekannter Heizkessel",
+          "hybrid": "Hybridsystem"
+        }
+      },
+      "system_type": {
+        "name": "Anlagentyp",
+        "state": {
+          "heatpump_single": "Einzelne Wärmepumpe",
+          "heatpump_cascade": "Wärmepumpenkaskade",
+          "boiler_single": "Einzelner Heizkessel",
+          "hybrid": "Hybridsystem"
+        }
+      },
+      "energy_management_status": {
+        "name": "Energiemanagement-Status",
+        "state": {
+          "not_connected": "Nicht verbunden",
+          "inactive": "Inaktiv",
+          "active_ch": "Aktiv für Heizung",
+          "active_dhw": "Aktiv für Warmwasser",
+          "active_em": "Energiemanagement aktiv",
+          "connected": "Verbunden",
+          "active": "Aktiv",
+          "error": "Fehler"
+        }
+      },
+      "outdoor_temperature_source": {
+        "name": "Quelle der Außentemperatur",
+        "state": {
+          "appliance": "Heizungsanlage",
+          "internet": "Internet",
+          "roomcontroller": "Raumregler"
+        }
+      },
+      "support_status": {
+        "name": "Unterstützungsstatus",
+        "state": {
+          "not_supported": "Nicht unterstützt",
+          "supported": "Unterstützt",
+          "active": "Aktiv"
+        }
+      },
+      "update_status": {
+        "name": "Updatestatus",
+        "state": {
+          "idle": "Bereit",
+          "running": "Läuft",
+          "success": "Erfolgreich",
+          "failed": "Fehlgeschlagen"
+        }
+      },
+      "pressure_status": {
+        "name": "Systemdruckstatus (berechnet)",
+        "state": {
+          "critical_low": "Kritisch niedrig",
+          "low": "Niedrig",
+          "normal": "Normal",
+          "high": "Hoch",
+          "critical_high": "Kritisch hoch"
+        }
+      },
+      "active_faults": {
+        "name": "Aktive Störungen"
+      },
+      "active_notifications": {
+        "name": "Aktive Meldungen"
+      },
+      "next_holiday": {
+        "name": "Nächster Urlaub"
+      },
+      "pointt_api_requests_total": {
+        "name": "PointT-API-Aufrufe gesamt"
+      },
+      "pointt_api_requests_last_hour": {
+        "name": "PointT-API-Aufrufe – letzte Stunde"
+      },
+      "pointt_api_response_time_last_hour": {
+        "name": "PointT-API-Antwortzeit – letzte Stunde"
+      }
     },
     "binary_sensor": {
-      "holiday_active": { "name": "Urlaubsmodus aktiv" },
-      "system_fault": { "name": "Anlagenstörung" }
+      "holiday_active": {
+        "name": "Urlaubsmodus aktiv"
+      },
+      "system_fault": {
+        "name": "Anlagenstörung"
+      }
     },
-    "calendar": { "holiday_periods": { "name": "Urlaubszeiten" } },
-    "event": { "system_notifications": { "name": "Anlagenmeldungen" } }
+    "calendar": {
+      "holiday_periods": {
+        "name": "Urlaubszeiten"
+      }
+    },
+    "event": {
+      "system_notifications": {
+        "name": "Anlagenmeldungen"
+      }
+    }
   }
 }

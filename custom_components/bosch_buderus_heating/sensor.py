@@ -1637,7 +1637,9 @@ def _known_value_keys(path: str) -> tuple[str, ...]:
     """Return stable subkeys for resources whose startup payload may be partial."""
     if path == _SYSTEM_PRESSURE_RANGE_PATH:
         return _SYSTEM_PRESSURE_RANGE_KEYS
-    if re.fullmatch(r"/heatSources/[^/]+/(?:numberOfStarts|workingTime)", path):
+    if re.fullmatch(r"/heatSources/[^/]+/numberOfStarts", path):
+        return (*_KNOWN_MULTIPART_KEYS, "pool")
+    if re.fullmatch(r"/heatSources/[^/]+/workingTime", path):
         return _KNOWN_MULTIPART_KEYS
     return ()
 

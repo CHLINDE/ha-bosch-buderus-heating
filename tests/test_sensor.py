@@ -34,6 +34,7 @@ from custom_components.bosch_buderus_heating.pointt import (
     ResourceMetadata,
 )
 from custom_components.bosch_buderus_heating.pointt.metrics import RequestMetrics
+from custom_components.bosch_buderus_heating.pointt.models import JsonValue
 from custom_components.bosch_buderus_heating.sensor import (
     BoschBuderusActiveFaultsSensor,
     BoschBuderusActiveNotificationsSensor,
@@ -988,6 +989,55 @@ def test_known_multipart_entities_survive_empty_or_partial_startup() -> None:
         "cooling",
         "dhw",
     }
+
+
+@pytest.mark.parametrize("heat_source", ["hs1", "hs2", "hs3"])
+@pytest.mark.parametrize("partial", [False, True])
+def test_pool_start_sensor_survives_partial_startup(
+    hass: HomeAssistant, heat_source: str, partial: bool
+) -> None:
+    path = f"/heatSources/{heat_source}/numberOfStarts"
+    resource = Resource(
+        path=path,
+        values=({"total": 42},) if partial else (),
+        metadata=ResourceMetadata(resource_type="emonValue"),
+    )
+    sensor = _sensor(hass, resource, value_key="pool")
+    unique_id = sensor.unique_id
+
+    assert sensor.native_value is None
+    assert sensor.state_class == SensorStateClass.TOTAL_INCREASING
+    assert sensor.native_unit_of_measurement is None
+    assert sensor.entity_category == EntityCategory.DIAGNOSTIC
+    assert sensor.entity_description.entity_registry_enabled_default
+
+    updated = Resource(
+        path=path,
+        values=({"total": 43, "pool": 1},),
+        metadata=resource.metadata,
+    )
+    sensor.coordinator.data[path] = ResourceSnapshot(updated, True, datetime.now(UTC))
+
+    assert sensor.native_value == 1
+    assert sensor.unique_id == unique_id
+    descriptions = build_sensor_descriptions({path: updated})
+    assert [item.value_key for item in descriptions].count("pool") == 1
+
+
+@pytest.mark.parametrize("pool_value", [None, {}, [], 0, 17])
+@pytest.mark.parametrize("available", [False, True])
+def test_pool_start_values(
+    hass: HomeAssistant, pool_value: JsonValue, available: bool
+) -> None:
+    resource = Resource(
+        path="/heatSources/hs1/numberOfStarts",
+        values=({"pool": pool_value},),
+        metadata=ResourceMetadata(resource_type="emonValue"),
+    )
+    sensor = _sensor(hass, resource, value_key="pool", available=available)
+
+    assert sensor.available is available
+    assert sensor.native_value == (pool_value if isinstance(pool_value, int) else None)
 
 
 def test_pointt_enum_spelling_is_normalized_only_at_ha_boundary(

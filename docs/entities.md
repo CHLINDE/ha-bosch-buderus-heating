@@ -383,12 +383,21 @@ or its live schema does not match the documented type and unit.
 | Heating starts | Diagnostic sensor | `/heatSources/{hs}/numberOfStarts` → `ch` | No | No | 15 min |
 | Cooling starts | Diagnostic sensor | `/heatSources/{hs}/numberOfStarts` → `cooling` | No | No | 15 min |
 | Hot-water starts | Diagnostic sensor | `/heatSources/{hs}/numberOfStarts` → `dhw` | No | No | 15 min |
+| Pool-heating starts | Diagnostic sensor | `/heatSources/{hs}/numberOfStarts` → `pool` | No | No | 15 min |
 | Condenser outlet temperature (TC3) | Diagnostic sensor | `/heatSources/{hs}/supplyFlowCondenserTemp` | No | No | 15 min |
 | System type | Diagnostic sensor | `/heatSources/{hs}/type` | No | No | startup only |
 | Total operating time | Diagnostic sensor | `/heatSources/{hs}/workingTime` → `total` | No | No | 15 min |
 | Heating operating time | Diagnostic sensor | `/heatSources/{hs}/workingTime` → `ch` | No | No | 15 min |
 | Cooling operating time | Diagnostic sensor | `/heatSources/{hs}/workingTime` → `cooling` | No | No | 15 min |
 | Hot-water operating time | Diagnostic sensor | `/heatSources/{hs}/workingTime` → `dhw` | No | No | 15 min |
+
+Start-counter entities are registered even when the discovered resource has an
+empty or partial startup payload. Pool-heating starts are named **Anzahl der
+Starts Poolheizung** in German and **Number of starts Pool heating** in English.
+Find them under **Settings → Devices & services → Entities**, filtered by this
+integration. The value stays unknown until the gateway supplies `pool`; not
+every system supports pool heating. It uses the existing 15-minute request,
+with no additional polling.
 
 The brine names use the heating-system perspective: `collectorInflowTemp` is
 the fluid leaving the heat pump for the ground collector, while

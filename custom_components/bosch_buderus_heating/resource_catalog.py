@@ -319,9 +319,7 @@ _APP_RESOURCE_SCHEMA_RULES = (
     # The global burner start counter is scalar on some boilers, including
     # Buderus G125. Do not expose structured or unexpected API responses.
     _EntitySchemaRule(
-        re.compile(
-            r"^/heatSources/numberOfStarts$"
-        ),
+        re.compile(r"^/heatSources/numberOfStarts$"),
         frozenset({"floatValue"}),
     ),
     _EntitySchemaRule(

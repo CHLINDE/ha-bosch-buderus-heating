@@ -1651,3 +1651,78 @@ async def test_manual_setpoint_404_queues_recovery_when_mode_already_manual(
         )
     assert not snapshots[target_path].available
     queue.assert_called_once_with(mode_path, snapshots)
+
+
+async def test_missing_manual_setpoint_can_be_recovered_and_polled(
+    hass: HomeAssistant,
+) -> None:
+    client = AsyncMock()
+    coordinator = _coordinator(hass, client)
+    mode_path = "/heatingCircuits/hc1/operationMode"
+    target_path = "/heatingCircuits/hc1/manualRoomSetpoint"
+    mode = Resource(path=mode_path, value="manual", has_value=True)
+    coordinator.data = {mode_path: _snapshot(mode)}
+    coordinator.resources = {mode_path: mode}
+    coordinator._paths_by_group = {PollGroup.CONTROL: (mode_path,)}
+    coordinator.last_update_success = True
+
+    with patch(
+        "custom_components.bosch_buderus_heating.coordinator.asyncio.sleep",
+        AsyncMock(),
+    ):
+        metadata = ResourceMetadata(
+            resource_type="floatValue",
+            unit="C",
+            minimum=5.0,
+            maximum=30.0,
+            writable=True,
+        )
+        recovered = Resource(
+            path=target_path, value=21.0, has_value=True, metadata=metadata
+        )
+        client.get_resources_bulk.return_value = (
+            BatchItemResult("gateway-one", target_path, 200, resource=recovered),
+        )
+        await coordinator._async_recover_manual_setpoint(mode_path, target_path)
+
+    assert coordinator.data[target_path].resource is recovered
+    assert coordinator.data[target_path].available
+    assert target_path in coordinator._paths_by_group[PollGroup.CONTROL]
+    client.get_resources_bulk.assert_awaited_once_with(
+        "gateway-one", (target_path,)
+    )
+
+
+async def test_missing_manual_setpoint_initial_404_does_not_block_retry(
+    hass: HomeAssistant,
+) -> None:
+    client = AsyncMock()
+    coordinator = _coordinator(hass, client)
+    mode_path = "/heatingCircuits/hc1/operationMode"
+    target_path = "/heatingCircuits/hc1/manualRoomSetpoint"
+    mode = Resource(path=mode_path, value="manual", has_value=True)
+    coordinator.data = {mode_path: _snapshot(mode)}
+    coordinator.last_update_success = True
+    metadata = ResourceMetadata(
+        resource_type="floatValue",
+        unit="C",
+        minimum=5.0,
+        maximum=30.0,
+        writable=True,
+    )
+    recovered = Resource(
+        path=target_path, value=21.0, has_value=True, metadata=metadata
+    )
+    client.get_resources_bulk.side_effect = [
+        (BatchItemResult("gateway-one", target_path, 404),),
+        (BatchItemResult("gateway-one", target_path, 200, resource=recovered),),
+    ]
+    with patch(
+        "custom_components.bosch_buderus_heating.coordinator.asyncio.sleep",
+        AsyncMock(),
+    ):
+        await coordinator._async_recover_manual_setpoint(mode_path, target_path)
+
+    assert client.get_resources_bulk.await_count == 2
+    assert target_path not in coordinator._negative_until
+    assert coordinator.data[target_path].available

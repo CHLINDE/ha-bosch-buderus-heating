@@ -166,6 +166,30 @@ def _parse_references(value: object) -> tuple[ResourceReference, ...]:
     return tuple(parsed)
 
 
+def _parse_numeric_error_states(value: object) -> tuple[tuple[int | float, ...], bool]:
+    """Retain only bounded numeric error markers, never arbitrary state data."""
+    if value is None:
+        return (), True
+    if not isinstance(value, list) or len(value) > 32:
+        return (), False
+    markers: set[int | float] = set()
+    for item in value:
+        if not isinstance(item, Mapping):
+            return (), False
+        for key in ("short", "open", "overflow", "underflow", "invalid"):
+            marker = item.get(key)
+            if marker is None:
+                continue
+            if (
+                isinstance(marker, bool)
+                or not isinstance(marker, (int, float))
+                or (isinstance(marker, float) and not math.isfinite(marker))
+            ):
+                return (), False
+            markers.add(marker)
+    return tuple(sorted(markers)), True
+
+
 def parse_resource(payload: object, *, path: str | None = None) -> Resource:
     """Parse one resource without rejecting unknown vendor fields."""
     data = _mapping(payload, message="Resource response must be an object")
@@ -208,6 +232,9 @@ def parse_resource(payload: object, *, path: str | None = None) -> Resource:
     if not isinstance(writable_raw, (bool, int)) or writable_raw not in (0, 1):
         raise InvalidPayload("writeable must be a boolean or 0/1")
 
+    numeric_error_values, numeric_error_states_valid = _parse_numeric_error_states(
+        data.get("state")
+    )
     return Resource(
         path=resource_path,
         value=_json_value(data.get("value")),
@@ -221,6 +248,8 @@ def parse_resource(payload: object, *, path: str | None = None) -> Resource:
             minimum=_optional_number(data.get("minValue")),
             maximum=_optional_number(data.get("maxValue")),
             writable=bool(writable_raw),
+            numeric_error_values=numeric_error_values,
+            numeric_error_states_valid=numeric_error_states_valid,
         ),
         references=_parse_references(data.get("references")),
     )

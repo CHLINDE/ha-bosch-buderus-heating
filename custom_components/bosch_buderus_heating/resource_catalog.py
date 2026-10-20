@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from .pointt import Resource
+from .start_counters import assess_start_counter, is_start_counter_path
 from .startup_data import is_static_startup_resource
 
 
@@ -111,7 +112,6 @@ _NO_ENTITY_PATHS = frozenset(
         "/dhwCircuits",
         "/heatSources",
         "/heatSources/info",
-        "/heatSources/numberOfStarts",
         "/holidayMode/list",
         "/holidayMode/configuration",
         "/holidayMode/activeModes",
@@ -276,6 +276,7 @@ _DEFAULT_ENABLED_PATHS = frozenset(
         "/heatSources/currentEmergencyMode",
         "/heatSources/emStatus",
         "/heatSources/flameStatus",
+        "/heatSources/numberOfStarts",
         "/heatSources/returnTemperature",
         "/heatSources/passiveCooling/inflowTemp",
         "/heatSources/pvContactState",
@@ -831,6 +832,8 @@ def supports_entity(resource: Resource) -> bool:
 
 def _matches_optional_app_schema(resource: Resource) -> bool:
     """Reject optional app paths whose live type or unit is unexpected."""
+    if is_start_counter_path(resource.path):
+        return assess_start_counter(resource).supported
     for rule in _APP_RESOURCE_SCHEMA_RULES:
         if rule.pattern.fullmatch(resource.path):
             return rule.matches(resource)
@@ -863,6 +866,9 @@ def entity_enabled_by_default(path: str) -> bool:
 
 def poll_group(resource: Resource) -> PollGroup:
     """Classify a discovered resource into a cloud-friendly cadence."""
+    if is_start_counter_path(resource.path):
+        # An empty or malformed sample must not permanently stop recovery.
+        return PollGroup.SLOW
     if is_static_startup_resource(resource):
         return PollGroup.STATIC
     # Historical failure lists are probed during discovery, but are not polled

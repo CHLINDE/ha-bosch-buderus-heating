@@ -5,6 +5,52 @@ Versioning after its first tagged preview.
 
 ## [Unreleased]
 
+## [0.8.2-beta.2] - 2026-10-21
+
+I am releasing this beta with the start-counter improvements from PR #72.
+**0.8.1 remains the stable release and Latest.**
+
+I expose the general start counter reported by systems such as the Buderus
+G125 BE ECO-21. Thank you, CHLINDE, for reporting the missing counter in
+Issue #64, providing the initial implementation and testing its visibility.
+
+I revised the counter handling in PR #72 so that general and per-heat-source
+counters retain independent entities. A missing response or another counter
+no longer causes the general entity to be hidden or removed. Existing IDs,
+custom names and activation choices are preserved across reloads.
+
+I use the same path validation for sensor creation and recovery. A supported
+source ID containing a dot or a non-ASCII character can no longer be missed
+when restoring an existing sensor after a failed startup read.
+
+I validate whole-number counts and the resource's declared numeric error
+markers consistently. Missing or invalid readings remain unknown, conflicting
+parts are rejected, and unknown fields cannot create extra counter entities.
+The general resource uses `floatValue`; per-source counters use `emonValue`.
+
+I restore exact registered counter paths during bounded discovery and recover
+known or advertised leaves through normal polling. The interval remains
+15 minutes with the standard profile or 30 minutes with the cloud-friendly
+profile. Recovering a previously omitted path can add reads; existing batch
+limits, path budgets, forbidden-resource pauses and cloud backoff still apply.
+
+I added schema 15 diagnostics with counter validation reasons and recovery
+status, without exporting counts or raw error-marker values. The
+[implementation report](https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/blob/v0.8.2-beta.2/docs/start-counters.md) and its
+[German version](https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/blob/v0.8.2-beta.2/docs/start-counters.de.md) explain the previous weaknesses,
+the changes and the scope of validation.
+
+Select this beta explicitly in HACS and restart Home Assistant after updating.
+Physical validation of the revised recovery and multi-source behavior is
+still pending. CHLINDE confirmed visibility with the original implementation;
+that feedback does not establish the revised recovery behavior on an appliance.
+
+I verified 1,460 automated test cases with 96.64% combined statement and branch
+coverage. Ruff, formatting and strict Mypy passed. The tests include actual
+Home Assistant registry and recorder behavior, plus deterministic packaging
+and an isolated import from the generated archive. Parametrized variants are
+counted separately.
+
 ## [0.8.2-beta.1] - 2026-10-20
 
 I am releasing this beta with the manual-setpoint recovery from PR #71 and the

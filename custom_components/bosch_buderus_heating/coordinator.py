@@ -21,8 +21,10 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, RATE_LIMIT_ISSUE_PREFIX, PollingProfile
 from .discovery import (
+    MAX_DISCOVERY_RESOURCES,
     ROOT_RESOURCE_PATHS,
     DiscoveryDiagnostics,
+    DiscoveryPathSource,
     async_discover_resources,
 )
 from .faults import FaultTracker, fault_resource_candidates, is_fault_resource_path
@@ -54,6 +56,7 @@ from .pointt.const import MAX_BULK_PATHS
 from .pointt.models import BatchItemResult
 from .pointt.redaction import resource_path_template
 from .resource_catalog import PollGroup, poll_group
+from .start_counters import is_start_counter_path
 from .startup_data import STARTUP_BUDGET_SECONDS, StartupSession
 from .startup_reader import StartupReader
 from .writes import EnumWritePolicy, NumberWritePolicy, WriteService
@@ -247,6 +250,8 @@ class BoschBuderusDataUpdateCoordinator(
         self.polling_profile = polling_profile
         self._poll_intervals = poll_intervals
         self.resources: dict[str, Resource] = {}
+        self.registered_start_counter_paths: set[str] = set()
+        self._start_counter_recovery_limited = False
         self.holiday_timezones: dict[str, tzinfo | None] = {}
         self._paths_by_group: dict[PollGroup, tuple[str, ...]] = {}
         self._deferred_poll_paths: tuple[str, ...] = ()
@@ -973,12 +978,62 @@ class BoschBuderusDataUpdateCoordinator(
         self._advance_groups(completed_groups, now_monotonic)
         return snapshots
 
+    def restore_start_counter_path(self, path: str) -> None:
+        """Remember only bounded, exact leaves from this gateway's registry."""
+        if (
+            is_start_counter_path(path)
+            and len(self.registered_start_counter_paths) < MAX_DISCOVERY_RESOURCES
+        ):
+            self.registered_start_counter_paths.add(path)
+
+    def _merge_start_counter_candidates(self) -> None:
+        """Schedule advertised and registered leaves within the normal budget."""
+        advertised = {
+            path
+            for path, report in self.discovery_diagnostics.paths.items()
+            if report.source is DiscoveryPathSource.REFERENCE
+            and is_start_counter_path(path)
+            and report.bulk_result != "not_attempted"
+        }
+        for path in (*sorted(self.registered_start_counter_paths), *sorted(advertised)):
+            if path not in self.resources:
+                if not self.startup_data.reserve_discovery((path,)):
+                    self._start_counter_recovery_limited = True
+                    continue
+                # No type or fresh reading is inferred from a failed request.
+                self.resources[path] = Resource(path=path)
+            report = self.discovery_diagnostics.paths.get(path)
+            if report is None or report.discovered:
+                continue
+            result = report.fallback_result or report.bulk_result
+            if result == "http_403" or (
+                result == "http_404" and path not in self.registered_start_counter_paths
+            ):
+                pause = FORBIDDEN_PAUSE if result == "http_403" else NOT_FOUND_PAUSE
+                self._negative_until[path] = monotonic() + pause.total_seconds()
+
+    def start_counter_recovery_diagnostics(self) -> dict[str, object]:
+        """Describe recovery coverage without disclosing paths or readings."""
+        snapshots = self.data or {}
+        return {
+            "registered_paths": len(self.registered_start_counter_paths),
+            "waiting_for_first_response": sum(
+                is_start_counter_path(path) and path not in snapshots
+                for path in self.resources
+            ),
+            "resource_limit_reached": self._start_counter_recovery_limited,
+        }
+
     async def _async_discover_data(self) -> dict[str, ResourceSnapshot]:
         """Discover the bounded tree and use its values as the first snapshot."""
         try:
             resources = await async_discover_resources(
                 self.client,
                 self.gateway.gateway_id,
+                roots=(
+                    *sorted(self.registered_start_counter_paths),
+                    *ROOT_RESOURCE_PATHS,
+                ),
                 diagnostics=self.discovery_diagnostics,
                 startup_data=self.startup_data,
             )
@@ -1030,6 +1085,7 @@ class BoschBuderusDataUpdateCoordinator(
                 if path not in successful_resources
             },
         }
+        self._merge_start_counter_candidates()
         self.faults.process_resources(
             {
                 path: resource
@@ -1281,7 +1337,10 @@ class BoschBuderusDataUpdateCoordinator(
                     source=source,
                 )
                 self.resources[result.path] = result.resource
-                if result.path in self._manual_setpoint_candidates:
+                if (
+                    result.path in self._manual_setpoint_candidates
+                    or is_start_counter_path(result.path)
+                ):
                     # Both a targeted read and a later regular read can discover
                     # the value for the first time. Register normal polling once.
                     group = poll_group(result.resource)
@@ -1318,13 +1377,13 @@ class BoschBuderusDataUpdateCoordinator(
                 snapshots[result.path] = failed
                 self._pause_failed_resource(failed, result.status, now_monotonic)
             elif result.status in (403, 404):
-                if (
-                    result.status == 404
-                    and result.path in self._manual_setpoint_candidates
+                if result.status == 404 and (
+                    result.path in self._manual_setpoint_candidates
+                    or result.path in self.registered_start_counter_paths
                 ):
-                    # The same batch can report Auto before this candidate's
-                    # 404. Do not carry a new 24-hour pause into its next Manual
-                    # episode; removing the candidate already stops its reads.
+                    # Registered counters and pending manual targets recover
+                    # through their regular groups. A 404 must not introduce
+                    # a day-long pause for either established recovery path.
                     self._negative_until.pop(result.path, None)
                 else:
                     pause = FORBIDDEN_PAUSE if result.status == 403 else NOT_FOUND_PAUSE

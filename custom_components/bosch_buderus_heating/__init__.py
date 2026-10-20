@@ -41,6 +41,7 @@ from .resource_catalog import (
     configured_device_name,
 )
 from .runtime import BoschBuderusRuntimeData
+from .start_counters import is_start_counter_path, registered_start_counter_path
 from .startup_data import STARTUP_BUDGET_SECONDS, StartupSession, is_startup_entity_path
 
 if TYPE_CHECKING:
@@ -212,6 +213,11 @@ def _restore_registered_startup_paths(
         if entity.domain != "sensor" or entity.platform != DOMAIN:
             continue
         for coordinator in entry.runtime_data.coordinators:
+            counter_path = registered_start_counter_path(
+                entity.unique_id, coordinator.gateway.gateway_id
+            )
+            if counter_path is not None:
+                coordinator.restore_start_counter_path(counter_path)
             prefix = f"{coordinator.gateway.gateway_id}:"
             if entity.unique_id.startswith(prefix):
                 path = "/" + entity.unique_id.removeprefix(prefix).replace(":", "/")
@@ -357,7 +363,6 @@ def _remove_retired_entities(
     observed_resource_paths: dict[str, str] = {}
     for coordinator in coordinators:
         gateway_id = coordinator.gateway.gateway_id
-        retired_unique_ids.add(f"{gateway_id}:heatSources:numberOfStarts")
         for domain in (
             "totalConsumption",
             "chConsumption",
@@ -434,6 +439,9 @@ def _enable_new_default_entities(
         )
         for platform, descriptions in candidates:
             for description in descriptions:
+                if is_start_counter_path(description.resource_path):
+                    # Existing counter activation choices survive this update.
+                    continue
                 if not description.entity_registry_enabled_default:
                     continue
                 unique_id = f"{gateway_id}:{description.key}"

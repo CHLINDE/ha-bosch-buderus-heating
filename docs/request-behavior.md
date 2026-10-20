@@ -5,6 +5,20 @@ with stable 0.8.0. The changes make nonessential startup data less disruptive
 and reduce repeat reads. They do not change the configured heating settings
 or the normal polling intervals for operating values.
 
+## Start-counter recovery in 0.8.2-beta.2
+
+I keep discovered start counters in the slow group, including while their
+current schema or value is unusable. I also restore exact registered counter
+paths during bounded discovery. Failed optional probes do not become regular
+polls; recovery is limited to registered counters and explicitly referenced
+leaves that discovery attempted.
+
+The existing profile controls timing: 15 or 30 minutes. These paths share the
+discovery budget and normal batching, authentication and backoff handling.
+Recovering an omitted path can add requests, so unchanged intervals do not
+imply unchanged request counts. The [counter report](start-counters.md#recovery-and-request-cost)
+describes the tested workload, 404 and 403 handling, and remaining limitations.
+
 ## What changes
 
 | Data or action | 0.8.0 | 0.8.1-beta.1 |

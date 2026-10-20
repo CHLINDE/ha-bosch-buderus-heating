@@ -18,3 +18,4 @@ secrets.yaml
 raw-fixtures/
 *.raw.json
 *.tokens.json
+.vs

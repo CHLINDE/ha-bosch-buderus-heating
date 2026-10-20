@@ -1037,7 +1037,9 @@ def test_pool_start_values(
     sensor = _sensor(hass, resource, value_key="pool", available=available)
 
     assert sensor.available is available
-    assert sensor.native_value == (pool_value if isinstance(pool_value, int) else None)
+    assert sensor.native_value == (
+        pool_value if available and isinstance(pool_value, int) else None
+    )
 
 
 def test_pointt_enum_spelling_is_normalized_only_at_ha_boundary(
@@ -1830,3 +1832,68 @@ def test_default_policy_enables_user_values_and_keeps_technical_values_opt_in() 
     assert not descriptions[
         "/heatingCircuits/hc1/manualRoomSetpoint"
     ].entity_registry_enabled_default
+
+
+@pytest.mark.parametrize("value", [0, 1234, 1234.0])
+def test_global_start_counter_sensor_on_gateway_without_hs_starts(
+    hass: HomeAssistant, value: int | float
+) -> None:
+    path = "/heatSources/numberOfStarts"
+    global_counter = Resource(
+        path=path,
+        value=value,
+        has_value=True,
+        metadata=ResourceMetadata(resource_type="floatValue", unit="other"),
+    )
+    descriptions = build_sensor_descriptions({path: global_counter})
+    assert len(descriptions) == 1
+    description = descriptions[0]
+    assert description.resource_path == path
+    assert description.value_key is None
+    assert description.state_class == SensorStateClass.TOTAL_INCREASING
+    assert description.entity_category == EntityCategory.DIAGNOSTIC
+    assert description.entity_registry_enabled_default
+    sensor = _sensor(hass, global_counter)
+    assert sensor.native_value == value
+
+
+def test_global_start_counter_retained_when_per_source_starts_exist() -> None:
+    global_counter = Resource(
+        path="/heatSources/numberOfStarts",
+        value=1234,
+        has_value=True,
+        metadata=ResourceMetadata(resource_type="floatValue", unit="other"),
+    )
+    source_counter = Resource(
+        path="/heatSources/hs1/numberOfStarts",
+        values=({"total": 1234},),
+        metadata=ResourceMetadata(resource_type="emonValue"),
+    )
+    descriptions = build_sensor_descriptions(
+        {global_counter.path: global_counter, source_counter.path: source_counter}
+    )
+    assert any(item.resource_path == global_counter.path for item in descriptions)
+    assert any(
+        item.resource_path == source_counter.path and item.value_key == "total"
+        for item in descriptions
+    )
+
+
+def test_global_start_counter_retained_for_non_emon_per_source_starts() -> None:
+    global_counter = Resource(
+        path="/heatSources/numberOfStarts",
+        value=1234,
+        has_value=True,
+        metadata=ResourceMetadata(resource_type="floatValue", unit="other"),
+    )
+    source_counter = Resource(
+        path="/heatSources/hs1/numberOfStarts",
+        value=1234,
+        has_value=True,
+        metadata=ResourceMetadata(resource_type="floatValue", unit="other"),
+    )
+    descriptions = build_sensor_descriptions(
+        {global_counter.path: global_counter, source_counter.path: source_counter}
+    )
+    assert any(item.resource_path == global_counter.path for item in descriptions)
+    assert not any(item.resource_path == source_counter.path for item in descriptions)

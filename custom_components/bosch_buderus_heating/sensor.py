@@ -75,6 +75,11 @@ from .resource_catalog import (
     resource_name,
     supports_entity,
 )
+from .start_counters import (
+    assess_start_counter,
+    is_start_counter_path,
+    start_counter_placeholder,
+)
 from .startup_data import startup_placeholder
 
 type ValueKind = Literal[
@@ -454,6 +459,9 @@ def _track_resource_sensors(
 ) -> None:
     """Keep registered metadata sensors and add recovered values exactly once."""
     resources = dict(coordinator.resources)
+    for path in coordinator.registered_start_counter_paths:
+        if path not in resources or not assess_start_counter(resources[path]).supported:
+            resources[path] = start_counter_placeholder(path)
     for path in coordinator.startup_data.registered_paths():
         if path not in resources:
             resources[path] = startup_placeholder(path)
@@ -730,6 +738,12 @@ def build_sensor_descriptions(
             resource.path
         ):
             continue
+        if is_start_counter_path(resource.path):
+            descriptions.extend(
+                _description(resource, key, "value" if key is None else "nested")
+                for key, _ in assess_start_counter(resource).readings
+            )
+            continue
         if resource.path == "/system/info":
             descriptions.append(_description(resource, None, "system_info"))
             continue
@@ -1005,6 +1019,10 @@ class BoschBuderusSensor(
             return None
         resource = snapshot.resource
         description = self.entity_description
+        if is_start_counter_path(resource.path):
+            if not snapshot.available:
+                return None
+            return assess_start_counter(resource).reading(description.value_key).value
         if description.value_kind == "dew_point":
             calculation = self._dew_point_calculation
             return calculation.dew_point_celsius if calculation is not None else None

@@ -65,6 +65,33 @@ def _diagnostics() -> dict[str, object]:
     }
 
 
+@pytest.mark.parametrize("schema", [14, 15])
+def test_reviewed_schemas_drop_technical_and_counter_details(schema: int) -> None:
+    diagnostics = _diagnostics()
+    diagnostics["diagnostics_schema"] = schema
+    diagnostics["privacy"].update(
+        contains_raw_resource_values=True,
+        raw_resource_values_scope="allowlisted_technical_metadata",
+    )
+    gateway = diagnostics["gateways"][0]
+    gateway["technical_metadata"] = [{"value": "synthetic-private-product"}]
+    gateway["capabilities"][0]["start_counter"] = {"unexpected": "private-counter"}
+    serialized = json.dumps(build_anonymized_inventory(diagnostics))
+    assert "synthetic-private-product" not in serialized
+    assert "private-counter" not in serialized
+
+
+def test_future_schema_cannot_bypass_raw_value_restrictions() -> None:
+    diagnostics = _diagnostics()
+    diagnostics["diagnostics_schema"] = 16
+    diagnostics["privacy"].update(
+        contains_raw_resource_values=True,
+        raw_resource_values_scope="allowlisted_technical_metadata",
+    )
+    with pytest.raises(InventoryError, match="unrestricted"):
+        build_anonymized_inventory(diagnostics)
+
+
 def test_inventory_contains_structure_but_no_runtime_or_names() -> None:
     inventory = build_anonymized_inventory(
         _diagnostics(), captured_at=datetime(2026, 8, 16, 12, tzinfo=UTC)

@@ -256,7 +256,7 @@ PointT codes and app display names for operation mode:
 | `/heatSources/{hs}/type` | Heat-source type | R | Diagnostic |
 | `/heatSources/{hs}/workingTime` | Operating time by operation | R | Multipart cumulative counter |
 | `/heatSources/info` | Heat-source information | R | Internal/diagnostic structured object |
-| `/heatSources/numberOfStarts` | Total starts | R | No separate entity; identical to `total` of the dynamic heat source |
+| `/heatSources/numberOfStarts` | Total burner starts | R | Scalar fallback sensor when the gateway does not expose a per-source `numberOfStarts` counter; diagnostic, enabled by default; 15-minute polling |
 | `/heatSources/passiveCooling/inflowTemp` | Passive-cooling inlet temperature | R | Optional temperature sensor |
 | `/heatSources/pvContactState` | PV contact status | R | Optional operating state |
 | `/heatSources/returnTemperature` | Return temperature | R | Temperature sensor |

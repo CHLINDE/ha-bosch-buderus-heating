@@ -83,11 +83,11 @@ must not be described as local MX300/MX400 access.
 
 ## Official HACS publication
 
-The integration repository passes its own HACS and hassfest validation. The
-official catalog submission is
-[hacs/default#10040](https://github.com/hacs/default/pull/10040). The pull
-request remains open and requires a fresh upstream check run and maintainer
-review before the integration appears in the default HACS catalog.
+The integration was accepted into the default HACS catalog on 2026-10-20 through
+[hacs/default#10040](https://github.com/hacs/default/pull/10040). I have updated
+the [installation guide](setup.md#install-boschbuderus-heating) for direct HACS
+search and installation. Thank you to the HACS maintainers for reviewing and
+accepting the submission.
 
 ## Release gate for 1.0
 
@@ -102,7 +102,7 @@ review before the integration appears in the default HACS catalog.
 - [x] Privacy-redacted Home Assistant diagnostics.
 - [x] At least 95 percent automated test coverage.
 - [x] Repository HACS and hassfest validation passing.
-- [ ] Official HACS catalog review completed.
+- [x] Official HACS catalog review completed on 2026-10-20.
 - [ ] Complete installation, removal, privacy, troubleshooting, and migration
   documentation.
 - [ ] Migration tests for config entries and unique IDs.

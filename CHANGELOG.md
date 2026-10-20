@@ -5,6 +5,17 @@ Versioning after its first tagged preview.
 
 ## [Unreleased]
 
+I updated the installation instructions following the integration's acceptance
+into the default HACS catalog on 2026-10-20 through
+[hacs/default#10040](https://github.com/hacs/default/pull/10040). Thank you to
+the HACS maintainers for reviewing and accepting the submission.
+
+Bosch/Buderus Heating can now be found directly in HACS search. I replaced the
+temporary custom-repository instructions with search troubleshooting, marked
+the catalog review as complete in the project status, and added a HACS badge.
+I also updated the README's beta link to 0.8.2-beta.2; 0.8.1 remains the stable
+release and Latest.
+
 ## [0.8.2-beta.2] - 2026-10-21
 
 I am releasing this beta with the start-counter improvements from PR #72.

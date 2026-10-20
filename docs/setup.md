@@ -35,7 +35,8 @@ HACS then appears in the Home Assistant sidebar.
 
 ### Install Bosch/Buderus Heating
 
-HACS will notify you about future updates.
+**Bosch/Buderus Heating** is included in the default HACS catalog. Find it
+using the search below; HACS will notify you about future updates.
 
 1. Open **HACS** in Home Assistant.
 2. Enter **Bosch/Buderus Heating** in the **Search** field at the top.
@@ -52,23 +53,22 @@ HACS will notify you about future updates.
 
 #### Repository does not appear in HACS search
 
-Until **Bosch/Buderus Heating** is included in the default HACS catalog, the
-same published repository can be installed and updated safely as a custom
-repository:
+The integration is listed in the default catalog. If it is missing from your
+search results:
 
-1. Open **HACS**.
-2. Open the three-dot menu **⋮** in the upper-right corner.
-3. Select **Custom repositories**.
-4. Enter
-   `https://github.com/SoftwareSchmied/ha-bosch-buderus-heating` as the
-   repository.
-5. Select **Integration** as the category.
-6. Select **Add**.
-7. Search for **Bosch/Buderus Heating** in the HACS dashboard and follow the
-   download steps above.
+1. Search in **HACS**, rather than Home Assistant's **Add integration** dialog.
+2. Clear any filters that limit the results, such as showing only downloaded
+   repositories, and search for **Bosch/Buderus Heating** or **Buderus**.
+3. Check that HACS is up to date and can connect to GitHub. If HACS reports a
+   connection or rate-limit error, resolve it or wait for the indicated retry
+   time, then search again after the catalog has refreshed.
+4. If it is still missing, include your HACS version and any displayed error
+   when [requesting help](#request-help).
 
-This additional step is needed only while the project is not yet in the
-default HACS catalog. Use only the repository address shown above.
+The standard installation does not require a custom repository entry. If you
+previously installed this same repository manually through HACS, continue to
+update that installation through HACS; reinstalling the integration is not
+required.
 
 ## Add the integration
 
@@ -244,8 +244,9 @@ sign-in is required.
 
 First determine where the search fails:
 
-- **Not found in HACS:** add the project as a custom repository as described
-  under [Repository does not appear in HACS search](#repository-does-not-appear-in-hacs-search).
+- **Not found in HACS:** check the search term, active filters and HACS catalog
+  access as described under
+  [Repository does not appear in HACS search](#repository-does-not-appear-in-hacs-search).
 - **Downloaded in HACS but missing from Add integration:** restart Home
   Assistant completely. Then check **Settings → System → Logs** for a loading
   error involving `bosch_buderus_heating`.

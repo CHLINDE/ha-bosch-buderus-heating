@@ -1153,6 +1153,7 @@ class BoschBuderusDataUpdateCoordinator(
         """Apply partial results without discarding last-good values."""
         successful = 0
         manual_transitions: list[str] = []
+        missing_manual_setpoints: set[str] = set()
         for result in results:
             if result.resource is not None:
                 previous = snapshots.get(result.path)
@@ -1183,6 +1184,12 @@ class BoschBuderusDataUpdateCoordinator(
 
             result_category = _result_category(result.error, result.status)
             self._record_capability(result.path, result_category, source)
+            if (
+                result.status == 404
+                and result.path.startswith("/heatingCircuits/")
+                and result.path.endswith("/manualRoomSetpoint")
+            ):
+                missing_manual_setpoints.add(result.path)
             previous = snapshots.get(result.path)
             if previous is not None:
                 failed = replace(
@@ -1205,6 +1212,13 @@ class BoschBuderusDataUpdateCoordinator(
             )
         for mode_path in manual_transitions:
             self._queue_manual_setpoint_recovery(mode_path, snapshots)
+        # The mode can already be manual when the setpoint first returns 404.
+        # A transition-only trigger would miss this case until the next poll.
+        for setpoint_path in missing_manual_setpoints:
+            mode_path = setpoint_path.removesuffix("/manualRoomSetpoint") + "/operationMode"
+            mode = snapshots.get(mode_path)
+            if mode is not None and mode.available and mode.resource.value == "manual":
+                self._queue_manual_setpoint_recovery(mode_path, snapshots)
         return successful
 
     def _record_capability(

@@ -111,7 +111,6 @@ _NO_ENTITY_PATHS = frozenset(
         "/dhwCircuits",
         "/heatSources",
         "/heatSources/info",
-        "/heatSources/numberOfStarts",
         "/holidayMode/list",
         "/holidayMode/configuration",
         "/holidayMode/activeModes",
@@ -276,6 +275,7 @@ _DEFAULT_ENABLED_PATHS = frozenset(
         "/heatSources/currentEmergencyMode",
         "/heatSources/emStatus",
         "/heatSources/flameStatus",
+        "/heatSources/numberOfStarts",
         "/heatSources/returnTemperature",
         "/heatSources/passiveCooling/inflowTemp",
         "/heatSources/pvContactState",
@@ -316,6 +316,12 @@ _DEFAULT_ENABLED_PATTERNS = tuple(
 )
 
 _APP_RESOURCE_SCHEMA_RULES = (
+    # The global burner start counter is scalar on some boilers, including
+    # Buderus G125. Do not expose structured or unexpected API responses.
+    _EntitySchemaRule(
+        re.compile(r"^/heatSources/numberOfStarts$"),
+        frozenset({"floatValue"}),
+    ),
     _EntitySchemaRule(
         re.compile(
             r"^/heatSources/(?:currentEmergencyMode|pvContactState|standbyMode)$"

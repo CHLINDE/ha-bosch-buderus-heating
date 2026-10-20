@@ -5,6 +5,11 @@ Versioning after its first tagged preview.
 
 ## [Unreleased]
 
+## [0.8.2-beta.3] - 2026-10-21
+
+I am releasing this beta with the HACS documentation updates from PR #73.
+**0.8.1 remains the stable release and Latest.**
+
 I updated the installation instructions following the integration's acceptance
 into the default HACS catalog on 2026-10-20 through
 [hacs/default#10040](https://github.com/hacs/default/pull/10040). Thank you to
@@ -13,8 +18,15 @@ the HACS maintainers for reviewing and accepting the submission.
 Bosch/Buderus Heating can now be found directly in HACS search. I replaced the
 temporary custom-repository instructions with search troubleshooting, marked
 the catalog review as complete in the project status, and added a HACS badge.
-I also updated the README's beta link to 0.8.2-beta.2; 0.8.1 remains the stable
-release and Latest.
+
+Runtime behavior is unchanged from 0.8.2-beta.2. This includes the general
+start counter, counter validation and recovery. Only the manifest version
+changes inside the installation archive; the documentation is available in
+the repository. The new version allows a regular HACS update.
+
+Select this beta explicitly in HACS and restart Home Assistant after updating.
+The revised counter recovery and multi-source behavior still need field
+confirmation. I performed no physical appliance writes for this release.
 
 ## [0.8.2-beta.2] - 2026-10-21
 

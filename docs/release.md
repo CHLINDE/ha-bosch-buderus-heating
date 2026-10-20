@@ -4,6 +4,45 @@ Releases are built from a verified Git tag. The HACS archive contains the
 integration directly at its root and is published together with a SHA-256
 checksum file.
 
+## 0.8.2-beta.3 verification
+
+I prepared this beta on 2026-10-21 with the HACS documentation updates from
+PR #73. The integration was accepted into the default HACS catalog through
+[hacs/default#10040](https://github.com/hacs/default/pull/10040).
+Thank you to the HACS maintainers for reviewing and accepting the submission.
+
+I updated the installation guide, HACS search troubleshooting, project status
+and README badge. The README now points to beta.3. The release is a pre-release;
+**0.8.1 remains Stable/Latest.**
+
+- Home Assistant 2026.10.1, Python 3.14.2: **1,460 tests passed**, with
+  **96.64% combined statement and branch coverage**. Counts include
+  parametrized variants.
+- Ruff formatting and lint and strict Mypy passed.
+- The tests include reproducible packaging and an isolated import from the
+  generated archive. I also checked 45 local file and heading links.
+
+I compared the archive with the published beta.2 package. Both contain the
+same 56 paths, and only the manifest version differs. The integration code,
+translations, frontend assets and behavior are unchanged. The updated guides
+are available in the repository; the HACS archive contains the integration.
+
+The Linux archive contains **56 files** and **230,306 bytes**, with
+`manifest.json` at its root and version `0.8.2-beta.3`. Every archived file
+matches the prepared component source. ZIP SHA-256:
+`360bfbf2ca0c9965e47a7e24124c1eddbd2e59a179ffaa4b30b565aff71fcbd7`.
+
+Publication requires successful checks on the final PR commit and a merge
+through the protected main branch. The tag-triggered workflow repeats source
+checks, tests, the isolated dependency audit, Hassfest and HACS validation.
+The published ZIP, checksum and release notes must match the locally verified
+package and the corresponding CHANGELOG section.
+
+I performed no physical appliance writes or new field tests for this release.
+The revised counter recovery and multi-source behavior from beta.2 still need
+field confirmation. Select the beta explicitly in HACS and restart Home
+Assistant after updating.
+
 ## 0.8.2-beta.2 verification
 
 I prepared this beta on 2026-10-21 with the start-counter changes from PR #72.

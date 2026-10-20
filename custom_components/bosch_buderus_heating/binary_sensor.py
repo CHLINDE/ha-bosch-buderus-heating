@@ -48,6 +48,7 @@ from .sensor import (
     _semantic_key,
     _values_scalar_keys,
 )
+from .start_counters import is_start_counter_path
 
 if TYPE_CHECKING:
     from homeassistant.components.binary_sensor.const import BinarySensorDeviceClass
@@ -202,7 +203,7 @@ def build_binary_sensor_descriptions(
     """Build stable descriptions for all discovered safe boolean states."""
     descriptions: list[BoschBuderusBinarySensorEntityDescription] = []
     for resource in resources.values():
-        if not supports_entity(resource):
+        if is_start_counter_path(resource.path) or not supports_entity(resource):
             continue
         keys = _nested_scalar_keys(resource.value, include_booleans=True)
         if not keys and resource.values:

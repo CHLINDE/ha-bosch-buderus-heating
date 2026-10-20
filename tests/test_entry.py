@@ -559,7 +559,7 @@ def test_retired_empty_and_duplicate_entities_are_removed(
 
     _remove_retired_entities(hass, entry, (coordinator,))
 
-    assert entity_registry.async_get(duplicate.entity_id) is None
+    assert entity_registry.async_get(duplicate.entity_id) is not None
     assert entity_registry.async_get(empty_program.entity_id) is None
     assert entity_registry.async_get(empty_name.entity_id) is None
     assert entity_registry.async_get(direct_electricity.entity_id) is None
@@ -629,10 +629,10 @@ async def test_device_migration_never_merges_into_another_config_entry(hass):
 
 
 @pytest.mark.parametrize("per_source", [False, True])
-def test_global_start_counter_registry_fallback(
+def test_global_start_counter_registry_is_independent(
     hass: HomeAssistant, per_source: bool
 ) -> None:
-    """Keep the global counter only when no supported per-source counter exists."""
+    """Keep the global counter regardless of another source's presence."""
     entry = _entry(hass)
     registry = er.async_get(hass)
     global_counter = registry.async_get_or_create(
@@ -662,4 +662,4 @@ def test_global_start_counter_registry_fallback(
 
     _remove_retired_entities(hass, entry, (coordinator,))
 
-    assert (registry.async_get(global_counter.entity_id) is None) is per_source
+    assert registry.async_get(global_counter.entity_id) is not None

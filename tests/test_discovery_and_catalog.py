@@ -894,4 +894,4 @@ def test_global_number_of_starts_requires_scalar_schema(
     )
     assert supports_entity(resource) is supported
     assert entity_enabled_by_default(resource.path)
-    assert poll_group(resource) is (PollGroup.SLOW if supported else PollGroup.STATIC)
+    assert poll_group(resource) is PollGroup.SLOW

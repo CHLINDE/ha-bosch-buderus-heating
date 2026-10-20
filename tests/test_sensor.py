@@ -1037,7 +1037,9 @@ def test_pool_start_values(
     sensor = _sensor(hass, resource, value_key="pool", available=available)
 
     assert sensor.available is available
-    assert sensor.native_value == (pool_value if isinstance(pool_value, int) else None)
+    assert sensor.native_value == (
+        pool_value if available and isinstance(pool_value, int) else None
+    )
 
 
 def test_pointt_enum_spelling_is_normalized_only_at_ha_boundary(
@@ -1855,7 +1857,7 @@ def test_global_start_counter_sensor_on_gateway_without_hs_starts(
     assert sensor.native_value == value
 
 
-def test_global_start_counter_omitted_when_per_source_starts_exist() -> None:
+def test_global_start_counter_retained_when_per_source_starts_exist() -> None:
     global_counter = Resource(
         path="/heatSources/numberOfStarts",
         value=1234,
@@ -1870,14 +1872,14 @@ def test_global_start_counter_omitted_when_per_source_starts_exist() -> None:
     descriptions = build_sensor_descriptions(
         {global_counter.path: global_counter, source_counter.path: source_counter}
     )
-    assert all(item.resource_path != global_counter.path for item in descriptions)
+    assert any(item.resource_path == global_counter.path for item in descriptions)
     assert any(
         item.resource_path == source_counter.path and item.value_key == "total"
         for item in descriptions
     )
 
 
-def test_global_start_counter_omitted_for_non_emon_per_source_starts() -> None:
+def test_global_start_counter_retained_for_non_emon_per_source_starts() -> None:
     global_counter = Resource(
         path="/heatSources/numberOfStarts",
         value=1234,
@@ -1893,5 +1895,5 @@ def test_global_start_counter_omitted_for_non_emon_per_source_starts() -> None:
     descriptions = build_sensor_descriptions(
         {global_counter.path: global_counter, source_counter.path: source_counter}
     )
-    assert not any(item.resource_path == global_counter.path for item in descriptions)
-    assert any(item.resource_path == source_counter.path for item in descriptions)
+    assert any(item.resource_path == global_counter.path for item in descriptions)
+    assert not any(item.resource_path == source_counter.path for item in descriptions)

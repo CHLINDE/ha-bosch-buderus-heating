@@ -49,9 +49,26 @@ values. It also excludes raw notification payloads and installation-specific
 component IDs. Error codes remain visible because they are required to match a
 diagnostic report with the appliance display.
 
+## Start counters
+
+Schema 15 adds `start_counter` to start-counter capability entries. It reports
+`schema_supported`, `schema_rejection_reason`, `error_metadata_valid`,
+`error_marker_count` and a `readings` map for the scalar or known parts.
+Reading statuses include `valid`, `missing_value`, `not_numeric`, `not_integer`,
+`not_finite`, `out_of_range`, `device_error_value`, `invalid_error_metadata`,
+`invalid_structure`, `conflicting_values`, `not_read` and `unavailable`.
+No current counts, raw marker numbers or unknown field names are included.
+
+The per-gateway `start_counter_recovery` section reports registered-path count,
+paths waiting for their first response and whether the shared path budget
+prevented recovery. Existing per-resource pause information still explains
+deferred reads. The inventory exporter accepts schema 15 and continues to
+discard technical values and additional counter details. See
+[start-counter behavior](start-counters.md) for examples and limitations.
+
 ## Missing controls
 
-Schema 14 reports `control` under each entry in `gateways → capabilities`.
+Schema 15 retains `control` under each entry in `gateways → capabilities`.
 The same assessment drives the select, number, and switch implementations:
 
 - `platform`: the principal control type or `null` for unsupported paths;
@@ -136,7 +153,7 @@ This field is not a connectivity or current-health indicator. A subsequent
 failed request remains visible in `resource_results` and the existing fault
 availability handling, even when the last parser result was `empty`. Unrelated
 reads do not advance `last_successful_update` or confirm a fault resolution.
-These fault-parser fields retain their existing meanings in schema 14.
+These fault-parser fields retain their existing meanings in schema 15.
 
 ## Supplementary startup data
 

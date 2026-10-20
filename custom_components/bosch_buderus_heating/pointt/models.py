@@ -77,6 +77,8 @@ class ResourceMetadata:
     minimum: float | None = None
     maximum: float | None = None
     writable: bool = False
+    numeric_error_values: tuple[int | float, ...] = ()
+    numeric_error_states_valid: bool = True
 
 
 @dataclass(frozen=True, slots=True)

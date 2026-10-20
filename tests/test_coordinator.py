@@ -1626,3 +1626,28 @@ async def test_manual_setpoint_recovery_queued_after_polled_mode_change(
             source=SnapshotSource.BATCH,
         )
     queue.assert_called_once_with(mode_path, snapshots)
+
+
+async def test_manual_setpoint_404_queues_recovery_when_mode_already_manual(
+    hass: HomeAssistant,
+) -> None:
+    coordinator = _coordinator(hass, AsyncMock())
+    mode_path = "/heatingCircuits/hc1/operationMode"
+    target_path = "/heatingCircuits/hc1/manualRoomSetpoint"
+    mode = Resource(path=mode_path, value="manual", has_value=True)
+    target = _resource(target_path, 20.0)
+    snapshots = {
+        mode_path: _snapshot(mode),
+        target_path: _snapshot(target),
+    }
+    with patch.object(coordinator, "_queue_manual_setpoint_recovery") as queue:
+        coordinator._apply_results(
+            snapshots,
+            (BatchItemResult("gateway-one", target_path, 404,
+                             error=ResourceNotFound(target_path, 404)),),
+            attempted_at=datetime.now(UTC),
+            now_monotonic=monotonic(),
+            source=SnapshotSource.BATCH,
+        )
+    assert not snapshots[target_path].available
+    queue.assert_called_once_with(mode_path, snapshots)

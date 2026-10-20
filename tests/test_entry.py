@@ -660,6 +660,6 @@ def test_global_start_counter_registry_fallback(
         )
     coordinator = SimpleNamespace(gateway=Gateway("gateway-one"), resources=resources)
 
-    _remove_retired_entities(hass, entry, (coordinator))
+    _remove_retired_entities(hass, entry, (coordinator,))
 
     assert (registry.async_get(global_counter.entity_id) is None) is per_source

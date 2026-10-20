@@ -5,6 +5,12 @@ Versioning after its first tagged preview.
 
 ## [Unreleased]
 
+## [0.8.2-beta.1] - 2026-10-20
+
+I am releasing this beta with the manual-setpoint recovery from PR #71 and the
+pool-heating start counter correction from PR #70. **0.8.1 remains the current
+stable release.**
+
 I extended the manual-setpoint recovery contributed by CHLINDE. When a reported
 heating circuit is in Manual and its setpoint is missing or unavailable, I allow
 one series of up to three targeted reads, waiting 3, 10 and 20 seconds in turn.
@@ -17,12 +23,22 @@ while its circuit is in Manual. A later successful response adds its supported
 entities and normal polling without a restart. Existing forbidden-resource
 pauses, authentication handling and cloud rate limits remain effective. I also
 stop pending recovery on unload and keep a targeted success from clearing an
-unrelated failed polling cycle. See [request behavior](docs/request-behavior.md)
+unrelated failed polling cycle. See [request behavior](https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/blob/v0.8.2-beta.1/docs/request-behavior.md)
 for timing, request limits and the scope of the APK comparison.
 
 I register the pool-heating start counter (`numberOfStarts` → `pool`) even
 when the gateway's initial payload is empty or partial, with German and English
 names. Values still depend on gateway support; polling is unchanged.
+
+I verified the combined changes with 1,350 automated test cases on Home Assistant
+2026.10.1 and 96.55% combined statement and branch coverage. Ruff, formatting and
+strict Mypy passed. The tests include parametrized variants and an isolated
+installation of the generated release archive. An isolated runtime dependency
+audit found no known vulnerabilities.
+
+I have not performed physical appliance writes for this beta. Recovery on the
+affected installation still needs confirmation. After selecting the beta in
+HACS and updating, restart Home Assistant.
 
 ## [0.8.1] - 2026-10-20
 

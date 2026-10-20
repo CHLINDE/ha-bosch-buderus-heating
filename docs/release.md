@@ -4,6 +4,44 @@ Releases are built from a verified Git tag. The HACS archive contains the
 integration directly at its root and is published together with a SHA-256
 checksum file.
 
+## 0.8.2-beta.1 verification
+
+I prepared this beta on 2026-10-20 with the pool-heating start counter from
+PR #70 and the manual-setpoint recovery from PR #71. I extended CHLINDE's
+original recovery implementation and tests with bounded outage handling,
+normal polling for late values, error pauses and cancellation checks.
+Thank you, CHLINDE, for the initial contribution.
+
+The release is a pre-release. **0.8.1 remains Stable/Latest.**
+
+- Home Assistant 2026.10.1, Python 3.14.7: **1,350 tests passed**, with
+  **96.55% combined statement and branch coverage**. Counts include parametrized
+  variants.
+- Ruff 0.17.0 formatting and lint and strict Mypy 2.4.0 passed.
+- An isolated runtime dependency audit found no known vulnerabilities.
+- Tests cover at most one 3/10/20-second recovery sequence per outage,
+  continued regular polling, independent circuits and gateways, authentication
+  and rate-limit errors, forbidden-resource pauses, mode changes, unloading,
+  stable entity identities and late pool-counter values.
+- The release tests built two identical component-rooted archives and imported
+  the integration from an isolated extracted installation.
+
+I independently built the Linux archive twice. It contains **55 files** and
+**226,828 bytes**, with `manifest.json` at its root and version
+`0.8.2-beta.1`. Every archived file matches the prepared component source.
+ZIP SHA-256:
+`6234bb5ea0f87166a18b699f7d3c5bf17889bc7f0133b20182516b922b34db4b`.
+
+The protected main branch requires successful combined checks before merging.
+The tag-triggered workflow repeats verification, including the dependency
+audit, Hassfest and HACS, before publication. Published notes, archive and
+checksum must match the verified local artifacts.
+
+I performed no physical appliance writes for this beta. The static APK
+comparison does not establish the recovery delay on a real installation.
+Field confirmation remains open. Select the beta explicitly in HACS and
+restart Home Assistant after updating.
+
 ## 0.8.1 verification
 
 I prepared the full stable release on 2026-10-20 from main, including the HACS

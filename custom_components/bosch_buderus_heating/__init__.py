@@ -357,7 +357,6 @@ def _remove_retired_entities(
     observed_resource_paths: dict[str, str] = {}
     for coordinator in coordinators:
         gateway_id = coordinator.gateway.gateway_id
-        retired_unique_ids.add(f"{gateway_id}:heatSources:numberOfStarts")
         for domain in (
             "totalConsumption",
             "chConsumption",

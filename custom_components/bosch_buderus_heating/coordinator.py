@@ -85,6 +85,9 @@ CIRCUIT_OPEN_INTERVAL = timedelta(minutes=5)
 MAX_FALLBACK_PATHS = 5
 RATE_LIMIT_REPAIR_THRESHOLD = 3
 ACTIVE_NOTIFICATION_INTERVAL = timedelta(seconds=60)
+# Short, bounded recovery of controls temporarily absent in automatic mode.
+# Delays are incremental: at most three targeted reads per manual transition.
+MANUAL_SETPOINT_RETRY_DELAYS = (3.0, 10.0, 20.0)
 # HA rounds scheduled callbacks to whole seconds plus a fixed offset. A callback
 # just before our exact deadline must not postpone a group by another minute.
 # This tolerance applies to group cadence only, never to error/backoff deadlines.
@@ -223,6 +226,7 @@ class BoschBuderusDataUpdateCoordinator(
         self._gateway_failure_count = 0
         self._circuit_open_until = 0.0
         self._update_lock = asyncio.Lock()
+        self._manual_setpoint_tasks: dict[str, asyncio.Task[None]] = {}
         self._polls_total = 0
         self._poll_failures = 0
         self._last_poll_duration_ms: float | None = None
@@ -248,6 +252,86 @@ class BoschBuderusDataUpdateCoordinator(
                 self._next_update.get(group, now_monotonic), now_monotonic
             )
         await super().async_request_refresh()
+
+    def _queue_manual_setpoint_recovery(
+        self, mode_path: str, snapshots: dict[str, ResourceSnapshot]
+    ) -> None:
+        """Recover an unavailable number when a heating circuit enters manual mode."""
+        if not (
+            mode_path.startswith("/heatingCircuits/")
+            and mode_path.endswith("/operationMode")
+        ):
+            return
+        setpoint_path = mode_path.removesuffix("/operationMode") + "/manualRoomSetpoint"
+        snapshot = snapshots.get(setpoint_path)
+        if (
+            snapshot is None
+            or (snapshot.available and snapshot.freshness is Freshness.FRESH)
+            or setpoint_path in self._manual_setpoint_tasks
+        ):
+            return
+        self._manual_setpoint_tasks[setpoint_path] = self.hass.async_create_background_task(
+            self._async_recover_manual_setpoint(mode_path, setpoint_path),
+            f"{DOMAIN} recover manual setpoint",
+        )
+
+    async def _async_recover_manual_setpoint(
+        self, mode_path: str, setpoint_path: str
+    ) -> None:
+        """Recheck only the missing value without bypassing cloud rate limits."""
+        try:
+            for delay in MANUAL_SETPOINT_RETRY_DELAYS:
+                await asyncio.sleep(delay)
+                async with self._update_lock:
+                    snapshots = dict(self.data or {})
+                    mode = snapshots.get(mode_path)
+                    target = snapshots.get(setpoint_path)
+                    if (
+                        mode is None
+                        or not mode.available
+                        or mode.resource.value != "manual"
+                        or target is None
+                        or (target.available and target.freshness is Freshness.FRESH)
+                    ):
+                        return
+                    now = monotonic()
+                    if (
+                        now < self._cloud_backoff_until
+                        or now < self._circuit_open_until
+                        or self._resource_is_paused(setpoint_path, now)
+                    ):
+                        return
+                    try:
+                        results = await self.client.get_resources_bulk(
+                            self.gateway.gateway_id, (setpoint_path,)
+                        )
+                    except RateLimited as err:
+                        self._activate_rate_limit_backoff(err, monotonic())
+                        return
+                    except AuthenticationError:
+                        self._config_entry.async_start_reauth(self.hass)
+                        return
+                    except PointTError:
+                        # Transport problems remain subject to normal polling.
+                        return
+                    successes = self._apply_results(
+                        snapshots,
+                        results,
+                        attempted_at=datetime.now(UTC),
+                        now_monotonic=monotonic(),
+                        source=SnapshotSource.BATCH,
+                    )
+                    self.async_set_updated_data(snapshots)
+                    if successes:
+                        return
+        finally:
+            self._manual_setpoint_tasks.pop(setpoint_path, None)
+
+    def cancel_manual_setpoint_recovery(self) -> None:
+        """Cancel outstanding recovery tasks when the integration is unloaded."""
+        for task in self._manual_setpoint_tasks.values():
+            task.cancel()
+        self._manual_setpoint_tasks.clear()
 
     async def async_write_control(
         self,
@@ -323,6 +407,13 @@ class BoschBuderusDataUpdateCoordinator(
             self._negative_until.pop(path, None)
             self._record_capability(path, "success", SnapshotSource.WRITE)
             self.async_set_updated_data(snapshots)
+            if (
+                path.startswith("/heatingCircuits/")
+                and path.endswith("/operationMode")
+                and snapshot.resource.value != "manual"
+                and confirmed.value == "manual"
+            ):
+                self._queue_manual_setpoint_recovery(path, snapshots)
             return confirmed
 
     async def async_create_holiday(self, values: HolidayWriteValues) -> Resource:
@@ -1061,9 +1152,18 @@ class BoschBuderusDataUpdateCoordinator(
     ) -> int:
         """Apply partial results without discarding last-good values."""
         successful = 0
+        manual_transitions: list[str] = []
         for result in results:
             if result.resource is not None:
                 previous = snapshots.get(result.path)
+                if (
+                    result.path.startswith("/heatingCircuits/")
+                    and result.path.endswith("/operationMode")
+                    and previous is not None
+                    and previous.resource.value != "manual"
+                    and result.resource.value == "manual"
+                ):
+                    manual_transitions.append(result.path)
                 if previous is not None:
                     self._energy_counter_resets += _energy_reset_count(
                         previous.resource, result.resource
@@ -1103,6 +1203,8 @@ class BoschBuderusDataUpdateCoordinator(
             _LOGGER.debug(
                 "PointT resource unavailable: %s", resource_path_template(result.path)
             )
+        for mode_path in manual_transitions:
+            self._queue_manual_setpoint_recovery(mode_path, snapshots)
         return successful
 
     def _record_capability(

@@ -669,6 +669,13 @@ def test_catalog_privacy_polling_devices_and_names() -> None:
     assert resource_name("/heatSources/hs1/workingTime", "total") == (
         "Betriebszeit Gesamt"
     )
+    assert resource_name("/heatSources/hs1/numberOfStarts", "pool") == (
+        "Anzahl der Starts Poolheizung"
+    )
+    assert (
+        resource_name("/heatSources/hs1/numberOfStarts", "pool", language="en")
+        == "Number of starts Pool heating"
+    )
     assert (
         resource_name("/heatSources/emon/coolingConsumption", "outputProduced")
         == "Kühlung \N{EN DASH} Erzeugte Kühlenergie"

@@ -250,7 +250,7 @@ PointT codes and app display names for operation mode:
 | `/heatSources/{hs}/brineCircuit/collectorOutflowTemp` | Brine inlet temperature | R | Fluid returning to the heat pump, named from the heating-system perspective |
 | `/heatSources/{hs}/defrostActive` | Defrost active | R | Boolean or app status, depending on the gateway |
 | `/heatSources/{hs}/heatPumpType` | Heat-pump type | R | Diagnostic: air/water, brine/water, or exhaust-air/water |
-| `/heatSources/{hs}/numberOfStarts` | Starts by operation | R | Multipart cumulative counter |
+| `/heatSources/{hs}/numberOfStarts` | Starts by operation | R | Multipart cumulative counter: `total`, `ch`, `cooling`, `dhw`, `pool` |
 | `/heatSources/{hs}/powerPercentage` | Current power percentage | R | Instantaneous measurement in % |
 | `/heatSources/{hs}/supplyFlowCondenserTemp` | Condenser outlet temperature (TC3) | R | Diagnostic temperature |
 | `/heatSources/{hs}/type` | Heat-source type | R | Diagnostic |
@@ -265,6 +265,12 @@ PointT codes and app display names for operation mode:
 | `/heatSources/standbyMode` | Standby mode | R | Optional operating state |
 | `/heatSources/systemPressure` | System pressure | R | Pressure sensor in bar; validated range values as attributes and optional derived status sensor |
 | `/heatSources/systemPressureRange` | Permitted pressure range | R | Six static diagnostic sensors in bar |
+
+The `pool` start-counter key is present in the `NumberOfStartsType` model of
+MyBuderus 5.0.0 and HomeCom Easy 5.0.0. This is static APK evidence, not a
+live-device validation. A discovered `numberOfStarts` resource gets stable
+entities for the known keys even with a partial payload; missing values remain
+unknown. This does not add a predefined `pool` key to `workingTime`.
 
 PointT returns the pressure range as a structured `values` object. The
 integration creates one entity for each of `highSystemPressure`,

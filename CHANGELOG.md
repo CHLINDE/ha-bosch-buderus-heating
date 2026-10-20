@@ -20,6 +20,10 @@ stop pending recovery on unload and keep a targeted success from clearing an
 unrelated failed polling cycle. See [request behavior](docs/request-behavior.md)
 for timing, request limits and the scope of the APK comparison.
 
+I register the pool-heating start counter (`numberOfStarts` → `pool`) even
+when the gateway's initial payload is empty or partial, with German and English
+names. Values still depend on gateway support; polling is unchanged.
+
 ## [0.8.1] - 2026-10-20
 
 I am releasing 0.8.1 as the current stable version. It includes the holiday

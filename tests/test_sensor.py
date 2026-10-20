@@ -1870,9 +1870,7 @@ def test_global_start_counter_omitted_when_per_source_starts_exist() -> None:
     descriptions = build_sensor_descriptions(
         {global_counter.path: global_counter, source_counter.path: source_counter}
     )
-    assert all(
-        item.resource_path != global_counter.path for item in descriptions
-    )
+    assert all(item.resource_path != global_counter.path for item in descriptions)
     assert any(
         item.resource_path == source_counter.path and item.value_key == "total"
         for item in descriptions

@@ -466,7 +466,7 @@ def _track_resource_sensors(
         recovered = {
             path: snapshot.resource
             for path, snapshot in (coordinator.data or {}).items()
-            if coordinator.startup_data.tracks(path) and snapshot.available
+            if snapshot.available
         }
         entities = []
         for description in build_sensor_descriptions(recovered):

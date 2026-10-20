@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from time import monotonic
 from typing import TYPE_CHECKING, Any, cast
 
@@ -39,6 +40,7 @@ from .resource_catalog import (
     CapabilityMaturity,
     capability_maturity,
     configured_device_name,
+    supports_entity,
 )
 from .runtime import BoschBuderusRuntimeData
 from .startup_data import STARTUP_BUDGET_SECONDS, StartupSession, is_startup_entity_path
@@ -357,6 +359,22 @@ def _remove_retired_entities(
     observed_resource_paths: dict[str, str] = {}
     for coordinator in coordinators:
         gateway_id = coordinator.gateway.gateway_id
+        # The global start counter is a valid fallback on systems where
+        # the per-source total is absent. Retire it only if it cannot
+        # provide a supported entity or a per-source counter supersedes it.
+        global_path = "/heatSources/numberOfStarts"
+        global_counter = coordinator.resources.get(global_path)
+        has_per_source_counter = any(
+            re.fullmatch(r"/heatSources/[^/]+/numberOfStarts", path)
+            and supports_entity(resource)
+            for path, resource in coordinator.resources.items()
+        )
+        if (
+            global_counter is None
+            or not supports_entity(global_counter)
+            or has_per_source_counter
+        ):
+            retired_unique_ids.add(f"{gateway_id}:heatSources:numberOfStarts")
         for domain in (
             "totalConsumption",
             "chConsumption",

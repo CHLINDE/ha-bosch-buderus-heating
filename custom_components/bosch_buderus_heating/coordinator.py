@@ -265,8 +265,7 @@ class BoschBuderusDataUpdateCoordinator(
         setpoint_path = mode_path.removesuffix("/operationMode") + "/manualRoomSetpoint"
         snapshot = snapshots.get(setpoint_path)
         if (
-            snapshot is None
-            or (snapshot.available and snapshot.freshness is Freshness.FRESH)
+            (snapshot is not None and snapshot.available and snapshot.freshness is Freshness.FRESH)
             or setpoint_path in self._manual_setpoint_tasks
         ):
             return
@@ -290,8 +289,11 @@ class BoschBuderusDataUpdateCoordinator(
                         mode is None
                         or not mode.available
                         or mode.resource.value != "manual"
-                        or target is None
-                        or (target.available and target.freshness is Freshness.FRESH)
+                        or (
+                            target is not None
+                            and target.available
+                            and target.freshness is Freshness.FRESH
+                        )
                     ):
                         return
                     now = monotonic()
@@ -321,6 +323,24 @@ class BoschBuderusDataUpdateCoordinator(
                         now_monotonic=monotonic(),
                         source=SnapshotSource.BATCH,
                     )
+                    if successes and target is None:
+                        # A control missing at startup must join regular polling
+                        # once its gateway metadata becomes available again.
+                        recovered = snapshots[setpoint_path].resource
+                        group = poll_group(recovered)
+                        if (
+                            group in self._poll_intervals
+                            and setpoint_path not in self._paths_by_group.get(group, ())
+                        ):
+                            self._paths_by_group[group] = (
+                                *self._paths_by_group.get(group, ()),
+                                setpoint_path,
+                            )
+                    elif target is None:
+                        # Manual controls can legitimately return 404 in Auto.
+                        # Do not let an initial miss disable the remaining
+                        # bounded retries for this known circuit path.
+                        self._negative_until.pop(setpoint_path, None)
                     self.async_set_updated_data(snapshots)
                     if successes:
                         return
@@ -984,6 +1004,15 @@ class BoschBuderusDataUpdateCoordinator(
             for path, resource in successful_resources.items()
         }
         self._merge_startup_resources(snapshots)
+        # A manual setpoint may be absent during discovery even though
+        # the circuit already reports Manual. Attempt bounded recovery.
+        for path, snapshot in snapshots.items():
+            if (
+                path.startswith("/heatingCircuits/")
+                and path.endswith("/operationMode")
+                and snapshot.resource.value == "manual"
+            ):
+                self._queue_manual_setpoint_recovery(path, snapshots)
         return snapshots
 
     def _merge_startup_resources(self, snapshots: dict[str, ResourceSnapshot]) -> None:

@@ -35,6 +35,11 @@ Update through HACS, restart Home Assistant and reload the browser. See the
 [season-switching guide](docs/season-switching.md) for details and the remaining
 field checks.
 
+I am also offering **0.8.2-beta.1** for testing manual-setpoint recovery and the
+pool-heating start counter. **0.8.1 remains Stable/Latest.** Select the beta
+explicitly in HACS and restart Home Assistant after updating. See the
+[beta release notes](CHANGELOG.md#082-beta1---2026-10-20).
+
 Bosch/Buderus Heating is an unofficial Home Assistant custom integration. It
 discovers the capabilities exposed by a heating system instead of assuming a
 fixed device layout. Heating circuits, hot-water circuits, heat generators,

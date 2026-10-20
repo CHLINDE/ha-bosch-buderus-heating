@@ -189,6 +189,8 @@ async def async_unload_entry(
     if unloaded:
         if entry.runtime_data.startup is not None:
             entry.runtime_data.startup.close()
+        for coordinator in entry.runtime_data.coordinators:
+            coordinator.cancel_manual_setpoint_recovery()
         for manager in entry.runtime_data.notifications:
             await manager.async_close()
     return unloaded

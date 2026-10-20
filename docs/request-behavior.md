@@ -167,6 +167,44 @@ add a dedicated initial batch. Failed supplementary reads also need later
 recovery requests. The test does not establish faster startup, a guaranteed
 percentage reduction, or real-world uptime on a physical heating system.
 
+## Manual heating-circuit setpoint recovery
+
+When a reported heating circuit is confirmed to be in Manual and its
+`manualRoomSetpoint` is missing or unavailable, the coordinator can make up to
+three targeted reads. It waits **3, 10 and 20 seconds in succession**, so the
+earliest starts are approximately 3, 13 and 33 seconds after scheduling, plus
+request and lock-wait time. These reads disable immediate transport retries;
+the existing access-token refresh may still repeat an HTTP request once.
+
+There is one series per continuous unavailability episode and at most one task
+per circuit and gateway. Repeated failure polls do not renew the series. A
+successful setpoint read or a confirmed departure from Manual resets the
+episode. Recovery stops when the target is fresh, Manual is no longer confirmed,
+the integration unloads, or a connection, service, authentication or rate-limit
+error prevents further reads. Existing cloud, circuit-breaker and per-resource
+pauses apply. A 429 item in a successful batch envelope also activates backoff.
+
+After the series, a previously discovered target keeps its normal polling.
+An absent startup target remains a candidate only for that reported circuit's
+exact setpoint path, while Manual is confirmed. It joins the regular control
+group reads every **5 minutes**, or **10 minutes** in the cloud-friendly profile.
+Leaving Manual removes that provisional candidate. A successful response joins
+normal catalog polling and can create supported entities using its actual
+metadata. Unknown circuits and other failed optional discovery paths are not
+added by this mechanism. The shared distinct-path budget still applies.
+
+A 404 for this provisional target does not install a 24-hour absence pause.
+403 pauses remain unchanged. Targeted results update only the affected resource;
+they do not declare a failed main cycle healthy or reset its polling timer.
+
+Static inspection of MyBuderus and HomeCom Easy **5.0.0 (26072914)** supports
+reading the matching setpoint again after a mode change and reconsidering
+failed cached reads. The APKs contain several provider paths, including an
+ICOM helper with five retries one second apart. The 3/10/20-second sequence and
+the episode limit above are integration policy, not timing copied from that
+helper. Static inspection does not establish how long a particular installation
+takes to expose its setpoint. No appliance write test is claimed for this change.
+
 ## Diagnostics and privacy
 
 Schema 14 distinguishes functional discovery, omitted license data and
@@ -202,3 +240,12 @@ ausdrücklich von dieser fortgesetzten Wiederholung ausgenommen.
 Die Integration spart wiederholte Metadatenabrufe und lässt unwichtige
 Zusatzabfragen die funktionierende Einrichtung nicht mehr abbrechen. Neue,
 bisher unbekannte Anlagenbestandteile benötigen weiterhin eine neue Discovery.
+
+Für einen fehlenden manuellen Heizkreis-Sollwert gibt es zusätzlich höchstens
+drei gezielte Abrufe pro zusammenhängendem Ausfall. Die Wartezeiten von 3, 10
+und 20 Sekunden folgen aufeinander. Weitere Fehler-Polls starten keine neue
+Serie. Nach den Versuchen greift der reguläre Abfragerhythmus. Ein beim Start
+fehlender Sollwert wird dabei nur am tatsächlich gemeldeten Heizkreis und bei
+bestätigtem Handbetrieb weitergeprüft. Eine erfolgreiche Antwort kann das
+Bedienelement ohne Neustart ergänzen. Vorhandene 403-Pausen und Cloud-Sperrzeiten
+bleiben erhalten.

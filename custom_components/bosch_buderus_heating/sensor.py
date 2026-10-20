@@ -725,7 +725,17 @@ def build_sensor_descriptions(
 ) -> tuple[BoschBuderusSensorEntityDescription, ...]:
     """Build stable scalar descriptions from the discovered resource shapes."""
     descriptions: list[BoschBuderusSensorEntityDescription] = []
+    # Use the global scalar counter only when no per-source total counter exists.
+    # A gateway may expose only /heatSources/numberOfStarts (e.g. G125).
+    global_starts_path = "/heatSources/numberOfStarts"
+    per_source_starts = any(
+        re.fullmatch(r"/heatSources/[^/]+/numberOfStarts", path)
+        and resource.metadata.resource_type == "emonValue"
+        for path, resource in resources.items()
+    )
     for resource in resources.values():
+        if resource.path == global_starts_path and per_source_starts:
+            continue
         if not supports_entity(resource) and not is_opt_in_diagnostic_resource(
             resource.path
         ):

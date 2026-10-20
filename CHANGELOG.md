@@ -5,6 +5,17 @@ Versioning after its first tagged preview.
 
 ## [Unreleased]
 
+## [0.8.2-beta.2] - 2026-10-20
+
+Fork test version based on upstream `v0.8.2-beta.1` for Issue #64.
+
+- Expose the existing read-only scalar `/heatSources/numberOfStarts` as a cumulative diagnostic sensor for systems that do not provide a per-heat-source start counter, such as the Buderus G125 BE ECO-21.
+- Keep the regular 15-minute polling cadence without additional cloud requests.
+- Avoid duplicate total-start entities if a supported per-heat-source counter is available.
+- Add schema and sensor regression tests; physical-device validation and CI are still pending.
+
+This version identifies the fork development branch. No public GitHub release or tag has been created for it.
+
 ## [0.8.2-beta.1] - 2026-10-20
 
 I am releasing this beta with the manual-setpoint recovery from PR #71 and the

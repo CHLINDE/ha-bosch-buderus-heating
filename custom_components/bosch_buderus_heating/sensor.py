@@ -730,7 +730,7 @@ def build_sensor_descriptions(
     global_starts_path = "/heatSources/numberOfStarts"
     per_source_starts = any(
         re.fullmatch(r"/heatSources/[^/]+/numberOfStarts", path)
-        and resource.metadata.resource_type == "emonValue"
+        and supports_entity(resource)
         for path, resource in resources.items()
     )
     for resource in resources.values():

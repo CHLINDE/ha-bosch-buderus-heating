@@ -1532,7 +1532,9 @@ async def test_manual_setpoint_recovery_queued_after_confirmed_mode_write(
         resource_type="stringValue", allowed_values=("auto", "manual"), writable=True
     )
     old_mode = Resource(path=mode_path, value="auto", has_value=True, metadata=metadata)
-    new_mode = Resource(path=mode_path, value="manual", has_value=True, metadata=metadata)
+    new_mode = Resource(
+        path=mode_path, value="manual", has_value=True, metadata=metadata
+    )
     target = _resource(target_path, 20.0)
     coordinator.data = {
         mode_path: _snapshot(old_mode),
@@ -1573,8 +1575,11 @@ async def test_manual_setpoint_recovery_reads_only_missing_target(
         "custom_components.bosch_buderus_heating.coordinator.asyncio.sleep",
         AsyncMock(),
     ):
-        await coordinator._async_recover_manual_setpoint(mode_path, target_path)
-    client.get_resources_bulk.assert_awaited_once_with("gateway-one", (target_path,))
+        coordinator._queue_manual_setpoint_recovery(mode_path, coordinator.data)
+        await coordinator._manual_setpoint_tasks[target_path]
+    client.get_resources_bulk.assert_awaited_once_with(
+        "gateway-one", (target_path,), retryable=False
+    )
     assert coordinator.data[target_path].available
     assert coordinator.data[target_path].resource.value == 22.0
 
@@ -1643,8 +1648,14 @@ async def test_manual_setpoint_404_queues_recovery_when_mode_already_manual(
     with patch.object(coordinator, "_queue_manual_setpoint_recovery") as queue:
         coordinator._apply_results(
             snapshots,
-            (BatchItemResult("gateway-one", target_path, 404,
-                             error=ResourceNotFound(target_path, 404)),),
+            (
+                BatchItemResult(
+                    "gateway-one",
+                    target_path,
+                    404,
+                    error=ResourceNotFound(target_path, 404),
+                ),
+            ),
             attempted_at=datetime.now(UTC),
             now_monotonic=monotonic(),
             source=SnapshotSource.BATCH,
@@ -1683,13 +1694,14 @@ async def test_missing_manual_setpoint_can_be_recovered_and_polled(
         client.get_resources_bulk.return_value = (
             BatchItemResult("gateway-one", target_path, 200, resource=recovered),
         )
-        await coordinator._async_recover_manual_setpoint(mode_path, target_path)
+        coordinator._queue_manual_setpoint_recovery(mode_path, coordinator.data)
+        await coordinator._manual_setpoint_tasks[target_path]
 
     assert coordinator.data[target_path].resource is recovered
     assert coordinator.data[target_path].available
     assert target_path in coordinator._paths_by_group[PollGroup.CONTROL]
     client.get_resources_bulk.assert_awaited_once_with(
-        "gateway-one", (target_path,)
+        "gateway-one", (target_path,), retryable=False
     )
 
 
@@ -1721,7 +1733,8 @@ async def test_missing_manual_setpoint_initial_404_does_not_block_retry(
         "custom_components.bosch_buderus_heating.coordinator.asyncio.sleep",
         AsyncMock(),
     ):
-        await coordinator._async_recover_manual_setpoint(mode_path, target_path)
+        coordinator._queue_manual_setpoint_recovery(mode_path, coordinator.data)
+        await coordinator._manual_setpoint_tasks[target_path]
 
     assert client.get_resources_bulk.await_count == 2
     assert target_path not in coordinator._negative_until

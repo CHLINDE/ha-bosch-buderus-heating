@@ -5,6 +5,21 @@ Versioning after its first tagged preview.
 
 ## [Unreleased]
 
+I extended the manual-setpoint recovery contributed by CHLINDE. When a reported
+heating circuit is in Manual and its setpoint is missing or unavailable, I allow
+one series of up to three targeted reads, waiting 3, 10 and 20 seconds in turn.
+Repeated failure polls do not start another series until the value has recovered
+or the circuit has left Manual. Thank you, CHLINDE, for the initial recovery
+implementation and tests.
+
+I keep a setpoint missing at startup eligible for the normal control-group reads
+while its circuit is in Manual. A later successful response adds its supported
+entities and normal polling without a restart. Existing forbidden-resource
+pauses, authentication handling and cloud rate limits remain effective. I also
+stop pending recovery on unload and keep a targeted success from clearing an
+unrelated failed polling cycle. See [request behavior](docs/request-behavior.md)
+for timing, request limits and the scope of the APK comparison.
+
 ## [0.8.1] - 2026-10-20
 
 I am releasing 0.8.1 as the current stable version. It includes the holiday

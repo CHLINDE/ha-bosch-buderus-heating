@@ -16,8 +16,8 @@ from scripts.release_notes import extract_release_notes
 
 
 def test_release_archive_is_reproducible_and_component_rooted(tmp_path: Path) -> None:
-    first, checksum = build_release(tmp_path / "first", expected_version="0.8.1-beta.2")
-    second, _ = build_release(tmp_path / "second", expected_version="0.8.1-beta.2")
+    first, checksum = build_release(tmp_path / "first", expected_version="0.8.1")
+    second, _ = build_release(tmp_path / "second", expected_version="0.8.1")
 
     assert first.name == ARCHIVE_NAME
     assert first.read_bytes() == second.read_bytes()
@@ -28,6 +28,9 @@ def test_release_archive_is_reproducible_and_component_rooted(tmp_path: Path) ->
         names = release_zip.namelist()
         assert "manifest.json" in names
         assert "pointt/py.typed" in names
+        assert "holiday_timezones.py" in names
+        assert "holiday_ui.py" in names
+        assert "www/holiday-dialog.js" in names
         assert not any(name.startswith("custom_components/") for name in names)
         assert not any("__pycache__" in name or name.endswith(".pyc") for name in names)
 
@@ -38,7 +41,7 @@ def test_release_rejects_a_version_mismatch(tmp_path: Path) -> None:
 
 
 def test_release_archive_imports_from_an_isolated_install(tmp_path: Path) -> None:
-    archive, _ = build_release(tmp_path / "dist", expected_version="0.8.1-beta.2")
+    archive, _ = build_release(tmp_path / "dist", expected_version="0.8.1")
     install_root = tmp_path / "install"
     component = install_root / "custom_components" / "bosch_buderus_heating"
     component.mkdir(parents=True)

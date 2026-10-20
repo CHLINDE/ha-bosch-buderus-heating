@@ -21,21 +21,19 @@
 > The illustrated [setup guide](docs/setup.md) explains installation and
 > sign-in step by step.
 
-I am releasing **0.8.0** as the current stable version. It brings heating fault
-notifications to the Home Assistant bell, a new icon for light and dark themes,
-and fixes for disappearing solar entities and reauthentication. Install the
-update through HACS and restart Home Assistant. Notifications are enabled by
-default and can be configured for each installation. See the
-[release notes](CHANGELOG.md) for all changes since 0.7.2 and the field checks
-that remain open.
+I am releasing **0.8.1** as the current stable version. Holiday creation and
+editing now share one dialog with date and time beside each other, clocks
+without seconds, a specific end-before-start error and a red delete button
+with confirmation. I also included the timezone corrections from the HACS
+review, startup recovery improvements, central season switching and the
+compatible maintenance updates.
 
-I am releasing **0.8.1-beta.1** to improve recovery from temporary PointT
-failures and reduce unnecessary metadata reads. Successful supplementary data
-is read once per integration load; temporary failures are retried later without
-a restart. Version **0.8.0 remains the stable release**. The beta also includes
-the compatible maintenance updates from PRs #55, #56 and #57. See the
-[exact request and recovery rules](docs/request-behavior.md) and
-[beta release notes](CHANGELOG.md#081-beta1---2026-10-11).
+Update through HACS, restart Home Assistant and reload the browser. See the
+[release notes](CHANGELOG.md#081---2026-10-20),
+[holiday guide](docs/holiday-periods.md),
+[request and recovery rules](docs/request-behavior.md) and
+[season-switching guide](docs/season-switching.md) for details and the remaining
+field checks.
 
 Bosch/Buderus Heating is an unofficial Home Assistant custom integration. It
 discovers the capabilities exposed by a heating system instead of assuming a

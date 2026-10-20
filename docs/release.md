@@ -4,6 +4,43 @@ Releases are built from a verified Git tag. The HACS archive contains the
 integration directly at its root and is published together with a SHA-256
 checksum file.
 
+## 0.8.1 verification
+
+I prepared the full stable release on 2026-10-20 from main, including the HACS
+timezone corrections, holiday dialog and write changes, the earlier startup
+recovery and season-switching betas, and the compatible dependency updates.
+
+- Home Assistant 2026.10.1, Python 3.14.2: **1,287 tests passed**, with
+  **96.45% combined statement and branch coverage**.
+- Home Assistant 2026.9.4: **366 targeted compatibility cases passed** for
+  configuration, holiday dialogs, timezone preparation, writing and coordination.
+- Ruff 0.17.0 formatting and lint, strict Mypy 2.4.0 and the isolated runtime
+  dependency audit passed. The audit found no known vulnerabilities.
+- Local browser component checks passed at 390 and 1280 pixels: adjacent date
+  and time, minute-only clocks, empty required dates, editable 08:00 defaults,
+  saved times, keyboard deletion, repeated-click protection, invalid drafts,
+  failed-request recovery and confirmation routing. The test used simulated
+  flow responses and performed no appliance writes.
+- Regression tests cover asynchronous timezone preparation before publishing
+  successful, adjusted and duplicate write results. The existing cold-cache
+  tests check that named-zone disk access occurs outside the event loop.
+
+The earlier installation evidence in [Holiday periods](holiday-periods.md)
+covers the dialog layout and a midnight edit of one existing test holiday.
+Creation and deletion were not repeated on the appliance for this release.
+The broader recovery and installation checks below remain open.
+
+The locally built Linux archive contains **55 files**, **224,569 bytes**, with
+`manifest.json` at the root and both the timezone module and new dialog assets.
+Two independent test builds produced identical archives, and import from an
+isolated extracted installation passed. ZIP SHA-256:
+`d39b236bb724a284b6a1fbf715f0c57666763bad977e338b0b2d0fd35e4bf13a`.
+
+The release uses the protected main branch and its required checks. The
+tag-triggered workflow repeats source checks, tests, the dependency audit,
+Hassfest and HACS validation before publication. Published notes, the archive
+and its checksum must match the locally verified release artifacts.
+
 ## 0.8.1-beta.2 verification
 
 I prepared this beta on 2026-10-11 to expose central season switching in Home
@@ -49,7 +86,7 @@ paths, deadlines, exception cases and measured savings, is in
 
 This version is a pre-release; **0.8.0 remains Stable/Latest**. The combined
 release branch is
-`codex/release-v0.8.1-beta.1`. Other working checkouts are unaffected.
+`release/v0.8.1-beta.1`. Other working checkouts are unaffected.
 
 ### Included changes
 

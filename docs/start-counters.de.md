@@ -16,6 +16,7 @@ Die ausführlichen technischen Regeln stehen auch in der
 | Ganzzahlige und gebrochene Zahlendarstellungen wurden teilweise unterschiedlich behandelt; gemeldete Fehlerkennwerte fehlten. | Ungültige Zahlen konnten erscheinen, gültige Zahlen konnten verschwinden. | Eine gemeinsame Zählerprüfung wertet Datenformat, Zahl und Fehlerkennwerte aus. |
 | Unbekannte Teilfelder konnten Sensoren erzeugen; bei mehrfachen Angaben gewann der erste Wert. | Unerwartete oder widersprüchliche Angaben konnten angezeigt werden. | Ich beschränke die Auswertung auf bekannte Teile und weise widersprüchliche Angaben zurück. |
 | Nach einem fehlgeschlagenen Start fehlte teilweise die regelmäßige Abfrage. | Ein erhaltener Registrierungseintrag allein konnte sich nicht erholen. | Ich berücksichtige registrierte Pfade beim Start und nehme zulässige Wiederherstellungen in die normale Abfrageplanung auf. |
+| Die Wiederherstellung akzeptierte weniger ID-Schreibweisen als die Sensorerstellung. | Ein bereits angelegter Zähler konnte bei einer ID mit Punkt oder Nicht-ASCII-Zeichen nach einem fehlgeschlagenen Start dauerhaft fehlen. | Ich verwende dieselbe Pfadprüfung für Erstellung und Wiederherstellung und prüfe den vollständigen Ablauf mit der tatsächlichen Discovery. |
 
 ## Gültige Werte und unveränderte Zuordnung
 
@@ -56,6 +57,11 @@ seine normale Behandlung von Zählerrücksetzungen.
 Ich ordne vorhandene Entitäten ausschließlich ihrem Konfigurationseintrag und
 Gateway zu. Ihre exakten Ressourcenpfade werden bei der begrenzten Discovery
 berücksichtigt. Die Registrierung ersetzt keine aktuelle Antwort der Anlage.
+Die Schreibweise einer bereits akzeptierten Wärmeerzeuger-ID bleibt erhalten,
+einschließlich Punkten und Nicht-ASCII-Zeichen. Pfadwechsel über `..`, leere
+IDs, Abfrageparameter und mehrdeutige Entitätskennungen werden weiterhin
+abgewiesen. Die Varianten in den Tests sind synthetisch und belegen keine
+bestimmte ID-Schreibweise auf einer realen Anlage.
 
 Registrierte Pfade und ausdrücklich gemeldete, bereits versuchte Referenzen
 können anschließend über die normale langsame Abfragegruppe wiederhergestellt
@@ -88,15 +94,22 @@ Neustarts, zwei Gateways, die tatsächlichen Home-Assistant-Zustände,
 Registrierungseinträge, Profilintervalle, Anfragenlimits und Fehlerpausen.
 Die verwendeten Gerätedaten sind synthetisch.
 
+Im erneuten Review habe ich zusätzlich die unterschiedliche Behandlung von
+IDs nachgewiesen. Fünf Fälle scheiterten vor der Korrektur. Die ergänzten
+Tests prüfen erzeugte Sensoridentitäten, unveränderte Pfadgrenzen und die
+Wiederherstellung nach 403, 404 und 406 mit der tatsächlichen Discovery.
+Die 403-Pause bleibt dabei wirksam; andere fällige Ressourcen werden weiter
+abgefragt.
+
 Ein zusätzlicher Test verwendet den Home-Assistant-Recorder mit einer
 Datenbank im Arbeitsspeicher. Die Werte 100, 105 und 110 ergeben trotz eines
 zwischenzeitlichen Fehlerkennwerts und Ausfalls einen Zuwachs von 10. Nach
 einem Rücksprung auf 3 ergibt die normale Rücksetzungsbehandlung einen
 gesamten Zuwachs von 13. Damit prüfe ich die tatsächlich gespeicherte Statistik.
 
-Die lokale Gesamtprüfung am 21.10.2026 besteht mit 1.448 Testfällen und
-96,62 % kombinierter Code- und Verzweigungsabdeckung unter Python 3.14.2.
-Gegenüber dem ursprünglichen PR sind das 88 zusätzliche Fälle einschließlich
+Die lokale Gesamtprüfung am 21.10.2026 besteht mit 1.460 Testfällen und
+96,64 % kombinierter Code- und Verzweigungsabdeckung unter Python 3.14.2.
+Gegenüber dem ursprünglichen PR sind das 100 zusätzliche Fälle einschließlich
 separat gezählter Testvarianten. Das neue Modul für die Zählerauswertung erreicht
 100 % Code- und Verzweigungsabdeckung. Ruff, Formatprüfung und striktes Mypy
 bestehen. Die Tests prüfen außerdem den reproduzierbaren Paketbau und den

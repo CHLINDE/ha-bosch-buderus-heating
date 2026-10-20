@@ -6,6 +6,7 @@ import math
 import re
 from dataclasses import dataclass
 
+from .pointt.bulk import normalize_resource_path
 from .pointt.models import Resource, ResourceMetadata
 
 GLOBAL_START_COUNTER = "/heatSources/numberOfStarts"
@@ -16,7 +17,12 @@ _SOURCE_PATH = re.compile(r"^/heatSources/[^/:]+/numberOfStarts$")
 
 def is_start_counter_path(path: str) -> bool:
     """Recognize exact counter leaves without inventing heat-source IDs."""
-    return path == GLOBAL_START_COUNTER or _SOURCE_PATH.fullmatch(path) is not None
+    if path != GLOBAL_START_COUNTER and _SOURCE_PATH.fullmatch(path) is None:
+        return False
+    try:
+        return normalize_resource_path(path) == path
+    except ValueError:
+        return False
 
 
 def registered_start_counter_path(unique_id: str, gateway_id: str) -> str | None:
@@ -32,9 +38,9 @@ def registered_start_counter_path(unique_id: str, gateway_id: str) -> str | None
         and parts[0] == "heatSources"
         and parts[2] == "numberOfStarts"
         and parts[3] in START_COUNTER_KEYS
-        and re.fullmatch(r"[A-Za-z0-9_-]+", parts[1])
     ):
-        return f"/heatSources/{parts[1]}/numberOfStarts"
+        path = f"/heatSources/{parts[1]}/numberOfStarts"
+        return path if is_start_counter_path(path) else None
     return None
 
 

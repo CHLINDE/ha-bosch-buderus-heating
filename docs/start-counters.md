@@ -16,6 +16,7 @@ return interchangeable counters.
 | Generic scalar handling treated integer and floating-point error-like values differently and did not retain declared error markers. | Invalid readings could become counts, while a legitimate `32767.0` could be discarded. | I use one counter assessment for schema, numeric validation, entity readings and diagnostics. |
 | Unknown multipart fields could become entities, and the first repeated field won. | Unexpected fields or conflicting values could be published. | I allow only known parts and reject conflicting readings deterministically. |
 | An omitted startup resource had no regular polling path; an unexpected schema could be classified as static. | Retaining its registry entry alone did not ensure recovery. | I restore exact registered paths and keep eligible recovery leaves on the slow polling group. |
+| Registry recovery accepted fewer source-ID forms than sensor creation. | An existing counter with a dotted or non-ASCII source ID could lose recovery after a failed startup read. | I use the same path validation for creation and recovery, and test the complete flow with the actual discovery implementation. |
 
 ## Supported contract
 
@@ -70,6 +71,11 @@ gateway. Restored paths join the existing bounded discovery roots. A registry
 entry supplies entity shape, never a fresh reading. Only actual successful
 responses supply current schema and count data.
 
+Accepted source IDs retain their exact spelling, including dots and non-ASCII
+characters. Traversal segments, empty IDs, query or fragment components and
+ambiguous entity identities remain rejected. The additional ID variants in
+the tests are synthetic, not evidence of naming on a physical installation.
+
 Registered leaves and explicitly referenced leaves that discovery attempted
 remain eligible for recovery. Failed optional probes and references not
 attempted because of discovery limits are not promoted. All recovery paths
@@ -105,6 +111,12 @@ I first ran 20 focused regression cases against the original PR head
 cases covered source suppression, registry removal, invalid numeric readings,
 declared error markers, unknown fields, conflicting parts and source outages.
 
+The follow-up review reproduced five further failures caused by inconsistent
+source-ID validation. I added creation-to-recovery identity checks, rejection
+cases for unsafe paths, and complete discovery/polling cases for 403, 404 and
+406 responses. The forbidden-resource pause remains effective while other
+due resources can still be read.
+
 The expanded tests exercise parser boundaries, malformed payloads, profile
 timing, discovery budgets, partial failures, cloud backoff and authentication.
 They also set up and unload the integration through Home Assistant with two
@@ -116,8 +128,8 @@ statistics: counts 100, 105 and 110 produce a sum of 10 despite an intervening
 declared error marker and unavailable reading. A subsequent count of 3 gives
 a sum of 13 through Home Assistant's normal reset handling.
 
-Local validation on 2026-10-21 passed with 1,448 test cases and 96.62% combined
-statement and branch coverage on Python 3.14.2. This includes 88 additional
+Local validation on 2026-10-21 passed with 1,460 test cases and 96.64% combined
+statement and branch coverage on Python 3.14.2. This includes 100 additional
 cases relative to the initial PR, counting parametrized variants. The new
 counter-assessment module has 100% statement and branch coverage. Ruff,
 formatting and strict Mypy passed. The complete suite also verified repeatable

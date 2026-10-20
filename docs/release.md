@@ -4,6 +4,46 @@ Releases are built from a verified Git tag. The HACS archive contains the
 integration directly at its root and is published together with a SHA-256
 checksum file.
 
+## 0.8.2-beta.2 verification
+
+I prepared this beta on 2026-10-21 with the start-counter changes from PR #72.
+Thank you, CHLINDE, for the initial implementation and for confirming that the
+missing counter became visible. I keep general and per-source counters
+independent, validate their readings and restore existing entities through
+normal polling. The [implementation report](start-counters.md) and its
+[German version](start-counters.de.md) explain the previous weaknesses and
+the changes in detail.
+
+The release is a pre-release. **0.8.1 remains Stable/Latest.**
+
+- Home Assistant 2026.10.1, Python 3.14.2: **1,460 tests passed**, with
+  **96.64% combined statement and branch coverage**. Counts include
+  parametrized variants; the counter-assessment module has 100% coverage.
+- Ruff formatting and lint and strict Mypy passed.
+- The follow-up review found inconsistent source-ID handling during recovery.
+  Five cases failed before the correction. I added twelve cases covering
+  identity restoration, rejected paths and actual discovery/polling after
+  403, 404 and 406 responses. Forbidden-resource pauses remain effective.
+- Tests also exercise Home Assistant registration and reload with two
+  synthetic gateways, recorder statistics, bounded request batches, malformed
+  readings, cloud failures, deterministic packaging and isolated ZIP imports.
+
+The Linux archive contains **56 files** and **230,306 bytes**, with
+`manifest.json` at its root and version `0.8.2-beta.2`. Every archived file
+matches the prepared component source. ZIP SHA-256:
+`02919378b6036bf537ebef1899f1d943bf4c84aa676c99f194b765f0ca97fa50`.
+
+Publication requires the protected main branch and successful checks on the
+final PR commit. The tag-triggered workflow repeats source checks, tests, the
+isolated dependency audit, Hassfest and HACS before publishing. The published
+ZIP, checksum and release notes must match the locally verified package and
+the matching CHANGELOG section.
+
+CHLINDE's feedback confirms visibility with the initial implementation.
+The revised recovery and multi-source behavior still need field confirmation.
+I performed no physical appliance writes for this beta. Select the beta
+explicitly in HACS and restart Home Assistant after updating.
+
 ## 0.8.2-beta.1 verification
 
 I prepared this beta on 2026-10-20 with the pool-heating start counter from

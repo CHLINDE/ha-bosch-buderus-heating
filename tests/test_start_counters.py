@@ -331,10 +331,113 @@ def test_boolean_counter_payloads_never_create_binary_sensors() -> None:
         "gateway-one:heatSources:numberOfStarts:total",
         "gateway-one:heatSources:../hs1:numberOfStarts:total",
         "gateway-one:heatSources::numberOfStarts:total",
+        "gateway-one:heatSources:.:numberOfStarts:total",
+        "gateway-one:heatSources:..:numberOfStarts:total",
+        "gateway-one:heatSources:hs?1:numberOfStarts:total",
+        "gateway-one:heatSources:hs#1:numberOfStarts:total",
     ],
 )
 def test_registry_recovery_rejects_foreign_or_ambiguous_ids(unique_id) -> None:
     assert registered_start_counter_path(unique_id, "gateway-one") is None
+
+
+@pytest.mark.parametrize("source_id", ["hs1", "hs-1", "hs_1", "hs.1", "source_ä"])
+def test_created_counter_identities_can_be_restored(source_id) -> None:
+    resource = source_resource(id=f"/heatSources/{source_id}/numberOfStarts")
+    descriptions = build_sensor_descriptions({resource.path: resource})
+    assert len(descriptions) == 5
+    for description in descriptions:
+        identity = f"gateway-one:{description.unique_key}"
+        assert registered_start_counter_path(identity, "gateway-one") == resource.path
+
+
+@pytest.mark.parametrize("status", [403, 404, 406])
+async def test_dotted_source_recovers_through_real_discovery(hass, status) -> None:
+    entry, coordinator = coordinator_for(hass)
+    entry.runtime_data = SimpleNamespace(coordinators=(coordinator,))
+    resource = source_resource(id="/heatSources/hs.1/numberOfStarts")
+    description = next(
+        item
+        for item in build_sensor_descriptions({resource.path: resource})
+        if item.value_key == "total"
+    )
+    registry = er.async_get(hass)
+    existing = registry.async_get_or_create(
+        "sensor",
+        DOMAIN,
+        f"gateway-one:{description.unique_key}",
+        config_entry=entry,
+    )
+    _restore_registered_startup_paths(hass, entry)
+    recovering = False
+
+    async def read(gateway, paths):
+        results = []
+        for path in paths:
+            if path == "/heatSources":
+                results.append(
+                    BatchItemResult(gateway, path, 200, resource=Resource(path))
+                )
+            elif path == resource.path and recovering:
+                results.append(BatchItemResult(gateway, path, 200, resource=resource))
+            else:
+                failure = status if path == resource.path else 404
+                results.append(
+                    BatchItemResult(
+                        gateway, path, failure, error=ResourceError(path, failure)
+                    )
+                )
+        return tuple(results)
+
+    coordinator.client.get_resources_bulk.side_effect = read
+    with patch(
+        "custom_components.bosch_buderus_heating.coordinator.monotonic",
+        return_value=100,
+    ):
+        coordinator.data = await coordinator._async_discover_data()
+    requested = {
+        path
+        for call in coordinator.client.get_resources_bulk.call_args_list
+        for path in call.args[1]
+    }
+    assert resource.path in requested
+    assert resource.path in coordinator._paths_by_group[PollGroup.SLOW]
+    added = []
+    _track_resource_sensors(entry, coordinator, added.extend)
+    sensor = next(item for item in added if item.unique_id == existing.unique_id)
+    assert not sensor.available
+    assert sensor.native_value is None
+    coordinator.client.get_resources_bulk.reset_mock()
+    coordinator._next_update = {
+        group: float("inf") for group in coordinator._poll_intervals
+    }
+    coordinator._next_update[PollGroup.SLOW] = 1000
+    recovering = True
+    with patch(
+        "custom_components.bosch_buderus_heating.coordinator.monotonic",
+        return_value=1000,
+    ):
+        coordinator.data = await coordinator._async_update_data_locked()
+    if status == 403:
+        assert all(
+            resource.path not in call.args[1]
+            for call in coordinator.client.get_resources_bulk.call_args_list
+        )
+        assert not sensor.available
+        with patch(
+            "custom_components.bosch_buderus_heating.coordinator.monotonic",
+            return_value=86501,
+        ):
+            coordinator.data = await coordinator._async_update_data_locked()
+    poll_calls = coordinator.client.get_resources_bulk.call_args_list
+    assert sum(resource.path in call.args[1] for call in poll_calls) == 1
+    assert all(call.args[0] == "gateway-one" for call in poll_calls)
+    assert all(len(call.args[1]) <= 30 for call in poll_calls)
+    coordinator.client.get_resource.assert_not_awaited()
+    assert sensor.available
+    assert sensor.native_value == 42
+    assert sensor.unique_id == existing.unique_id
+    assert len(added) == 5
 
 
 @pytest.mark.parametrize(

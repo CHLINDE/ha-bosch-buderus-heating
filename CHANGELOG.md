@@ -5,7 +5,10 @@ Versioning after its first tagged preview.
 
 ## [Unreleased]
 
-## [0.8.2-beta.2] - Unreleased
+## [0.8.2-beta.2] - 2026-10-21
+
+I am releasing this beta with the start-counter improvements from PR #72.
+**0.8.1 remains the stable release and Latest.**
 
 I expose the general start counter reported by systems such as the Buderus
 G125 BE ECO-21. Thank you, CHLINDE, for reporting the missing counter in
@@ -15,6 +18,10 @@ I revised the counter handling in PR #72 so that general and per-heat-source
 counters retain independent entities. A missing response or another counter
 no longer causes the general entity to be hidden or removed. Existing IDs,
 custom names and activation choices are preserved across reloads.
+
+I use the same path validation for sensor creation and recovery. A supported
+source ID containing a dot or a non-ASCII character can no longer be missed
+when restoring an existing sensor after a failed startup read.
 
 I validate whole-number counts and the resource's declared numeric error
 markers consistently. Missing or invalid readings remain unknown, conflicting
@@ -29,14 +36,16 @@ limits, path budgets, forbidden-resource pauses and cloud backoff still apply.
 
 I added schema 15 diagnostics with counter validation reasons and recovery
 status, without exporting counts or raw error-marker values. The
-[implementation report](docs/start-counters.md) and its
-[German version](docs/start-counters.de.md) explain the previous weaknesses,
+[implementation report](https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/blob/v0.8.2-beta.2/docs/start-counters.md) and its
+[German version](https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/blob/v0.8.2-beta.2/docs/start-counters.de.md) explain the previous weaknesses,
 the changes and the scope of validation.
 
-This development version has not been published as a release. Physical
-validation of the revised recovery and multi-source behavior is still pending.
+Select this beta explicitly in HACS and restart Home Assistant after updating.
+Physical validation of the revised recovery and multi-source behavior is
+still pending. CHLINDE confirmed visibility with the original implementation;
+that feedback does not establish the revised recovery behavior on an appliance.
 
-I verified 1,448 automated test cases with 96.62% combined statement and branch
+I verified 1,460 automated test cases with 96.64% combined statement and branch
 coverage. Ruff, formatting and strict Mypy passed. The tests include actual
 Home Assistant registry and recorder behavior, plus deterministic packaging
 and an isolated import from the generated archive. Parametrized variants are

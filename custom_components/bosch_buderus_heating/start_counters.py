@@ -104,7 +104,10 @@ def assess_start_counter(resource: Resource) -> StartCounterAssessment:
     expected_type = "floatValue" if scalar else "emonValue"
     if resource.references or resource.metadata.resource_type != expected_type:
         return StartCounterAssessment(False, "unsupported_schema")
-    if resource.metadata.unit not in (None, "", "other"):
+    # Some PointT gateways declare a blank, whitespace-only unit.
+    # Treat whitespace as absent while still rejecting real measurement units.
+    unit = resource.metadata.unit
+    if unit is not None and unit.strip() not in ("", "other"):
         return StartCounterAssessment(False, "unsupported_unit")
     if scalar:
         if resource.values or resource.has_values:

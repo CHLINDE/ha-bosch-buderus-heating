@@ -5,6 +5,17 @@ Versioning after its first tagged preview.
 
 ## [Unreleased]
 
+## [0.8.2-beta.4] - 2026-10-21
+
+Fork test build based on upstream `v0.8.2-beta.3` for the Buderus G125 BE ECO-21 start-counter fix.
+
+- Normalize surrounding whitespace in PointT counter units, including a single space (`U+0020`), while continuing to reject actual measurement units.
+- Keep all other upstream counter validation, recovery and polling behavior unchanged.
+- Add regression tests for blank, whitespace-padded, accepted and rejected units.
+- Confirmed on a physical G125 BE ECO-21: the cumulative start counter is visible again.
+
+This version identifies a fork development branch, not an official upstream tag or release. Automated CI verification is pending.
+
 ## [0.8.2-beta.3] - 2026-10-21
 
 I am releasing this beta with the HACS documentation updates from PR #73.

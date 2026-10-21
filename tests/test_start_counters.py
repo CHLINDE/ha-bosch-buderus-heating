@@ -926,3 +926,33 @@ async def test_recorder_counts_only_valid_increments_and_device_reset(
     )
     rows = sorted(result[sensor.entity_id], key=lambda row: row["start"])
     assert [(row["state"], row["sum"]) for row in rows] == [(110, 10), (3, 13)]
+
+
+def test_rejected_global_counter_unit_diagnostics_show_bounded_codepoints() -> None:
+    """Expose a rejected unit safely, without the raw string or counter value."""
+    resource = global_resource(1234, unitOfMeasure="other ")
+    report = _capability_diagnostics(resource, None, {}, 0)
+    assert report["unit"] == "other"
+    counter = report["start_counter"]
+    assert counter["schema_rejection_reason"] == "unsupported_unit"
+    assert counter["temporary_unit_debug"] == {
+        "character_count": 6,
+        "codepoints": [
+            "U+006F",
+            "U+0074",
+            "U+0068",
+            "U+0065",
+            "U+0072",
+            "U+0020",
+        ],
+        "truncated": False,
+    }
+    assert '"1234"' not in json.dumps(counter)
+
+
+def test_rejected_global_counter_unit_diagnostics_are_truncated() -> None:
+    resource = global_resource(1234, unitOfMeasure="x" * 40)
+    counter = _capability_diagnostics(resource, None, {}, 0)["start_counter"]
+    assert counter["temporary_unit_debug"]["character_count"] == 40
+    assert len(counter["temporary_unit_debug"]["codepoints"]) == 32
+    assert counter["temporary_unit_debug"]["truncated"] is True

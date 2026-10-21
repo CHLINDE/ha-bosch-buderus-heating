@@ -257,7 +257,7 @@ def _start_counter_diagnostics(
 ) -> dict[str, object]:
     """Report the sensor's decisions, never counts or vendor state content."""
     assessment = assess_start_counter(resource)
-    return {
+    result: dict[str, object] = {
         "schema_supported": assessment.supported,
         "schema_rejection_reason": assessment.reason,
         "error_metadata_valid": resource.metadata.numeric_error_states_valid,
@@ -273,6 +273,26 @@ def _start_counter_diagnostics(
             for key, reading in assessment.readings
         },
     }
+    # Temporary, opt-in field diagnostics for a unit rejected on the
+    # global start counter. The normal top-level "unit" value is sanitized
+    # to "other", concealing the difference between a literal "other" and
+    # an unsupported original unit. Preserve exact code points without
+    # inserting arbitrary untrusted strings or full payloads into the report.
+    if (
+        resource.path == "/heatSources/numberOfStarts"
+        and assessment.reason == "unsupported_unit"
+    ):
+        unit = resource.metadata.unit
+        result["temporary_unit_debug"] = {
+            "character_count": len(unit) if unit is not None else None,
+            "codepoints": (
+                [f"U+{ord(character):04X}" for character in unit[:32]]
+                if unit is not None
+                else []
+            ),
+            "truncated": unit is not None and len(unit) > 32,
+        }
+    return result
 
 
 def _control_diagnostics(resource: Resource) -> dict[str, object]:

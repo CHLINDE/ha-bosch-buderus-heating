@@ -35,10 +35,11 @@ from .resource_catalog import (
     supports_entity,
 )
 from .runtime import BoschBuderusRuntimeData
+from .start_counters import assess_start_counter, is_start_counter_path
 from .startup_data import LICENSE_PATH, STARTUP_BUDGET_SECONDS, safe_technical_value
 from .writes import EnumWritePolicy, NumberWritePolicy, assess_control
 
-DIAGNOSTICS_SCHEMA_VERSION = 14
+DIAGNOSTICS_SCHEMA_VERSION = 15
 
 
 async def async_get_config_entry_diagnostics(
@@ -139,6 +140,7 @@ def _gateway_diagnostics(
         "runtime": coordinator.diagnostics_summary(),
         "discovery": _discovery_diagnostics(coordinator),
         "startup_data": _startup_diagnostics(coordinator),
+        "start_counter_recovery": coordinator.start_counter_recovery_diagnostics(),
         "technical_metadata": [
             {"path": diagnostic_resource_path(resource.path), "value": value}
             for resource in resources
@@ -235,6 +237,11 @@ def _capability_diagnostics(
         "has_minimum": resource.metadata.minimum is not None,
         "has_maximum": resource.metadata.maximum is not None,
         "control": _control_diagnostics(resource),
+        **(
+            {"start_counter": _start_counter_diagnostics(resource, available)}
+            if is_start_counter_path(resource.path)
+            else {}
+        ),
         "available": available,
         "freshness": freshness,
         "source": source,
@@ -242,6 +249,29 @@ def _capability_diagnostics(
         "consecutive_failures": consecutive_failures,
         "unknown_enum_values_detected": unknown_enum_values_detected,
         "calls": metrics,
+    }
+
+
+def _start_counter_diagnostics(
+    resource: Resource, available: bool | None
+) -> dict[str, object]:
+    """Report the sensor's decisions, never counts or vendor state content."""
+    assessment = assess_start_counter(resource)
+    return {
+        "schema_supported": assessment.supported,
+        "schema_rejection_reason": assessment.reason,
+        "error_metadata_valid": resource.metadata.numeric_error_states_valid,
+        "error_marker_count": len(resource.metadata.numeric_error_values),
+        "readings": {
+            key or "value": (
+                "not_read"
+                if available is None
+                else "unavailable"
+                if not available
+                else reading.reason or "valid"
+            )
+            for key, reading in assessment.readings
+        },
     }
 
 

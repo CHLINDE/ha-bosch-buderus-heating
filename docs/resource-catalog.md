@@ -250,13 +250,13 @@ PointT codes and app display names for operation mode:
 | `/heatSources/{hs}/brineCircuit/collectorOutflowTemp` | Brine inlet temperature | R | Fluid returning to the heat pump, named from the heating-system perspective |
 | `/heatSources/{hs}/defrostActive` | Defrost active | R | Boolean or app status, depending on the gateway |
 | `/heatSources/{hs}/heatPumpType` | Heat-pump type | R | Diagnostic: air/water, brine/water, or exhaust-air/water |
-| `/heatSources/{hs}/numberOfStarts` | Starts by operation | R | Multipart cumulative counter |
+| `/heatSources/{hs}/numberOfStarts` | Starts by operation | R | Independent `emonValue` cumulative counters: `total`, `ch`, `cooling`, `dhw`, `pool`; validated whole numbers |
 | `/heatSources/{hs}/powerPercentage` | Current power percentage | R | Instantaneous measurement in % |
 | `/heatSources/{hs}/supplyFlowCondenserTemp` | Condenser outlet temperature (TC3) | R | Diagnostic temperature |
 | `/heatSources/{hs}/type` | Heat-source type | R | Diagnostic |
 | `/heatSources/{hs}/workingTime` | Operating time by operation | R | Multipart cumulative counter |
 | `/heatSources/info` | Heat-source information | R | Internal/diagnostic structured object |
-| `/heatSources/numberOfStarts` | Total starts | R | No separate entity; identical to `total` of the dynamic heat source |
+| `/heatSources/numberOfStarts` | Number of starts | R | Independent `floatValue` cumulative diagnostic counter, enabled by default; 15-minute or 30-minute polling according to the selected profile |
 | `/heatSources/passiveCooling/inflowTemp` | Passive-cooling inlet temperature | R | Optional temperature sensor |
 | `/heatSources/pvContactState` | PV contact status | R | Optional operating state |
 | `/heatSources/returnTemperature` | Return temperature | R | Temperature sensor |
@@ -265,6 +265,14 @@ PointT codes and app display names for operation mode:
 | `/heatSources/standbyMode` | Standby mode | R | Optional operating state |
 | `/heatSources/systemPressure` | System pressure | R | Pressure sensor in bar; validated range values as attributes and optional derived status sensor |
 | `/heatSources/systemPressureRange` | Permitted pressure range | R | Six static diagnostic sensors in bar |
+
+A supported multipart `numberOfStarts` resource keeps stable entities for the
+known keys even with a partial payload; missing values remain unknown.
+The general counter and source-specific totals are not assumed to be equal.
+No total is calculated from partial counts, and a failed read never switches
+an entity to another source. See [start counters](start-counters.md) for numeric
+validation, recovery and migration behavior. This does not add a predefined
+`pool` key to `workingTime`.
 
 PointT returns the pressure range as a structured `values` object. The
 integration creates one entity for each of `highSystemPressure`,

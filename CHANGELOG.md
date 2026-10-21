@@ -5,6 +5,139 @@ Versioning after its first tagged preview.
 
 ## [Unreleased]
 
+## [0.8.2-beta.4] - 2026-10-22
+
+I am incorporating CHLINDE's fix for start counters that report a whitespace-only
+unit. The validation introduced in beta.2 rejected these otherwise valid
+responses, leaving an existing sensor unknown or preventing a new sensor from
+appearing.
+
+- Ignore surrounding whitespace when validating the general counter and the
+  counters of individual heat sources. Missing units and the dimensionless
+  `other` unit remain supported; actual measurement units remain rejected.
+- Preserve numeric validation, device error markers, entity identities,
+  statistics metadata, recovery rules and polling intervals. This correction
+  adds no cloud requests or write operations.
+- Extend regression tests to cover both counter formats, malformed units,
+  metadata changes, unavailable readings and recovery of the same entities.
+  Home Assistant setup and reload tests also cover whitespace units with two
+  synthetic gateways.
+
+Thank you, @CHLINDE, for the correction, the regression tests and the confirmation
+that the counter displays its value again on your Buderus G125 BE ECO-21. That
+confirmation covers the reported counter; recovery scenarios and multiple heat
+sources still need confirmation on physical installations.
+
+Select **0.8.2-beta.4** explicitly in HACS, update and restart Home Assistant.
+**0.8.1 remains Stable/Latest.** The
+[English](https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/blob/v0.8.2-beta.4/docs/start-counters.md)
+and [German](https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/blob/v0.8.2-beta.4/docs/start-counters.de.md)
+guides describe the accepted units and the scope of validation.
+
+## [0.8.2-beta.3] - 2026-10-21
+
+I am releasing this beta with the HACS documentation updates from PR #73.
+**0.8.1 remains the stable release and Latest.**
+
+I updated the installation instructions following the integration's acceptance
+into the default HACS catalog on 2026-10-20 through
+[hacs/default#10040](https://github.com/hacs/default/pull/10040). Thank you to
+the HACS maintainers for reviewing and accepting the submission.
+
+Bosch/Buderus Heating can now be found directly in HACS search. I replaced the
+temporary custom-repository instructions with search troubleshooting, marked
+the catalog review as complete in the project status, and added a HACS badge.
+
+Runtime behavior is unchanged from 0.8.2-beta.2. This includes the general
+start counter, counter validation and recovery. Only the manifest version
+changes inside the installation archive; the documentation is available in
+the repository. The new version allows a regular HACS update.
+
+Select this beta explicitly in HACS and restart Home Assistant after updating.
+The revised counter recovery and multi-source behavior still need field
+confirmation. I performed no physical appliance writes for this release.
+
+## [0.8.2-beta.2] - 2026-10-21
+
+I am releasing this beta with the start-counter improvements from PR #72.
+**0.8.1 remains the stable release and Latest.**
+
+I expose the general start counter reported by systems such as the Buderus
+G125 BE ECO-21. Thank you, CHLINDE, for reporting the missing counter in
+Issue #64, providing the initial implementation and testing its visibility.
+
+I revised the counter handling in PR #72 so that general and per-heat-source
+counters retain independent entities. A missing response or another counter
+no longer causes the general entity to be hidden or removed. Existing IDs,
+custom names and activation choices are preserved across reloads.
+
+I use the same path validation for sensor creation and recovery. A supported
+source ID containing a dot or a non-ASCII character can no longer be missed
+when restoring an existing sensor after a failed startup read.
+
+I validate whole-number counts and the resource's declared numeric error
+markers consistently. Missing or invalid readings remain unknown, conflicting
+parts are rejected, and unknown fields cannot create extra counter entities.
+The general resource uses `floatValue`; per-source counters use `emonValue`.
+
+I restore exact registered counter paths during bounded discovery and recover
+known or advertised leaves through normal polling. The interval remains
+15 minutes with the standard profile or 30 minutes with the cloud-friendly
+profile. Recovering a previously omitted path can add reads; existing batch
+limits, path budgets, forbidden-resource pauses and cloud backoff still apply.
+
+I added schema 15 diagnostics with counter validation reasons and recovery
+status, without exporting counts or raw error-marker values. The
+[implementation report](https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/blob/v0.8.2-beta.2/docs/start-counters.md) and its
+[German version](https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/blob/v0.8.2-beta.2/docs/start-counters.de.md) explain the previous weaknesses,
+the changes and the scope of validation.
+
+Select this beta explicitly in HACS and restart Home Assistant after updating.
+Physical validation of the revised recovery and multi-source behavior is
+still pending. CHLINDE confirmed visibility with the original implementation;
+that feedback does not establish the revised recovery behavior on an appliance.
+
+I verified 1,460 automated test cases with 96.64% combined statement and branch
+coverage. Ruff, formatting and strict Mypy passed. The tests include actual
+Home Assistant registry and recorder behavior, plus deterministic packaging
+and an isolated import from the generated archive. Parametrized variants are
+counted separately.
+
+## [0.8.2-beta.1] - 2026-10-20
+
+I am releasing this beta with the manual-setpoint recovery from PR #71 and the
+pool-heating start counter correction from PR #70. **0.8.1 remains the current
+stable release.**
+
+I extended the manual-setpoint recovery contributed by CHLINDE. When a reported
+heating circuit is in Manual and its setpoint is missing or unavailable, I allow
+one series of up to three targeted reads, waiting 3, 10 and 20 seconds in turn.
+Repeated failure polls do not start another series until the value has recovered
+or the circuit has left Manual. Thank you, CHLINDE, for the initial recovery
+implementation and tests.
+
+I keep a setpoint missing at startup eligible for the normal control-group reads
+while its circuit is in Manual. A later successful response adds its supported
+entities and normal polling without a restart. Existing forbidden-resource
+pauses, authentication handling and cloud rate limits remain effective. I also
+stop pending recovery on unload and keep a targeted success from clearing an
+unrelated failed polling cycle. See [request behavior](https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/blob/v0.8.2-beta.1/docs/request-behavior.md)
+for timing, request limits and the scope of the APK comparison.
+
+I register the pool-heating start counter (`numberOfStarts` → `pool`) even
+when the gateway's initial payload is empty or partial, with German and English
+names. Values still depend on gateway support; polling is unchanged.
+
+I verified the combined changes with 1,350 automated test cases on Home Assistant
+2026.10.1 and 96.55% combined statement and branch coverage. Ruff, formatting and
+strict Mypy passed. The tests include parametrized variants and an isolated
+installation of the generated release archive. An isolated runtime dependency
+audit found no known vulnerabilities.
+
+I have not performed physical appliance writes for this beta. Recovery on the
+affected installation still needs confirmation. After selecting the beta in
+HACS and updating, restart Home Assistant.
+
 ## [0.8.1] - 2026-10-20
 
 I am releasing 0.8.1 as the current stable version. It includes the holiday

@@ -21,8 +21,10 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, RATE_LIMIT_ISSUE_PREFIX, PollingProfile
 from .discovery import (
+    MAX_DISCOVERY_RESOURCES,
     ROOT_RESOURCE_PATHS,
     DiscoveryDiagnostics,
+    DiscoveryPathSource,
     async_discover_resources,
 )
 from .faults import FaultTracker, fault_resource_candidates, is_fault_resource_path
@@ -54,6 +56,7 @@ from .pointt.const import MAX_BULK_PATHS
 from .pointt.models import BatchItemResult
 from .pointt.redaction import resource_path_template
 from .resource_catalog import PollGroup, poll_group
+from .start_counters import is_start_counter_path
 from .startup_data import STARTUP_BUDGET_SECONDS, StartupSession
 from .startup_reader import StartupReader
 from .writes import EnumWritePolicy, NumberWritePolicy, WriteService
@@ -85,6 +88,9 @@ CIRCUIT_OPEN_INTERVAL = timedelta(minutes=5)
 MAX_FALLBACK_PATHS = 5
 RATE_LIMIT_REPAIR_THRESHOLD = 3
 ACTIVE_NOTIFICATION_INTERVAL = timedelta(seconds=60)
+# Short, bounded recovery of controls temporarily absent in automatic mode.
+# Delays are incremental: at most three targeted reads per unavailability episode.
+MANUAL_SETPOINT_RETRY_DELAYS = (3.0, 10.0, 20.0)
 # HA rounds scheduled callbacks to whole seconds plus a fixed offset. A callback
 # just before our exact deadline must not postpone a group by another minute.
 # This tolerance applies to group cadence only, never to error/backoff deadlines.
@@ -133,6 +139,36 @@ class ResourceSnapshot:
     def updated_at(self) -> datetime:
         """Return the last-success timestamp for compatibility."""
         return self.last_success
+
+
+def _snapshot_is_fresh(snapshot: ResourceSnapshot | None) -> bool:
+    return (
+        snapshot is not None
+        and snapshot.available
+        and snapshot.freshness is Freshness.FRESH
+    )
+
+
+def _manual_setpoint_mode_path(path: str) -> str | None:
+    """Match only direct leaves of an actual heating circuit, not cooling paths."""
+    parts = path.split("/")
+    if (
+        len(parts) == 4
+        and parts[1] == "heatingCircuits"
+        and parts[2]
+        and parts[3] in ("operationMode", "manualRoomSetpoint")
+    ):
+        return path.rsplit("/", 1)[0] + "/operationMode"
+    return None
+
+
+def _manual_mode_active(mode_path: str, snapshots: dict[str, ResourceSnapshot]) -> bool:
+    mode = snapshots.get(mode_path)
+    return (
+        mode is not None
+        and _snapshot_is_fresh(mode)
+        and mode.resource.value == "manual"
+    )
 
 
 @dataclass(slots=True)
@@ -214,6 +250,8 @@ class BoschBuderusDataUpdateCoordinator(
         self.polling_profile = polling_profile
         self._poll_intervals = poll_intervals
         self.resources: dict[str, Resource] = {}
+        self.registered_start_counter_paths: set[str] = set()
+        self._start_counter_recovery_limited = False
         self.holiday_timezones: dict[str, tzinfo | None] = {}
         self._paths_by_group: dict[PollGroup, tuple[str, ...]] = {}
         self._deferred_poll_paths: tuple[str, ...] = ()
@@ -223,6 +261,10 @@ class BoschBuderusDataUpdateCoordinator(
         self._gateway_failure_count = 0
         self._circuit_open_until = 0.0
         self._update_lock = asyncio.Lock()
+        self._manual_setpoint_tasks: dict[str, asyncio.Task[None]] = {}
+        self._manual_setpoint_attempted: set[str] = set()
+        self._manual_setpoint_candidates: dict[str, str] = {}
+        self._manual_setpoint_recovery_closed = False
         self._polls_total = 0
         self._poll_failures = 0
         self._last_poll_duration_ms: float | None = None
@@ -248,6 +290,147 @@ class BoschBuderusDataUpdateCoordinator(
                 self._next_update.get(group, now_monotonic), now_monotonic
             )
         await super().async_request_refresh()
+
+    def _queue_manual_setpoint_recovery(
+        self, mode_path: str, snapshots: dict[str, ResourceSnapshot]
+    ) -> None:
+        """Start one bounded series until the target or its mode recovers."""
+        if (
+            self._manual_setpoint_recovery_closed
+            or _manual_setpoint_mode_path(mode_path) != mode_path
+        ):
+            return
+        setpoint_path = mode_path.removesuffix("/operationMode") + "/manualRoomSetpoint"
+        mode = snapshots.get(mode_path)
+        target = snapshots.get(setpoint_path)
+        if _snapshot_is_fresh(target) or (
+            mode is not None
+            and _snapshot_is_fresh(mode)
+            and mode.resource.value != "manual"
+        ):
+            self._reset_manual_setpoint_recovery(setpoint_path)
+            return
+        if not _manual_mode_active(mode_path, snapshots):
+            return
+        if target is None:
+            if not self.startup_data.reserve_discovery((setpoint_path,)):
+                return
+            # This exact path belongs to a reported, currently manual circuit.
+            # Keep it eligible for normal group reads after the short series.
+            self._manual_setpoint_candidates[setpoint_path] = mode_path
+        if setpoint_path in self._manual_setpoint_attempted:
+            return
+        self._manual_setpoint_attempted.add(setpoint_path)
+        self._manual_setpoint_tasks[setpoint_path] = (
+            self.hass.async_create_background_task(
+                self._async_recover_manual_setpoint(mode_path, setpoint_path),
+                f"{DOMAIN} recover manual setpoint",
+                eager_start=False,
+            )
+        )
+
+    def _reset_manual_setpoint_recovery(self, setpoint_path: str) -> None:
+        """End this episode without letting an old task remove its successor."""
+        self._manual_setpoint_attempted.discard(setpoint_path)
+        self._manual_setpoint_candidates.pop(setpoint_path, None)
+        task = self._manual_setpoint_tasks.pop(setpoint_path, None)
+        if task is not None and task is not asyncio.current_task():
+            task.cancel()
+
+    async def _async_recover_manual_setpoint(
+        self, mode_path: str, setpoint_path: str
+    ) -> None:
+        """Recheck only the missing value without bypassing cloud rate limits."""
+        try:
+            for delay in MANUAL_SETPOINT_RETRY_DELAYS:
+                await asyncio.sleep(delay)
+                async with self._update_lock:
+                    snapshots = dict(self.data or {})
+                    target = snapshots.get(setpoint_path)
+                    if (
+                        self._manual_setpoint_recovery_closed
+                        or not _manual_mode_active(mode_path, snapshots)
+                        or _snapshot_is_fresh(target)
+                    ):
+                        return
+                    now = monotonic()
+                    if (
+                        now < self._cloud_backoff_until
+                        or now < self._circuit_open_until
+                        or self._resource_is_paused(setpoint_path, now)
+                    ):
+                        return
+                    try:
+                        results = await self.client.get_resources_bulk(
+                            self.gateway.gateway_id,
+                            (setpoint_path,),
+                            retryable=False,
+                        )
+                    except RateLimited as err:
+                        self._record_capability(
+                            setpoint_path, "rate_limited", SnapshotSource.BATCH
+                        )
+                        self._activate_rate_limit_backoff(err, monotonic())
+                        return
+                    except AuthenticationError:
+                        self._record_capability(
+                            setpoint_path, "authentication_error", SnapshotSource.BATCH
+                        )
+                        self._config_entry.async_start_reauth(self.hass)
+                        return
+                    except PointTError as err:
+                        # Transport problems remain subject to normal polling.
+                        self._record_capability(
+                            setpoint_path, _pointt_result(err), SnapshotSource.BATCH
+                        )
+                        return
+                    successes = self._apply_results(
+                        snapshots,
+                        results,
+                        attempted_at=datetime.now(UTC),
+                        now_monotonic=monotonic(),
+                        source=SnapshotSource.BATCH,
+                    )
+                    # A targeted read must not clear an unrelated failed main
+                    # cycle or reset the coordinator's normal polling timer.
+                    self.data = snapshots
+                    self.async_update_listeners()
+                    for result in results:
+                        if result.status == 429 or isinstance(
+                            result.error, RateLimited
+                        ):
+                            error = (
+                                result.error
+                                if isinstance(result.error, RateLimited)
+                                else RateLimited(retry_after=None)
+                            )
+                            self._activate_rate_limit_backoff(error, monotonic())
+                            return
+                        if result.status == 401 or isinstance(
+                            result.error, AuthenticationError
+                        ):
+                            self._config_entry.async_start_reauth(self.hass)
+                            return
+                    if (
+                        successes
+                        or not results
+                        or any(
+                            result.status not in (403, 404, 406) for result in results
+                        )
+                    ):
+                        return
+        finally:
+            if self._manual_setpoint_tasks.get(setpoint_path) is asyncio.current_task():
+                self._manual_setpoint_tasks.pop(setpoint_path, None)
+
+    def cancel_manual_setpoint_recovery(self) -> None:
+        """Cancel outstanding recovery tasks when the integration is unloaded."""
+        self._manual_setpoint_recovery_closed = True
+        for task in self._manual_setpoint_tasks.values():
+            task.cancel()
+        self._manual_setpoint_tasks.clear()
+        self._manual_setpoint_attempted.clear()
+        self._manual_setpoint_candidates.clear()
 
     async def async_write_control(
         self,
@@ -323,6 +506,8 @@ class BoschBuderusDataUpdateCoordinator(
             self._negative_until.pop(path, None)
             self._record_capability(path, "success", SnapshotSource.WRITE)
             self.async_set_updated_data(snapshots)
+            if (mode_path := _manual_setpoint_mode_path(path)) is not None:
+                self._queue_manual_setpoint_recovery(mode_path, snapshots)
             return confirmed
 
     async def async_create_holiday(self, values: HolidayWriteValues) -> Resource:
@@ -587,8 +772,19 @@ class BoschBuderusDataUpdateCoordinator(
             if now_monotonic + POLL_DUE_TOLERANCE_SECONDS
             >= self._next_update.get(group, 0.0)
         )
+        paths_by_group = dict(self._paths_by_group)
+        pending_manual = tuple(
+            path
+            for path, mode_path in self._manual_setpoint_candidates.items()
+            if path not in self.resources
+            and _manual_mode_active(mode_path, self.data or {})
+        )
+        paths_by_group[PollGroup.CONTROL] = (
+            *paths_by_group.get(PollGroup.CONTROL, ()),
+            *pending_manual,
+        )
         candidate_paths = [
-            path for group in due_groups for path in self._paths_by_group.get(group, ())
+            path for group in due_groups for path in paths_by_group.get(group, ())
         ]
         paths = [
             path
@@ -776,11 +972,57 @@ class BoschBuderusDataUpdateCoordinator(
             for group in due_groups
             if all(
                 path not in path_set or path in completed_paths
-                for path in self._paths_by_group.get(group, ())
+                for path in paths_by_group.get(group, ())
             )
         )
         self._advance_groups(completed_groups, now_monotonic)
         return snapshots
+
+    def restore_start_counter_path(self, path: str) -> None:
+        """Remember only bounded, exact leaves from this gateway's registry."""
+        if (
+            is_start_counter_path(path)
+            and len(self.registered_start_counter_paths) < MAX_DISCOVERY_RESOURCES
+        ):
+            self.registered_start_counter_paths.add(path)
+
+    def _merge_start_counter_candidates(self) -> None:
+        """Schedule advertised and registered leaves within the normal budget."""
+        advertised = {
+            path
+            for path, report in self.discovery_diagnostics.paths.items()
+            if report.source is DiscoveryPathSource.REFERENCE
+            and is_start_counter_path(path)
+            and report.bulk_result != "not_attempted"
+        }
+        for path in (*sorted(self.registered_start_counter_paths), *sorted(advertised)):
+            if path not in self.resources:
+                if not self.startup_data.reserve_discovery((path,)):
+                    self._start_counter_recovery_limited = True
+                    continue
+                # No type or fresh reading is inferred from a failed request.
+                self.resources[path] = Resource(path=path)
+            report = self.discovery_diagnostics.paths.get(path)
+            if report is None or report.discovered:
+                continue
+            result = report.fallback_result or report.bulk_result
+            if result == "http_403" or (
+                result == "http_404" and path not in self.registered_start_counter_paths
+            ):
+                pause = FORBIDDEN_PAUSE if result == "http_403" else NOT_FOUND_PAUSE
+                self._negative_until[path] = monotonic() + pause.total_seconds()
+
+    def start_counter_recovery_diagnostics(self) -> dict[str, object]:
+        """Describe recovery coverage without disclosing paths or readings."""
+        snapshots = self.data or {}
+        return {
+            "registered_paths": len(self.registered_start_counter_paths),
+            "waiting_for_first_response": sum(
+                is_start_counter_path(path) and path not in snapshots
+                for path in self.resources
+            ),
+            "resource_limit_reached": self._start_counter_recovery_limited,
+        }
 
     async def _async_discover_data(self) -> dict[str, ResourceSnapshot]:
         """Discover the bounded tree and use its values as the first snapshot."""
@@ -788,6 +1030,10 @@ class BoschBuderusDataUpdateCoordinator(
             resources = await async_discover_resources(
                 self.client,
                 self.gateway.gateway_id,
+                roots=(
+                    *sorted(self.registered_start_counter_paths),
+                    *ROOT_RESOURCE_PATHS,
+                ),
                 diagnostics=self.discovery_diagnostics,
                 startup_data=self.startup_data,
             )
@@ -839,6 +1085,7 @@ class BoschBuderusDataUpdateCoordinator(
                 if path not in successful_resources
             },
         }
+        self._merge_start_counter_candidates()
         self.faults.process_resources(
             {
                 path: resource
@@ -893,6 +1140,15 @@ class BoschBuderusDataUpdateCoordinator(
             for path, resource in successful_resources.items()
         }
         self._merge_startup_resources(snapshots)
+        # A manual setpoint may be absent during discovery even though
+        # the circuit already reports Manual. Attempt bounded recovery.
+        for path, snapshot in snapshots.items():
+            if (
+                path.startswith("/heatingCircuits/")
+                and path.endswith("/operationMode")
+                and snapshot.resource.value == "manual"
+            ):
+                self._queue_manual_setpoint_recovery(path, snapshots)
         return snapshots
 
     def _merge_startup_resources(self, snapshots: dict[str, ResourceSnapshot]) -> None:
@@ -1061,7 +1317,11 @@ class BoschBuderusDataUpdateCoordinator(
     ) -> int:
         """Apply partial results without discarding last-good values."""
         successful = 0
+        affected_modes: set[str] = set()
+        missing_manual_setpoints: set[str] = set()
         for result in results:
+            if (mode_path := _manual_setpoint_mode_path(result.path)) is not None:
+                affected_modes.add(mode_path)
             if result.resource is not None:
                 previous = snapshots.get(result.path)
                 if previous is not None:
@@ -1077,12 +1337,33 @@ class BoschBuderusDataUpdateCoordinator(
                     source=source,
                 )
                 self.resources[result.path] = result.resource
+                if (
+                    result.path in self._manual_setpoint_candidates
+                    or is_start_counter_path(result.path)
+                ):
+                    # Both a targeted read and a later regular read can discover
+                    # the value for the first time. Register normal polling once.
+                    group = poll_group(result.resource)
+                    if (
+                        group in self._poll_intervals
+                        and result.path not in self._paths_by_group.get(group, ())
+                    ):
+                        self._paths_by_group[group] = (
+                            *self._paths_by_group.get(group, ()),
+                            result.path,
+                        )
                 self._negative_until.pop(result.path, None)
                 successful += 1
                 continue
 
             result_category = _result_category(result.error, result.status)
             self._record_capability(result.path, result_category, source)
+            if (
+                result.status == 404
+                and result.path.startswith("/heatingCircuits/")
+                and result.path.endswith("/manualRoomSetpoint")
+            ):
+                missing_manual_setpoints.add(result.path)
             previous = snapshots.get(result.path)
             if previous is not None:
                 failed = replace(
@@ -1096,13 +1377,30 @@ class BoschBuderusDataUpdateCoordinator(
                 snapshots[result.path] = failed
                 self._pause_failed_resource(failed, result.status, now_monotonic)
             elif result.status in (403, 404):
-                pause = FORBIDDEN_PAUSE if result.status == 403 else NOT_FOUND_PAUSE
-                self._negative_until[result.path] = (
-                    now_monotonic + pause.total_seconds()
-                )
+                if result.status == 404 and (
+                    result.path in self._manual_setpoint_candidates
+                    or result.path in self.registered_start_counter_paths
+                ):
+                    # Registered counters and pending manual targets recover
+                    # through their regular groups. A 404 must not introduce
+                    # a day-long pause for either established recovery path.
+                    self._negative_until.pop(result.path, None)
+                else:
+                    pause = FORBIDDEN_PAUSE if result.status == 403 else NOT_FOUND_PAUSE
+                    self._negative_until[result.path] = (
+                        now_monotonic + pause.total_seconds()
+                    )
             _LOGGER.debug(
                 "PointT resource unavailable: %s", resource_path_template(result.path)
             )
+        for mode_path in sorted(affected_modes):
+            self._queue_manual_setpoint_recovery(mode_path, snapshots)
+        for setpoint_path in missing_manual_setpoints:
+            mode_path = self._manual_setpoint_candidates.get(setpoint_path)
+            if mode_path is not None and _manual_mode_active(mode_path, snapshots):
+                # Only an absent manual target on a confirmed manual circuit
+                # gets this exception. Forbidden-resource pauses remain intact.
+                self._negative_until.pop(setpoint_path, None)
         return successful
 
     def _record_capability(

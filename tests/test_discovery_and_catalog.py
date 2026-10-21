@@ -669,6 +669,13 @@ def test_catalog_privacy_polling_devices_and_names() -> None:
     assert resource_name("/heatSources/hs1/workingTime", "total") == (
         "Betriebszeit Gesamt"
     )
+    assert resource_name("/heatSources/hs1/numberOfStarts", "pool") == (
+        "Anzahl der Starts Poolheizung"
+    )
+    assert (
+        resource_name("/heatSources/hs1/numberOfStarts", "pool", language="en")
+        == "Number of starts Pool heating"
+    )
     assert (
         resource_name("/heatSources/emon/coolingConsumption", "outputProduced")
         == "Kühlung \N{EN DASH} Erzeugte Kühlenergie"
@@ -866,3 +873,25 @@ def test_configured_device_name_decodes_observed_pointt_format() -> None:
     assert configured_device_name("Obergeschoss") == "Obergeschoss"
     assert configured_device_name("  ") is None
     assert configured_device_name("bad\x00name") is None
+
+
+@pytest.mark.parametrize(
+    ("resource_type", "supported"),
+    [
+        ("floatValue", True),
+        ("emonValue", False),
+        ("stringValue", False),
+    ],
+)
+def test_global_number_of_starts_requires_scalar_schema(
+    resource_type: str, supported: bool
+) -> None:
+    resource = Resource(
+        path="/heatSources/numberOfStarts",
+        value=1234,
+        has_value=True,
+        metadata=ResourceMetadata(resource_type=resource_type, unit="other"),
+    )
+    assert supports_entity(resource) is supported
+    assert entity_enabled_by_default(resource.path)
+    assert poll_group(resource) is PollGroup.SLOW

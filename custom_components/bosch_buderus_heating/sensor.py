@@ -75,6 +75,11 @@ from .resource_catalog import (
     resource_name,
     supports_entity,
 )
+from .start_counters import (
+    assess_start_counter,
+    is_start_counter_path,
+    start_counter_placeholder,
+)
 from .startup_data import startup_placeholder
 
 type ValueKind = Literal[
@@ -454,6 +459,9 @@ def _track_resource_sensors(
 ) -> None:
     """Keep registered metadata sensors and add recovered values exactly once."""
     resources = dict(coordinator.resources)
+    for path in coordinator.registered_start_counter_paths:
+        if path not in resources or not assess_start_counter(resources[path]).supported:
+            resources[path] = start_counter_placeholder(path)
     for path in coordinator.startup_data.registered_paths():
         if path not in resources:
             resources[path] = startup_placeholder(path)
@@ -466,7 +474,7 @@ def _track_resource_sensors(
         recovered = {
             path: snapshot.resource
             for path, snapshot in (coordinator.data or {}).items()
-            if coordinator.startup_data.tracks(path) and snapshot.available
+            if snapshot.available
         }
         entities = []
         for description in build_sensor_descriptions(recovered):
@@ -729,6 +737,12 @@ def build_sensor_descriptions(
         if not supports_entity(resource) and not is_opt_in_diagnostic_resource(
             resource.path
         ):
+            continue
+        if is_start_counter_path(resource.path):
+            descriptions.extend(
+                _description(resource, key, "value" if key is None else "nested")
+                for key, _ in assess_start_counter(resource).readings
+            )
             continue
         if resource.path == "/system/info":
             descriptions.append(_description(resource, None, "system_info"))
@@ -1005,6 +1019,10 @@ class BoschBuderusSensor(
             return None
         resource = snapshot.resource
         description = self.entity_description
+        if is_start_counter_path(resource.path):
+            if not snapshot.available:
+                return None
+            return assess_start_counter(resource).reading(description.value_key).value
         if description.value_kind == "dew_point":
             calculation = self._dew_point_calculation
             return calculation.dew_point_celsius if calculation is not None else None
@@ -1637,7 +1655,9 @@ def _known_value_keys(path: str) -> tuple[str, ...]:
     """Return stable subkeys for resources whose startup payload may be partial."""
     if path == _SYSTEM_PRESSURE_RANGE_PATH:
         return _SYSTEM_PRESSURE_RANGE_KEYS
-    if re.fullmatch(r"/heatSources/[^/]+/(?:numberOfStarts|workingTime)", path):
+    if re.fullmatch(r"/heatSources/[^/]+/numberOfStarts", path):
+        return (*_KNOWN_MULTIPART_KEYS, "pool")
+    if re.fullmatch(r"/heatSources/[^/]+/workingTime", path):
         return _KNOWN_MULTIPART_KEYS
     return ()
 

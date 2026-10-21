@@ -14,6 +14,7 @@
 <p align="center">
   <a href="https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/actions/workflows/ci.yml"><img src="https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/actions/workflows/codeql.yml"><img src="https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/actions/workflows/codeql.yml/badge.svg" alt="CodeQL"></a>
+  <a href="https://github.com/hacs/default/pull/10040"><img src="https://img.shields.io/badge/HACS-Default-41BDF5.svg" alt="Available in the default HACS catalog"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License"></a>
 </p>
 
@@ -34,6 +35,14 @@ Update through HACS, restart Home Assistant and reload the browser. See the
 [request and recovery rules](docs/request-behavior.md) and
 [season-switching guide](docs/season-switching.md) for details and the remaining
 field checks.
+
+I am also offering **0.8.2-beta.4** with CHLINDE's correction for start counters
+that report a whitespace-only unit. These valid readings can now appear again
+while the existing numeric validation and recovery rules remain in place.
+**0.8.1 remains Stable/Latest.** Select the beta explicitly in HACS and restart
+Home Assistant after updating. See the
+[beta release notes](CHANGELOG.md#082-beta4---2026-10-22) and the counter guides
+in [English](docs/start-counters.md) and [German](docs/start-counters.de.md).
 
 Bosch/Buderus Heating is an unofficial Home Assistant custom integration. It
 discovers the capabilities exposed by a heating system instead of assuming a
@@ -159,17 +168,16 @@ restart Home Assistant, and complete the HACS setup under
 
 ### 2. Install Bosch/Buderus Heating
 
+**Bosch/Buderus Heating** is available directly in the default HACS catalog.
+
 1. Open **HACS** in Home Assistant.
 2. Search for **Bosch/Buderus Heating**.
 3. Open the matching repository and select **Download**.
 4. Restart Home Assistant when prompted.
 
-If the repository is not yet listed in the default HACS catalog, open the
-three-dot menu in HACS, select **Custom repositories**, add
-`https://github.com/SoftwareSchmied/ha-bosch-buderus-heating` as an
-**Integration**, and then repeat the search. The
-[illustrated setup guide](docs/setup.md#repository-does-not-appear-in-hacs-search)
-shows the complete route.
+If the search does not show the integration, follow the
+[search troubleshooting steps](docs/setup.md#repository-does-not-appear-in-hacs-search)
+in the illustrated setup guide.
 
 ### 3. Add the integration
 

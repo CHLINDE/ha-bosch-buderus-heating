@@ -275,6 +275,8 @@ def test_largest_exact_count_and_duplicate_error_markers() -> None:
         ("", True),
         (" ", True),
         ("  ", True),
+        ("\t", True),
+        ("\u00a0", True),
         ("other", True),
         (" other ", True),
         ("C", False),

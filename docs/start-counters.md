@@ -32,6 +32,14 @@ truncate, sum parts, fill missing values with zero or substitute another source.
 Counts above `2**53 - 1` are rejected to avoid lossy downstream numeric storage;
 this is an integration precision limit, not an appliance-specific maximum.
 
+From 0.8.2-beta.4, I ignore surrounding whitespace in counter units before
+checking them. A single space, tabs and non-breaking spaces count as an empty
+unit; surrounding whitespace around `other` is accepted too. Actual units
+such as `C` and `kWh`, unexpected text and non-string unit fields are still
+rejected. This rule applies to both the general `floatValue` counter and the
+supported `emonValue` counters of individual heat sources. It does not change
+unit handling for other sensors.
+
 The optional `state` array contributes numeric error markers only for
 `short`, `open`, `overflow`, `underflow` and `invalid`. A matching marker makes
 the reading unknown. Missing, null or empty optional metadata is allowed.
@@ -136,7 +144,27 @@ formatting and strict Mypy passed. The complete suite also verified repeatable
 archive construction and import from an isolated installation of the ZIP.
 
 CHLINDE confirmed that the initial implementation made the counter visible on
-the affected system. I have not yet verified the revised recovery or multi-source
-behavior on physical appliances. The test payloads are synthetic and must not
-be presented as new device measurements. Final local check results are recorded
-in the PR description; GitHub checks apply only to the commit they actually ran.
+the affected system. The validation added in beta.2 later rejected that system's
+single-space unit. In [PR #75](https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/pull/75),
+CHLINDE corrected the unit check and confirmed that the counter displays its
+value again on a Buderus G125 BE ECO-21. Thank you, CHLINDE, for the detailed
+report, fix, regression tests and appliance test.
+
+## Validation of the beta.4 correction
+
+I extended the regression tests to check both counter formats through parsing,
+sensor creation and diagnostics. They also cover malformed unit types,
+whitespace combined with invalid numbers or device error markers, transitions
+between valid and invalid units, a 404 response, and recovery without replacing
+existing entities. Setup and reload tests check actual Home Assistant states
+and registry entries with whitespace units and two synthetic gateways.
+
+The unit correction does not add requests, retries or write operations. Existing
+discovery budgets, polling intervals and resource-error pauses remain in force.
+The tests distinguish a successful response with an unusable count (`unknown`)
+from an unsuccessful read (`unavailable`); neither publishes a synthetic zero.
+
+CHLINDE's appliance test confirms the reported counter. I have not verified every
+recovery scenario or multiple heat sources on physical installations. The test
+payloads are synthetic. Final local check results are recorded in the PR
+description; GitHub checks apply only to the commit they actually ran.

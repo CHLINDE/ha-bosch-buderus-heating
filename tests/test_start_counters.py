@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from homeassistant.components.sensor import SensorStateClass
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import entity_registry as er
@@ -44,6 +45,7 @@ from custom_components.bosch_buderus_heating.pointt import (
     AuthTokens,
     BatchItemResult,
     Gateway,
+    InvalidPayload,
     RateLimited,
     RequestMetrics,
     RequestTimeout,
@@ -57,6 +59,7 @@ from custom_components.bosch_buderus_heating.pointt.transport import RateLimitBa
 from custom_components.bosch_buderus_heating.resource_catalog import (
     PollGroup,
     poll_group,
+    supports_entity,
 )
 from custom_components.bosch_buderus_heating.sensor import (
     BoschBuderusSensor,
@@ -139,15 +142,19 @@ def test_unexpected_source_scalar_does_not_hide_global(hass: HomeAssistant) -> N
         (None, None),
     ],
 )
-def test_counter_numeric_validation(hass: HomeAssistant, value, expected) -> None:
-    _, coordinator = coordinator_for(hass, global_resource(value))
+@pytest.mark.parametrize("unit", [None, " "])
+def test_counter_numeric_validation(hass: HomeAssistant, value, expected, unit) -> None:
+    _, coordinator = coordinator_for(hass, global_resource(value, unitOfMeasure=unit))
     assert sensors_for(coordinator)[GLOBAL, None].native_value == expected
 
 
 @pytest.mark.parametrize("field", ["short", "open", "overflow", "underflow", "invalid"])
-def test_declared_error_value_is_not_a_count(hass: HomeAssistant, field: str) -> None:
+@pytest.mark.parametrize("unit", [None, " "])
+def test_declared_error_value_is_not_a_count(
+    hass: HomeAssistant, field: str, unit: str | None
+) -> None:
     _, coordinator = coordinator_for(
-        hass, global_resource(32767, state=[{field: 32767.0}])
+        hass, global_resource(32767, unitOfMeasure=unit, state=[{field: 32767.0}])
     )
     assert sensors_for(coordinator)[GLOBAL, None].native_value is None
 
@@ -276,23 +283,142 @@ def test_largest_exact_count_and_duplicate_error_markers() -> None:
         (" ", True),
         ("  ", True),
         ("\t", True),
+        ("\r\n", True),
         ("\u00a0", True),
+        ("\u2003", True),
+        ("\u202f", True),
+        (" \t\u00a0\r\n", True),
         ("other", True),
         (" other ", True),
+        ("\tother\u00a0", True),
         ("C", False),
+        (" C ", False),
+        ("kWh", False),
         (" kWh ", False),
+        ("OTHER", False),
+        ("ot her", False),
+        ("\u200b", False),
+        ("\ufeff", False),
+        ("\0", False),
     ],
 )
+@pytest.mark.parametrize("path", [GLOBAL, SOURCE])
 def test_start_counter_normalizes_surrounding_unit_whitespace(
-    unit: str | None, supported: bool
+    hass: HomeAssistant, path: str, unit: str | None, supported: bool
 ) -> None:
-    resource = global_resource(unitOfMeasure=unit)
+    factory = global_resource if path == GLOBAL else source_resource
+    resource = factory(unitOfMeasure=unit)
+    key = None if path == GLOBAL else "total"
+    expected = 1234 if path == GLOBAL else 42
     assessment = assess_start_counter(resource)
     assert assessment.supported is supported
+    assert supports_entity(resource) is supported
+    _, coordinator = coordinator_for(hass, resource)
+    sensors = sensors_for(coordinator)
+    diagnostic = _capability_diagnostics(resource, coordinator.data[path], {}, 0)
+    assert diagnostic["entity_supported"] is supported
+    assert diagnostic["start_counter"]["schema_supported"] is supported
+    assert poll_group(resource) is PollGroup.SLOW
     if supported:
-        assert assessment.reading(None).value == 1234
+        assert assessment.reading(key).value == expected
+        assert len(sensors) == (1 if path == GLOBAL else 5)
+        sensor = sensors[path, key]
+        assert sensor.native_value == expected
+        assert sensor.native_unit_of_measurement is None
+        assert sensor.state_class is SensorStateClass.TOTAL_INCREASING
+        assert diagnostic["start_counter"]["readings"][key or "value"] == "valid"
+        baseline = factory()
+        assert {
+            description.unique_key
+            for description in build_sensor_descriptions({path: baseline})
+        } == {item.entity_description.unique_key for item in sensors.values()}
     else:
         assert assessment.reason == "unsupported_unit"
+        assert assessment.reading(key).value is None
+        assert sensors == {}
+        assert (
+            diagnostic["start_counter"]["schema_rejection_reason"] == "unsupported_unit"
+        )
+
+
+@pytest.mark.parametrize("path", [GLOBAL, SOURCE])
+@pytest.mark.parametrize("unit", [False, 0, 1, [], {}, [" "]])
+def test_malformed_counter_unit_is_rejected_by_parser(path, unit) -> None:
+    factory = global_resource if path == GLOBAL else source_resource
+    with pytest.raises(InvalidPayload, match="Expected a string field"):
+        factory(unitOfMeasure=unit)
+
+
+@pytest.mark.parametrize("path", [GLOBAL, SOURCE])
+@pytest.mark.parametrize("registered", [False, True])
+async def test_unit_changes_recover_without_replacing_counter_entities(
+    hass: HomeAssistant, path: str, registered: bool
+) -> None:
+    factory = global_resource if path == GLOBAL else source_resource
+    expected = 1234 if path == GLOBAL else 42
+    key = None if path == GLOBAL else "total"
+    entry, coordinator = coordinator_for(hass, factory(unitOfMeasure="C"))
+    if registered:
+        coordinator.restore_start_counter_path(path)
+    added = []
+    _track_resource_sensors(entry, coordinator, added.extend)
+    count = 1 if path == GLOBAL else 5
+    assert len(added) == (count if registered else 0)
+    assert all(sensor.native_value is None for sensor in added)
+    original = tuple(added)
+    for resource, status, value, reading_reason in (
+        (factory(unitOfMeasure=" "), 200, expected, "valid"),
+        (factory(unitOfMeasure=" kWh "), 200, None, "unsupported_unit"),
+        (None, 404, None, "unavailable"),
+        (factory(unitOfMeasure="\tother\u00a0"), 200, expected, "valid"),
+        (
+            factory(unitOfMeasure=" ", state=[{"invalid": expected}]),
+            200,
+            None,
+            "device_error_value",
+        ),
+        (factory(unitOfMeasure=" ", state=[]), 200, expected, "valid"),
+    ):
+        result = BatchItemResult(
+            "gateway-one",
+            path,
+            status,
+            resource=resource,
+            error=ResourceError(path, status) if status != 200 else None,
+        )
+        coordinator._apply_results(
+            coordinator.data,
+            (result,),
+            attempted_at=datetime.now(UTC),
+            now_monotonic=100,
+            source=SnapshotSource.BATCH,
+        )
+        coordinator.async_set_updated_data(dict(coordinator.data))
+        if not original:
+            original = tuple(added)
+        assert len(added) == count
+        assert tuple(added) == original
+        sensor = next(
+            item for item in added if item.entity_description.value_key == key
+        )
+        assert sensor.available is (status == 200)
+        assert sensor.native_value == value
+        assert registered_start_counter_path(sensor.unique_id, "gateway-one") == path
+        assert coordinator._paths_by_group[PollGroup.SLOW].count(path) == 1
+        snapshot = coordinator.data[path]
+        diagnostic = _capability_diagnostics(snapshot.resource, snapshot, {}, 0)
+        counter = diagnostic["start_counter"]
+        if reading_reason == "unsupported_unit":
+            assert counter["schema_rejection_reason"] == reading_reason
+        elif status == 200:
+            assert counter["readings"][key or "value"] == reading_reason
+        else:
+            assert diagnostic["available"] is False
+        serialized = json.dumps(diagnostic)
+        assert str(expected) not in serialized
+        assert "kWh" not in json.dumps(counter)
+    coordinator.client.get_resource.assert_not_awaited()
+    coordinator.client.get_resources_bulk.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
@@ -753,8 +879,10 @@ async def test_counter_batches_are_bounded_and_disjoint(hass) -> None:
 
 
 @pytest.mark.usefixtures("enable_custom_integrations")
+@pytest.mark.parametrize("unit", [None, " ", " other "])
 async def test_real_ha_setup_reload_and_two_gateways_keep_counter_entities(
     hass,
+    unit,
 ) -> None:
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -798,9 +926,11 @@ async def test_real_ha_setup_reload_and_two_gateways_keep_counter_entities(
                 path,
                 200,
                 resource=(
-                    global_resource(1234 if gateway == "gateway-one" else 9876)
+                    global_resource(
+                        1234 if gateway == "gateway-one" else 9876, unitOfMeasure=unit
+                    )
                     if path == GLOBAL
-                    else source_resource()
+                    else source_resource(unitOfMeasure=unit)
                     if path == SOURCE
                     else fast
                 ),

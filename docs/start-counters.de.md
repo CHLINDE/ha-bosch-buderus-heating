@@ -32,6 +32,14 @@ Zählerstand. Zeichenketten, Wahrheitswerte und Bruchteile werden zurückgewiese
 Die Obergrenze `2**53 - 1` verhindert Genauigkeitsverluste in nachgelagerter
 Zahlenspeicherung; sie ist keine behauptete Grenze der Heizungsanlage.
 
+Ab 0.8.2-beta.4 entferne ich vor der Einheitenprüfung umgebende Leerzeichen.
+Ein einzelnes Leerzeichen, Tabulatoren und geschützte Leerzeichen gelten als
+leere Einheit. Auch `other` mit umgebenden Leerzeichen wird akzeptiert.
+Tatsächliche Einheiten wie `C` und `kWh`, unbekannte Texte und Einheitenfelder
+mit anderen Datentypen bleiben unzulässig. Das gilt für den allgemeinen
+`floatValue`-Zähler und die unterstützten `emonValue`-Zähler einzelner
+Wärmeerzeuger. Die Einheitenprüfung anderer Sensoren bleibt unverändert.
+
 Die optionalen Metadaten `state` können Zahlen ausdrücklich als Fehlerwerte
 kennzeichnen: `short`, `open`, `overflow`, `underflow` und `invalid`. Solche
 Werte zeige ich nicht als Startzahl an. Deshalb kann `32767` je nach Metadaten
@@ -116,7 +124,33 @@ bestehen. Die Tests prüfen außerdem den reproduzierbaren Paketbau und den
 Import aus einer isolierten Installation des erzeugten ZIPs.
 
 CHLINDE hat die Sichtbarkeit des Zählers mit der ursprünglichen Umsetzung
-bestätigt. Die überarbeitete Wiederherstellung und das Verhalten mit mehreren
-Quellen sind noch nicht an realen Anlagen bestätigt. Die abschließenden lokalen
-Prüfergebnisse werden in der PR-Beschreibung getrennt von den GitHub-Prüfungen
-und noch ausstehenden Praxistests aufgeführt.
+bestätigt. Die in beta.2 ergänzte Prüfung wies später die Einheit seiner Anlage
+zurück, weil sie aus einem einzelnen Leerzeichen bestand. In
+[PR #75](https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/pull/75)
+hat CHLINDE die Prüfung korrigiert und bestätigt, dass der Zähler seiner
+Buderus G125 BE ECO-21 wieder einen Wert anzeigt. Vielen Dank, CHLINDE, für
+die genaue Fehlerbeschreibung, die Korrektur, die Regressionstests und den
+Test an deiner Anlage.
+
+## Prüfung der Korrektur in Beta.4
+
+Ich habe die Regressionstests für beide Zählerformate erweitert. Sie prüfen
+das Einlesen, die Sensorerstellung und die Diagnose sowie falsche Datentypen
+im Einheitenfeld. Weitere Fälle kombinieren Leerzeichen mit ungültigen Zahlen
+oder Gerätefehlerwerten. Die Tests wechseln zwischen gültigen und ungültigen
+Einheiten, simulieren eine 404-Antwort und prüfen die anschließende Erholung
+derselben Entitäten. Einrichtung und erneutes Laden prüfen außerdem die
+tatsächlichen Home-Assistant-Zustände und Registrierungseinträge mit
+Leerzeichen-Einheiten und zwei synthetischen Gateways.
+
+Die Einheitenkorrektur erzeugt keine zusätzlichen Anfragen, Wiederholungen oder
+Schreibzugriffe. Discovery-Grenzen, Abfrageintervalle und Fehlerpausen bleiben
+erhalten. Ein erfolgreicher Abruf ohne gültigen Zählerstand bleibt `unbekannt`,
+ein fehlgeschlagener Abruf `nicht verfügbar`. Eine künstliche Null entsteht
+in keinem dieser Fälle.
+
+CHLINDEs Anlagentest bestätigt den gemeldeten Zähler. Die verschiedenen
+Wiederherstellungsfälle und mehrere Wärmeerzeuger habe ich nicht an realen
+Anlagen geprüft. Die Testdaten sind synthetisch. Die abschließenden lokalen
+Prüfergebnisse stehen in der PR-Beschreibung; GitHub-Prüfungen gelten jeweils
+für den dort tatsächlich geprüften Commit.

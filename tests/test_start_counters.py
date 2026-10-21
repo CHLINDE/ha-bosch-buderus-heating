@@ -269,6 +269,31 @@ def test_largest_exact_count_and_duplicate_error_markers() -> None:
 
 
 @pytest.mark.parametrize(
+    ("unit", "supported"),
+    [
+        (None, True),
+        ("", True),
+        (" ", True),
+        ("  ", True),
+        ("other", True),
+        (" other ", True),
+        ("C", False),
+        (" kWh ", False),
+    ],
+)
+def test_start_counter_normalizes_surrounding_unit_whitespace(
+    unit: str | None, supported: bool
+) -> None:
+    resource = global_resource(unitOfMeasure=unit)
+    assessment = assess_start_counter(resource)
+    assert assessment.supported is supported
+    if supported:
+        assert assessment.reading(None).value == 1234
+    else:
+        assert assessment.reason == "unsupported_unit"
+
+
+@pytest.mark.parametrize(
     "fields",
     [
         {"type": "stringValue"},

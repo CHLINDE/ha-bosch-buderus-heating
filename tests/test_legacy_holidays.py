@@ -184,8 +184,8 @@ def test_missing_fixed_temperature_keeps_safe_icom_modes_for_new_holiday():
     config = icom_write_configuration(resources, FREE)
     assert config is not None
     assert config.heating_modes == ("OFF", "ECO")
-    # This unused slot has FIX_TEMPERATURE as its factory default.
-    assert config.heating_mode == "OFF"
+    # Prefer the advertised ECO mode to switching heating off by default.
+    assert config.heating_mode == "ECO"
     assert config.fix_temperature_min is None
     assert config.fix_temperature_max is None
     values = create_holiday_values(
@@ -195,7 +195,7 @@ def test_missing_fixed_temperature_keeps_safe_icom_modes_for_new_holiday():
         config,
         ZoneInfo("Europe/Berlin"),
     )
-    assert values.heating_mode == "OFF"
+    assert values.heating_mode == "ECO"
     assert values.fix_temperature == 0.0
 
 

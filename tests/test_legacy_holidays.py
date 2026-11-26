@@ -177,7 +177,6 @@ def test_invalid_slot_metadata_does_not_borrow_from_other_slots(field, change):
     assert icom_write_configuration(resources, FREE) is not None
 
 
-
 def test_icom_write_diagnostics_are_read_only_and_redacted() -> None:
     report = icom_holiday_write_diagnostics(RESOURCES)
     assert report["slot_count"] == 2

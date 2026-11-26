@@ -453,20 +453,28 @@ def flow_entry(hass, resources):
     return entry, coordinator
 
 
+@pytest.mark.parametrize("missing_fixed_temperature", [False, True])
 async def test_empty_icom_calendar_opens_create_form_without_selection(
-    hass, enable_custom_integrations
+    hass, enable_custom_integrations, missing_fixed_temperature
 ):
-    """Empty iCom installations should not render a redundant holiday_period step."""
+    """No holiday_period step, even when iCom lacks fixTemperature entirely."""
     resources = {
         **RESOURCES,
         START: replace(RESOURCES[START], value="2017-01-01/2017-01-01"),
     }
+    if missing_fixed_temperature:
+        resources = {
+            path: item
+            for path, item in resources.items()
+            if not path.endswith("/fixTemperature")
+        }
     entry, coordinator = flow_entry(hass, resources)
     result = await _start_holiday_options(hass, entry)
     assert result["step_id"] == "new_legacy_holiday"
     fields = {marker.schema for marker in result["data_schema"].schema}
     assert "holiday_period" not in fields
     assert {"holiday_start", "holiday_end", "holiday_assigned_to"} <= fields
+    assert ("holiday_fix_temperature" in fields) is (not missing_fixed_temperature)
     coordinator.async_create_holiday.assert_not_awaited()
 
 

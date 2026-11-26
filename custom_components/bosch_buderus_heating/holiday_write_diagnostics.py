@@ -49,9 +49,7 @@ def _slot_diagnostics(
         "slot": slot.rsplit("/", 1)[-1],
         "write_supported": configuration is not None,
         "rejection_reason": (
-            None
-            if configuration is not None
-            else _rejection_reason(resources, slot)
+            None if configuration is not None else _rejection_reason(resources, slot)
         ),
         "assignments_present": assigned is not None,
         "assignments_has_values": assigned.has_values if assigned is not None else None,
@@ -59,9 +57,7 @@ def _slot_diagnostics(
             len(assigned.values) if assigned is not None else None
         ),
         "assignments_allowed_count": (
-            len(assigned.metadata.allowed_values)
-            if assigned is not None
-            else None
+            len(assigned.metadata.allowed_values) if assigned is not None else None
         ),
         "fixed_temperature_present": fixed is not None,
     }

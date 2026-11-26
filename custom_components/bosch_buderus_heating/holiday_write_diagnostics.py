@@ -34,15 +34,11 @@ def icom_holiday_write_diagnostics(
     return {
         "slot_count": len(slots),
         "truncated": len(slots) > _MAX_SLOTS,
-        "slots": [
-            _slot_diagnostics(resources, slot) for slot in slots[:_MAX_SLOTS]
-        ],
+        "slots": [_slot_diagnostics(resources, slot) for slot in slots[:_MAX_SLOTS]],
     }
 
 
-def _slot_diagnostics(
-    resources: Mapping[str, Resource], slot: str
-) -> dict[str, object]:
+def _slot_diagnostics(resources: Mapping[str, Resource], slot: str) -> dict[str, object]:
     assigned = resources.get(f"{slot}/assignedTo")
     fixed = resources.get(f"{slot}/fixTemperature")
     configuration = icom_write_configuration(resources, slot)
@@ -56,12 +52,8 @@ def _slot_diagnostics(
             else _rejection_reason(resources, slot)
         ),
         "assignments_present": assigned is not None,
-        "assignments_has_values": (
-            assigned.has_values if assigned is not None else None
-        ),
-        "assignments_values_count": (
-            len(assigned.values) if assigned is not None else None
-        ),
+        "assignments_has_values": assigned.has_values if assigned is not None else None,
+        "assignments_values_count": len(assigned.values) if assigned is not None else None,
         "assignments_allowed_count": (
             len(assigned.metadata.allowed_values)
             if assigned is not None
@@ -71,9 +63,7 @@ def _slot_diagnostics(
     }
 
 
-def _rejection_reason(
-    resources: Mapping[str, Resource], slot: str
-) -> str:
+def _rejection_reason(resources: Mapping[str, Resource], slot: str) -> str:
     """Mirror validator gates in order; expose fixed reason codes only."""
     start = resources.get(f"{slot}/startStop")
     if start is None:
@@ -84,6 +74,8 @@ def _rejection_reason(
     assigned = resources.get(f"{slot}/assignedTo")
     if assigned is None:
         return "missing_assignments"
+    if assigned.metadata.resource_type != "arrayData" or assigned.has_value:
+        return "invalid_assignments_schema"
     if not assigned.has_values:
         return "assignments_values_field_missing"
     current_assignments = icom_assignments(assigned)

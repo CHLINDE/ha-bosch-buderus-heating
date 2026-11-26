@@ -174,6 +174,78 @@ def test_invalid_slot_metadata_does_not_borrow_from_other_slots(field, change):
     assert icom_write_configuration(resources, FREE) is not None
 
 
+def test_missing_fixed_temperature_keeps_safe_icom_modes_for_new_holiday():
+    """A missing temperature resource must hide only fixed-temperature modes."""
+    resources = {
+        path: resource
+        for path, resource in RESOURCES.items()
+        if path != f"{FREE}/fixTemperature"
+    }
+    config = icom_write_configuration(resources, FREE)
+    assert config is not None
+    assert config.heating_modes == ("OFF", "ECO")
+    # This unused slot has FIX_TEMPERATURE as its factory default.
+    assert config.heating_mode == "OFF"
+    assert config.fix_temperature_min is None
+    assert config.fix_temperature_max is None
+    values = create_holiday_values(
+        date(2030, 11, 3),
+        date(2030, 11, 6),
+        "",
+        config,
+        ZoneInfo("Europe/Berlin"),
+    )
+    assert values.heating_mode == "OFF"
+    assert values.fix_temperature == 0.0
+
+
+def test_missing_fixed_temperature_preserves_existing_safe_default():
+    """Keep a currently selected safe heating mode in a free slot."""
+    mode_path = f"{FREE}/hcMode"
+    resources = {
+        **{
+            path: resource
+            for path, resource in RESOURCES.items()
+            if path != f"{FREE}/fixTemperature"
+        },
+        mode_path: replace(RESOURCES[mode_path], value="ECO"),
+    }
+    config = icom_write_configuration(resources, FREE)
+    assert config is not None
+    assert config.heating_mode == "ECO"
+    assert config.heating_modes == ("OFF", "ECO")
+
+
+def test_missing_fixed_temperature_does_not_rewrite_occupied_holiday():
+    """Do not silently migrate an active fixed-temperature setting."""
+    resources = {
+        path: resource
+        for path, resource in RESOURCES.items()
+        if path != f"{SLOT}/fixTemperature"
+    }
+    assert icom_write_configuration(resources, SLOT) is None
+
+
+def test_missing_fixed_temperature_with_no_safe_modes_remains_blocked():
+    """A gateway advertising only fixed-temperature mode stays read-only."""
+    mode_path = f"{FREE}/hcMode"
+    resources = {
+        **{
+            path: resource
+            for path, resource in RESOURCES.items()
+            if path != f"{FREE}/fixTemperature"
+        },
+        mode_path: replace(
+            RESOURCES[mode_path],
+            metadata=replace(
+                RESOURCES[mode_path].metadata,
+                allowed_values=("FIX_TEMPERATURE",),
+            ),
+        ),
+    }
+    assert icom_write_configuration(resources, FREE) is None
+
+
 @pytest.mark.parametrize("on", [True, False])
 def test_wddw2_is_one_mode_without_calendar_dates(on):
     mode = replace(RESOURCES[WDDW2_HOLIDAY_PATH], value="on" if on else "off")

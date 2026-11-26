@@ -16,13 +16,13 @@ from custom_components.bosch_buderus_heating.binary_sensor import (
 from custom_components.bosch_buderus_heating.calendar import BoschBuderusHolidayCalendar
 from custom_components.bosch_buderus_heating.coordinator import Freshness
 from custom_components.bosch_buderus_heating.discovery import _optional_children
+from custom_components.bosch_buderus_heating.holiday_write_diagnostics import (
+    icom_holiday_write_diagnostics,
+)
 from custom_components.bosch_buderus_heating.holiday_writes import (
     HolidayChangedError,
     HolidayTimeRangeError,
     create_holiday_values,
-)
-from custom_components.bosch_buderus_heating.holiday_write_diagnostics import (
-    icom_holiday_write_diagnostics,
 )
 from custom_components.bosch_buderus_heating.holidays import (
     icom_write_configuration,

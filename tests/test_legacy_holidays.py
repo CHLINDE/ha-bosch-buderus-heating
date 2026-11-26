@@ -190,7 +190,11 @@ def test_icom_write_diagnostics_are_read_only_and_redacted() -> None:
     assert slots["hm4"]["assignments_values_count"] == 0
     serialized = json.dumps(report)
     for private_value in (
-        "2030-10-26", "2017-01-01", "hc2", "dhw1", "FIX_TEMPERATURE"
+        "2030-10-26",
+        "2017-01-01",
+        "hc2",
+        "dhw1",
+        "FIX_TEMPERATURE",
     ):
         assert private_value not in serialized
 

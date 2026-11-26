@@ -51,6 +51,7 @@ from .holidays import (
     parse_holiday_state,
     parse_holiday_write_configuration,
 )
+from .holiday_write_diagnostics import icom_holiday_write_diagnostics
 from .icom_diagnostics import icom_diagnostics
 from .icom_profile import is_icom_gateway
 from .local_only import hybrid_evidence, volume_flow_path
@@ -854,6 +855,20 @@ def _gateway_diagnostics(
                 )
                 is not None
                 for period in holiday_state.periods
+            ),
+            # Temporary, read-only iCom slot diagnostics. Only bounded slot
+            # IDs, fixed reason codes, booleans and counts; never raw values.
+            **(
+                {
+                    "icom_slot_write_debug": icom_holiday_write_diagnostics(
+                        current_holiday_resources
+                    )
+                }
+                if any(
+                    path.startswith("/system/holidayModes/hm")
+                    for path in current_holiday_resources
+                )
+                else {}
             ),
             # T8: a room controller's absence (calendar, away mode, boost)
             # is reported in its own block, not here.

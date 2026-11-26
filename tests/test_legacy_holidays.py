@@ -21,6 +21,9 @@ from custom_components.bosch_buderus_heating.holiday_writes import (
     HolidayTimeRangeError,
     create_holiday_values,
 )
+from custom_components.bosch_buderus_heating.holiday_write_diagnostics import (
+    icom_holiday_write_diagnostics,
+)
 from custom_components.bosch_buderus_heating.holidays import (
     icom_write_configuration,
     icom_write_values,
@@ -172,6 +175,68 @@ def test_invalid_slot_metadata_does_not_borrow_from_other_slots(field, change):
     }
     assert icom_write_configuration(resources, SLOT) is None
     assert icom_write_configuration(resources, FREE) is not None
+
+
+
+def test_icom_write_diagnostics_are_read_only_and_redacted() -> None:
+    report = icom_holiday_write_diagnostics(RESOURCES)
+    assert report["slot_count"] == 2
+    assert report["truncated"] is False
+    slots = {item["slot"]: item for item in report["slots"]}
+    assert slots["hm2"]["write_supported"] is True
+    assert slots["hm4"]["write_supported"] is True
+    assert slots["hm4"]["rejection_reason"] is None
+    assert slots["hm4"]["assignments_has_values"] is True
+    assert slots["hm4"]["assignments_values_count"] == 0
+    serialized = json.dumps(report)
+    for private_value in (
+        "2030-10-26", "2017-01-01", "hc2", "dhw1", "FIX_TEMPERATURE"
+    ):
+        assert private_value not in serialized
+
+
+def test_icom_write_diagnostics_explain_missing_assignment_array() -> None:
+    path = f"{FREE}/assignedTo"
+    state = {
+        **RESOURCES,
+        path: replace(RESOURCES[path], has_values=False),
+    }
+    assert icom_write_configuration(state, FREE) is None
+    debug = icom_holiday_write_diagnostics(state)["slots"]
+    slot = next(item for item in debug if item["slot"] == "hm4")
+    assert slot["write_supported"] is False
+    assert slot["rejection_reason"] == "assignments_values_field_missing"
+    assert slot["assignments_values_count"] == 0
+    assert slot["assignments_has_values"] is False
+
+
+def test_icom_write_diagnostics_explain_missing_fixed_temperature() -> None:
+    state = {
+        path: resource
+        for path, resource in RESOURCES.items()
+        if path != f"{FREE}/fixTemperature"
+    }
+    assert icom_write_configuration(state, FREE) is None
+    debug = icom_holiday_write_diagnostics(state)["slots"]
+    slot = next(item for item in debug if item["slot"] == "hm4")
+    assert slot["write_supported"] is False
+    assert slot["rejection_reason"] == "missing_fixed_temperature_resource"
+    assert slot["fixed_temperature_present"] is False
+
+
+def test_icom_write_diagnostics_explain_invalid_fixed_temperature() -> None:
+    path = f"{SLOT}/fixTemperature"
+    state = {
+        **RESOURCES,
+        path: replace(
+            RESOURCES[path],
+            metadata=replace(RESOURCES[path].metadata, unit="F"),
+        ),
+    }
+    assert icom_write_configuration(state, SLOT) is None
+    debug = icom_holiday_write_diagnostics(state)["slots"]
+    slot = next(item for item in debug if item["slot"] == "hm2")
+    assert slot["rejection_reason"] == "invalid_fixed_temperature_reading"
 
 
 @pytest.mark.parametrize("on", [True, False])

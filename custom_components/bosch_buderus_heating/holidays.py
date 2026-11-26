@@ -603,7 +603,10 @@ def icom_write_configuration(
                     or components.hmi800_hp_light
                 ):
                     return None
-                default_heating_mode = heating_modes[0]
+                default_heating_mode = next(
+                    (mode for mode in heating_modes if mode == "ECO"),
+                    heating_modes[0],
+                )
     minimum = maximum = step = None
     if fixed is not None and fixed.metadata.writable:
         minimum, maximum = fixed.metadata.minimum, fixed.metadata.maximum

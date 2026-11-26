@@ -1235,6 +1235,20 @@ class BoschBuderusOptionsFlow(
         mode_choices = self._holiday_mode_choices()
         if not choices and not mode_choices:
             return self.async_abort(reason="no_writable_holidays")
+        # A fresh iCom installation has only one action: create a holiday.
+        # Open the actual date/settings form directly instead of requiring a
+        # single-option selection step. This also avoids a frontend transition
+        # in which the old "holiday_period" input could be submitted against
+        # the new holiday form's schema.
+        if user_input is None and not mode_choices and len(choices) == 1:
+            only_key = next(iter(choices))
+            if only_key.startswith("create:"):
+                self._selected_key = only_key
+                self._displayed_choice = None
+                self._holiday_draft = None
+                self._delete_choice = None
+                self._delete_return_input = None
+                return await self.async_step_new_holiday()
         if not choices and len(mode_choices) == 1 and user_input is None:
             self._selected_key = next(iter(mode_choices))
             return await self.async_step_holiday_mode()
@@ -1359,6 +1373,7 @@ class BoschBuderusOptionsFlow(
                 }
             ),
             errors={"base": "holiday_changed"} if user_input is not None else None,
+            last_step=False,
         )
 
     def _holiday_mode_choices(self) -> dict[str, BoschBuderusDataUpdateCoordinator]:
@@ -1798,6 +1813,7 @@ class BoschBuderusOptionsFlow(
                 }
             ),
             errors={"base": error} if error else None,
+            last_step=False,
         )
 
     def _show_holiday_form(

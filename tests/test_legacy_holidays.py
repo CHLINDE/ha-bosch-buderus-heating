@@ -462,6 +462,9 @@ async def test_empty_icom_calendar_opens_create_form_without_selection(
         **RESOURCES,
         START: replace(RESOURCES[START], value="2017-01-01/2017-01-01"),
     }
+    # Both synthetic slots must be empty: an existing holiday correctly keeps
+    # the selection step visible so it can be edited.
+    assert not parse_holiday_state(resources).periods
     if missing_fixed_temperature:
         resources = {
             path: item

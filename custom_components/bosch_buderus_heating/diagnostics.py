@@ -47,11 +47,11 @@ from .discovery import DiscoveryPathSource
 from .energy_contracts import energy_diagnostics, is_energy_collection
 from .firmware_updates import existing_tracker
 from .heat_generator_sensor import heat_generator_diagnostics
+from .holiday_write_diagnostics import icom_holiday_write_diagnostics
 from .holidays import (
     parse_holiday_state,
     parse_holiday_write_configuration,
 )
-from .holiday_write_diagnostics import icom_holiday_write_diagnostics
 from .icom_diagnostics import icom_diagnostics
 from .icom_profile import is_icom_gateway
 from .local_only import hybrid_evidence, volume_flow_path

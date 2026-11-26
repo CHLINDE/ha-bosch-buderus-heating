@@ -453,6 +453,23 @@ def flow_entry(hass, resources):
     return entry, coordinator
 
 
+async def test_empty_icom_calendar_opens_create_form_without_selection(
+    hass, enable_custom_integrations
+):
+    """Empty iCom installations should not render a redundant holiday_period step."""
+    resources = {
+        **RESOURCES,
+        START: replace(RESOURCES[START], value="2017-01-01/2017-01-01"),
+    }
+    entry, coordinator = flow_entry(hass, resources)
+    result = await _start_holiday_options(hass, entry)
+    assert result["step_id"] == "new_legacy_holiday"
+    fields = {marker.schema for marker in result["data_schema"].schema}
+    assert "holiday_period" not in fields
+    assert {"holiday_start", "holiday_end", "holiday_assigned_to"} <= fields
+    coordinator.async_create_holiday.assert_not_awaited()
+
+
 @pytest.mark.parametrize("creating", [False, True])
 async def test_legacy_native_dialog_has_dates_no_clock_or_name_and_saves(
     hass, enable_custom_integrations, creating

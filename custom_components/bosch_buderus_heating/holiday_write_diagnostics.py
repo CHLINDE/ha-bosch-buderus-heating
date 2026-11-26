@@ -38,7 +38,9 @@ def icom_holiday_write_diagnostics(
     }
 
 
-def _slot_diagnostics(resources: Mapping[str, Resource], slot: str) -> dict[str, object]:
+def _slot_diagnostics(
+    resources: Mapping[str, Resource], slot: str
+) -> dict[str, object]:
     assigned = resources.get(f"{slot}/assignedTo")
     fixed = resources.get(f"{slot}/fixTemperature")
     configuration = icom_write_configuration(resources, slot)
@@ -53,7 +55,9 @@ def _slot_diagnostics(resources: Mapping[str, Resource], slot: str) -> dict[str,
         ),
         "assignments_present": assigned is not None,
         "assignments_has_values": assigned.has_values if assigned is not None else None,
-        "assignments_values_count": len(assigned.values) if assigned is not None else None,
+        "assignments_values_count": (
+            len(assigned.values) if assigned is not None else None
+        ),
         "assignments_allowed_count": (
             len(assigned.metadata.allowed_values)
             if assigned is not None

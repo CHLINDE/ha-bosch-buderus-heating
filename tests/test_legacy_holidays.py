@@ -1251,3 +1251,49 @@ async def test_icom_full_calendar_requires_known_reset_marker(environment, marke
             "synthetic-gateway", START, marker
         )
         assert state[free_start].value == "2031-01-01/2031-01-02"
+
+
+async def test_icom_reset_marker_save_failure_retries(environment):
+    coordinator, _, _ = environment
+    marker = RESOURCES[f"{FREE}/startStop"].value
+    with (
+        patch.object(
+            coordinator._icom_reset_store,
+            "async_save",
+            AsyncMock(side_effect=[OSError("disk unavailable"), None]),
+        ) as save,
+        patch.object(
+            coordinator._icom_legacy_reset_store, "async_remove", AsyncMock()
+        ),
+    ):
+        await coordinator._async_remember_icom_reset_marker(RESOURCES)
+        assert coordinator.icom_reset_marker == marker
+        assert coordinator._icom_reset_dirty
+        await coordinator._async_remember_icom_reset_marker({})
+        assert not coordinator._icom_reset_dirty
+        assert save.await_count == 2
+
+
+async def test_icom_reset_marker_migrates_legacy_cache(environment):
+    coordinator, _, _ = environment
+    marker = "2017-01-01/2017-01-01"
+    with (
+        patch.object(coordinator.faults, "async_load", AsyncMock()),
+        patch.object(
+            coordinator._icom_reset_store, "async_load", AsyncMock(return_value=None)
+        ),
+        patch.object(
+            coordinator._icom_legacy_reset_store,
+            "async_load",
+            AsyncMock(return_value={"marker": marker}),
+        ),
+        patch.object(coordinator._icom_reset_store, "async_save", AsyncMock()) as save,
+        patch.object(
+            coordinator._icom_legacy_reset_store, "async_remove", AsyncMock()
+        ) as remove,
+    ):
+        await coordinator.async_load_fault_state()
+        assert coordinator.icom_reset_marker == marker
+        await coordinator._async_remember_icom_reset_marker({})
+        save.assert_awaited_once_with({"marker": marker})
+        remove.assert_awaited_once()

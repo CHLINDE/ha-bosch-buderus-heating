@@ -1,0 +1,100 @@
+{
+  "schema": 1,
+  "family": "water_softener",
+  "provenance": {
+    "kind": "synthetic",
+    "basis": "compatibility_mapping",
+    "firmware": null,
+    "capture_date": null,
+    "created": "2026-10-23",
+    "redaction": "Constructed examples with fixture-local IDs; no captured response or private data.",
+    "physical_device_verified": false
+  },
+  "cases": [
+    {
+      "id": "remaining_volume_litres",
+      "payload": {
+        "id": "/swCircuits/sw1/sensor/availableWater",
+        "type": "floatValue",
+        "value": 875,
+        "writeable": 0
+      },
+      "expected": {
+        "value": 875,
+        "unit": "L",
+        "part": null
+      }
+    },
+    {
+      "id": "remaining_volume_cubic_metres",
+      "payload": {
+        "id": "/swCircuits/sw1/sensor/availableWater",
+        "type": "floatValue",
+        "value": 0.875,
+        "writeable": 0,
+        "unitOfMeasure": "m3"
+      },
+      "expected": {
+        "value": 0.875,
+        "unit": "m³",
+        "part": null
+      }
+    },
+    {
+      "id": "flow",
+      "payload": {
+        "id": "/swCircuits/sw1/sensor/waterFlow",
+        "type": "floatValue",
+        "value": 6.5,
+        "writeable": 0
+      },
+      "expected": {
+        "value": 6.5,
+        "unit": "L/min",
+        "part": null
+      }
+    },
+    {
+      "id": "remaining_seconds",
+      "payload": {
+        "id": "/swCircuits/sw1/regeneration/totalRemainingTime",
+        "type": "floatValue",
+        "value": 600,
+        "writeable": 0
+      },
+      "expected": {
+        "value": 600,
+        "unit": "s",
+        "part": null
+      }
+    },
+    {
+      "id": "next_days",
+      "payload": {
+        "id": "/swCircuits/sw1/regeneration/timeUntilNext",
+        "type": "floatValue",
+        "value": 3,
+        "writeable": 0
+      },
+      "expected": {
+        "value": 3,
+        "unit": "d",
+        "part": null
+      }
+    },
+    {
+      "id": "phase",
+      "payload": {
+        "id": "/swCircuits/sw1/regeneration/phase",
+        "type": "stringValue",
+        "value": "BACKWASH",
+        "writeable": 0
+      },
+      "expected": {
+        "value": "backwash",
+        "unit": null,
+        "part": null
+      }
+    }
+  ]
+}

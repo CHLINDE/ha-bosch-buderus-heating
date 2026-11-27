@@ -4,6 +4,903 @@ Releases are built from a verified Git tag. The HACS archive contains the
 integration directly at its root and is published together with a SHA-256
 checksum file.
 
+## 0.9.2 verification
+
+I am preparing **0.9.2 as the stable release**; it becomes Stable/Latest
+instead of 0.9.1. It collects everything of 0.9.2-beta.1 to beta.3 and adds
+a repair of the cloud hold (the entities learn when the hold ends between
+two update cycles) and of the token renewal (an unexpected early failure
+pauses the renewal instead of retrying at once). The notes open with a
+"Before you update" box for 0.9.1 and 0.8.x users. Storage format 4 and Home
+Assistant 2026.5.0 as the minimum stay; updating from 0.9.x needs no new
+setup. The diagnostics use schema 48.
+
+Automated checks on the release state (2026-11-19, run locally unless noted):
+
+| Check | Environment | Result |
+|---|---|---|
+| Full suite with coverage, current version | Home Assistant 2026.11.1, local, four parallel workers | 14798 passed, 1 skipped (the box test of stable release notes, before the version change); coverage 97.70 % |
+| Strict Mypy, Ruff lint and formatting | local | Mypy without findings in 302 files; Ruff clean |
+| Release tests | local | release, repository and write baseline tests run on a clean clone; the box test of stable release notes runs now; the release notes come from this version's CHANGELOG section |
+| Release archive and SHA-256 | local build on a clean clone | built twice for version 0.9.2 without tests or bytecode, with the same result; the checksum is published with the release |
+| GitHub checks | CI and release workflow | the compatibility, minimum version, frontend, hassfest and HACS jobs run on the release commit and again in the release workflow before publishing; a stable tag must point to a commit on `main` |
+
+Checks on a real installation with the candidate before the version change
+(Home Assistant 2026.11, installed after a full Home Assistant backup, reading
+only, without changes to the heating system and with the statistics import
+off):
+
+- The entity registry stayed unchanged (577 entities before and after), and
+  no entity changed to unavailable during the observation.
+- The background token renewal at about ten minutes before the end ran into
+  a timeout once and succeeded 54 seconds later; no pause of the cloud and
+  no flicker of states followed.
+- The log had no warnings or errors of the integration, and every cloud
+  request succeeded.
+
+Not yet confirmed on real hardware: the new controls of the betas (ventilation
+select, hybrid controls, heating circuit, system and room controller
+settings, timers and energy sensors of air conditioners, the wallbox history,
+the boiler recordings and the second cloud changes with a real device).
+
+## 0.9.2-beta.3 verification
+
+I am preparing **0.9.2-beta.3 as a pre-release** for testing; **0.9.1 stays
+Stable/Latest**. It adds a ventilation operating mode, hybrid system controls,
+more heating circuit, system and room controller settings, environmental
+energy, more recordings, and timers and energy sensors for air conditioners of
+the second cloud access. It fixes the sign-in on a slow answer, devices of the
+second cloud access dropping out, a local setup that stopped at a module
+without a serial number, and wrong states of calculated values. Storage
+format 4 and Home Assistant 2026.5.0 as the minimum stay; updating from 0.9.x
+needs no new setup. The diagnostics use schema 48.
+
+Automated checks on the release state (2026-11-18, run locally unless noted):
+
+| Check | Environment | Result |
+|---|---|---|
+| Full suite with coverage, current version | Home Assistant 2026.11.1, local, four parallel workers | 14737 passed, 1 skipped (the box test of stable release notes); coverage 97.78 % |
+| Full suite, minimum version | Home Assistant 2026.5.4, local, four parallel workers | 14735 passed, 3 skipped (version-dependent) |
+| Strict Mypy, Ruff lint and formatting | local | Mypy without findings in 299 files; Ruff clean |
+| Frontend tests and dialog browser tests | Home Assistant 2026.11.0 with its frontend, local | npm tests passed; 12 browser tests passed |
+| Release tests | local | release, repository and write baseline tests run on a clean clone; the release notes come from this version's CHANGELOG section |
+| Release archive and SHA-256 | local build on a clean clone | built twice for version 0.9.2-beta.3 without tests or bytecode, with the same result; the checksum is published with the release |
+| GitHub checks | CI and release workflow | the compatibility, minimum version, frontend, hassfest and HACS jobs run on the release commit and again in the release workflow before publishing |
+
+The last commit before the version change only changed one test (it counted
+reconnect pauses that occur while the test closes the broker); the full
+suites ran on the commit before it.
+
+Not yet confirmed on real hardware: the ventilation select, the hybrid
+controls, the heating circuit, system and room controller settings, the
+timers and energy sensors of air conditioners, the wallbox history, the boiler
+recordings and the second cloud changes with a real device.
+
+## 0.9.2-beta.2 verification
+
+I am preparing **0.9.2-beta.2 as a pre-release** for testing; **0.9.1 stays
+Stable/Latest**. It adds calculated values, the plant recordings, a climate
+entity per zone, more heating circuit settings and time programs, and
+controls for wallboxes and air conditioners on a PointT gateway. It reads a
+heating circuit whose directory is refused
+([#130](https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/issues/130))
+and the zones of a large zone controller
+([#131](https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/issues/131)).
+Storage format 4 and Home Assistant 2026.5.0 as the minimum stay; updating
+from 0.9.x needs no new setup. The diagnostics use schema 48.
+
+Automated checks on the release state (2026-11-15, run locally):
+
+| Check | Environment | Result |
+|---|---|---|
+| Full suite with coverage, current version | Home Assistant 2026.11.0, local, four parallel workers | 14032 passed, 1 skipped (the box test of stable release notes); coverage 97.79 % |
+| Full suite, minimum version | Home Assistant 2026.5.4, local, four parallel workers | 14030 passed, 3 skipped (version-dependent) |
+| Strict Mypy, Ruff lint and formatting | local | Mypy without findings in 276 files; Ruff clean |
+| Frontend tests and dialog browser tests | Home Assistant 2026.11.0 with its frontend, local | npm tests passed; 12 browser tests passed |
+| hassfest and HACS | official hassfest of Home Assistant 2026.11.0; HACS offline checks | no findings |
+| Release tests | local | 65 passed, 1 skipped in the release, repository and write baseline tests (clean clone); the release notes come from this version's CHANGELOG section |
+| Release archive and SHA-256 | local build on a clean clone | built for version 0.9.2-beta.2 with 329 files (2,233,474 bytes) under Linux, without tests or bytecode, twice with the same result; SHA-256 `2f4c8d22156bb182eae1a7c966164c8a4c4b0d85984f5546688581025a467ff0` |
+| GitHub checks | release workflow | pending; the compatibility, minimum version and frontend jobs run there before publishing |
+
+Checks on a real installation with builds of the release candidate (Home
+Assistant 2026.11, each installed after a full Home Assistant backup,
+reading only, without changes to the heating system and with the statistics
+import off):
+
+- The update from 0.9.1 kept the entity IDs; most new entities came
+  disabled. A local-only entity that an earlier build had handed over to
+  the cloud came back with its entity ID and statistics.
+- The final candidate replaced the build before it without adding,
+  removing or renaming an entity, also after an extra restart, and no
+  repair notice appeared.
+- The local state signals changed the order of their states once and kept
+  it over the restart.
+- The plant recordings gave yesterday's heat and electricity right after
+  the start, matching the energy counters; the hourly run made nine local
+  reads.
+- A flow below the measuring range showed "unknown" with
+  `reported_state: low_flow`.
+- The log had no warnings or errors of the integration, and every cloud
+  request succeeded.
+
+Not yet confirmed on a real installation: any of the new controls (heating
+circuit settings, zone climates, time programs, wallboxes, air
+conditioners), the statistics import, the cloud-only recordings, the change
+to and from daylight saving time, and a heating circuit or zone controller
+in the shape of #130 and #131.
+
+## 0.9.2-beta.1 verification
+
+I am preparing **0.9.2-beta.1 as a pre-release** for testing; **0.9.1 stays
+Stable/Latest**. It lets the local setup continue when the gateway answers
+`unknown`, an empty text or an unrecognized brand
+([#132](https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/issues/132)).
+The identity, the certificate check and the firmware check stay required.
+Storage format 4 and Home Assistant 2026.5.0 as the minimum stay; updating
+from 0.9.x needs no new setup.
+
+Automated checks on the release state (2026-11-14, run locally):
+
+| Check | Environment | Result |
+|---|---|---|
+| Full suite, current version | Home Assistant 2026.11.0, local, four parallel workers | 11245 passed, 1 skipped (the box test of stable release notes) |
+| Strict Mypy on the changed modules, Ruff lint and formatting | local | Mypy without findings; Ruff clean |
+| Release tests | local | 62 passed, 1 skipped in the release and repository tests (clean clone); the release notes come from this version's CHANGELOG section |
+| Release archive and SHA-256 | local build on a clean clone | built for version 0.9.2-beta.1 with 271 files (1,833,023 bytes) under Linux, without tests or bytecode; SHA-256 `d2ecc426f0e9c6d074b14c37c5243198cfaa0e724e29cae4c27a7bda9c17ce39` |
+| GitHub checks | PR and release workflow | pending; the minimum version and the other compatibility jobs run there |
+
+Tested with automated tests and a synthetic gateway answering `unknown`;
+not yet confirmed on a real gateway. A pre-release tag may come from the
+feature branch; the release workflow marks it as a pre-release, so HACS
+offers it only with **Show beta versions**.
+
+## 0.9.1 verification
+
+I am preparing **0.9.1 as a stable release**. It fixes the cloud sign-in of
+0.9.0 ([#127](https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/issues/127)):
+every sign-in link asks for the full set of permissions of 0.8.x again. It
+also adds the token list and the revocation of an old token for a local
+access, follows a gateway to a new address after a confirmation, lists the
+last local setup and cloud sign-in attempts in the diagnostics, makes the
+sign-in with the device label easier to get right, adds the heat generator
+sensor, shows texts for more gateway states, corrects entity names and
+clarifies dialog texts. It
+keeps storage format 4 and Home Assistant 2026.5.0 as the minimum; updating
+from 0.9.0 needs no new setup.
+
+Automated checks on the release state (2026-11-14, run locally):
+
+| Check | Environment | Result |
+|---|---|---|
+| Full suite with coverage, current version | Home Assistant 2026.11.0, local, four parallel workers | 11231 passed; coverage 95.97 % |
+| Full suite, minimum version | Home Assistant 2026.5.4, local, four parallel workers | 11229 passed, 2 skipped (version-dependent) |
+| Repeated runs of the request count after removing the cloud | Home Assistant 2026.11.0 and 2026.5.4, under extra CPU load | 500 of 500 passed on each version |
+| Strict Mypy, Ruff lint and formatting | local | Mypy without findings in 221 files; Ruff clean; 614 files formatted |
+| Frontend tests and dialog browser tests | Home Assistant 2026.11.0 with its frontend, local | npm tests passed; 12 browser tests passed |
+| Release archive and SHA-256 | local build on a clean tree | built for version 0.9.1 with 271 files (1,832,610 bytes) under Linux, without tests or bytecode; SHA-256 `e87fd9b352ea68f5cfe223ea5d2b554cd517815c4d640a2473465ef07b8fd537`; the release notes come from this version's CHANGELOG section |
+| GitHub checks | PR and release workflow | pending: all required checks of the PR must pass before the merge |
+
+Checks on a real installation with builds of the release candidate (Home
+Assistant 2026.11, installed after a full Home Assistant backup, without
+changes to the heating system):
+
+- A complete renewed cloud sign-in with the fixed link worked; the
+  diagnostics listed the abandoned link before it and the success.
+- The gateway's token list was read in the format of firmware 15.00.01.
+- The heat generator sensor showed the indoor and the outdoor unit with
+  family, construction and power class.
+- The corrected names appeared, while entity IDs, unique IDs and names set
+  by hand stayed.
+- After a restart with the fixed version, the local sensors kept their
+  device class and display precision, also before their first reading.
+- For an access with a token entered by hand, the token list showed the
+  note that explains why no entry is marked.
+
+Not yet confirmed on a real installation: revoking a token on a real
+gateway, a real change of the gateway's address, pressure units, volume
+flows of hybrid systems, the cooling mode (TR3/TR4) and the module names of
+iCom gateways.
+
+### 0.9.1 release checklist
+
+1. All required checks of the PR are green (quality, dependency audit,
+   hassfest, HACS, analyze, compatibility, frontend, minimum version).
+   The release date 2026-11-14 stands in the CHANGELOG heading,
+   `docs/roadmap.md`, `docs/specification-status.md` and the link of the
+   release notes; if the release is published on another day, change it in
+   all four places first.
+2. Squash-merge the PR into `main`.
+3. Create the annotated tag `v0.9.1` on the squash commit in `main`, not on
+   the feature branch; the release workflow refuses a tag that is not on
+   `main` or not annotated.
+4. Compare the published archive and its SHA-256 with the local build.
+5. Answer in #127 once the release is out.
+
+## 0.9.0 verification
+
+I am preparing **0.9.0 as the stable release** of the 0.9 line. It needs
+Home Assistant 2026.5.0 or newer and keeps storage format 4 of the
+pre-releases; updating from a 0.9.0 alpha needs no new setup. From 0.8.x the
+configuration entry moves to format 4 on the first start, so the release
+notes open with the backup advice.
+
+Automated checks on the release state (2026-11-13, run locally):
+
+| Check | Environment | Result |
+|---|---|---|
+| Full suite with coverage, current version | Home Assistant 2026.11.0, local, four parallel workers | 10726 passed; coverage 96.03 % |
+| Full suite with coverage, minimum version | Home Assistant 2026.5.4, local, four parallel workers | 10724 passed, 2 skipped (version-dependent); coverage 96.02 % |
+| Files changed since the review, one process | Home Assistant 2026.5.4, local | 570 passed in 13 test files |
+| Strict Mypy, Ruff lint and formatting | local | Mypy without findings in 216 files (2026.11.0); Ruff clean; 599 files formatted |
+| Browser tests of the dialogs | Chromium, local | `npm test` passed; the 12 Home Assistant frontend tests passed (Home Assistant 2026.11.0 with frontend 20261028.4 as browser environment) |
+| Release archive, SHA-256 and release notes | local build on a clean tree | built for version 0.9.0 with 265 files (1,716,822 bytes) under Linux, without tests or bytecode; SHA-256 `4d6eddd1e7383f1bff9b3e8518a3fae6109e528e3ee4fed96f6f8d974d5fd7a5`; the release notes come from this version's CHANGELOG section |
+| GitHub checks | PR and release workflow | pending: the PR checks, including hassfest and HACS with the new manifest category, must pass before the merge |
+
+What a real device confirmed is named as confirmed in the CHANGELOG; the
+other functions are tested with automated tests and simulated data only.
+
+### 0.9.0 release checklist
+
+1. All required checks of PR #110 are green (quality, dependency audit,
+   hassfest, HACS, analyze, compatibility, frontend, minimum version).
+2. Squash-merge PR #110 into `main`.
+3. Create the annotated tag `v0.9.0` on the squash commit in `main`, not on
+   the feature branch; the release workflow refuses a tag that is not on
+   `main` or not annotated.
+4. Compare the published archive and its SHA-256 with the local build.
+
+> [!WARNING]
+> **HACS and older versions.** From 0.9.0 on, `main` and every release store
+> the configuration entry in format 4. Never publish another release that
+> uses format 3. HACS still offers the 0.8.x releases under **Redownload**;
+> 0.8.x cannot load a format 4 entry, so going back is only possible by
+> restoring the backup made before the update. The release notes and the
+> README say so.
+
+## 0.9.0-alpha.6 verification
+
+I am publishing **0.9.0-alpha.6 as a pre-release** for testing from the commit
+tagged `v0.9.0-alpha.6`. Updating from alpha.1 to alpha.5 needs no new setup;
+the storage format stays 4.
+
+From this release on, I run the full suites locally on the current Home
+Assistant version and on the minimum version only; Home Assistant 2026.9.2
+and 2026.10.4 are checked by the GitHub workflows. For alpha.6 the local run
+on the minimum version 2026.5.4 was not completed; the minimum-version job of
+the release workflow runs it.
+
+Automated checks on the release state (2026-11-12, run locally):
+
+| Check | Environment | Result |
+|---|---|---|
+| Full suite with coverage, current version | Home Assistant 2026.11.0, local, four parallel workers | 10371 passed; coverage 95.99 % |
+| Strict Mypy, Ruff lint and formatting | local | Mypy without findings in 215 files (2026.11.0); Ruff clean; 496 files formatted |
+| Browser tests of the dialogs | Chromium, local | `npm test` passed; the 12 Home Assistant frontend tests passed (Home Assistant 2026.10.4 with frontend 20260930.5 as browser environment) |
+| Release archive, SHA-256 and release notes | local build | built for version 0.9.0-alpha.6 without tests or bytecode; the release notes come from this version's CHANGELOG section |
+| GitHub checks | release workflow | the release workflow publishes only after the browser tests, both older Home Assistant versions, its Python checks, hassfest and HACS pass |
+
+On a real room controller, a TC100.2 has confirmed the functions the
+CHANGELOG names as confirmed. The schedule editor, the iCom changes, the
+firmware entity and most fixes were tested with simulated data only; the
+CHANGELOG names them. The readings of the local access now enabled by default
+show plausible values on a real heat pump; nothing of this release was
+installed on a real system before the release.
+
+## 0.9.0-alpha.5 verification
+
+I am publishing **0.9.0-alpha.5 as a pre-release** for testing from the commit
+tagged `v0.9.0-alpha.5`. Updating from alpha.1 to alpha.4 needs no new setup;
+the storage format stays 4.
+
+Automated checks on the release state (2026-11-11, run locally):
+
+| Check | Environment | Result |
+|---|---|---|
+| Full suite with coverage, current version | Home Assistant 2026.11.0, local | 9488 passed; coverage 95.89 % |
+| Full suite | Home Assistant 2026.10.4, local | 9488 passed; coverage 95.90 % |
+| Full suite, compatibility version | Home Assistant 2026.9.2, same test packages as the workflow, local | 9488 passed; coverage 95.90 % |
+| Full suite, minimum version | Home Assistant 2026.5.4, local | 9486 passed, 2 skipped (version-dependent); coverage 95.89 % |
+| Strict Mypy, Ruff lint and formatting | local | Mypy without findings in 200 files (2026.10.4 and 2026.11.0); Ruff clean; 554 files formatted |
+| Browser tests of the dialogs | Chromium, local | `npm test` passed; the 12 Home Assistant frontend tests passed in two runs in a row on the release state |
+| Release archive, SHA-256 and release notes | local build | built for version 0.9.0-alpha.5 with 249 files, without tests or bytecode; the release notes come from this version's CHANGELOG section |
+| GitHub checks | release workflow | the release workflow publishes only after the browser tests, both older Home Assistant versions, its Python checks, hassfest and HACS pass |
+
+After these checks I made three last changes for this release: the energy
+history statistic IDs and their stored import state are named by a token
+keyed with the Home Assistant instance ID; days with the older energy keys
+wait up to 24 hours for an unreadable heat source type; and the season mode
+and the setpoint optimization stay enabled by default and follow the
+general rule for settings that are not available or not used. I checked the
+changed state again (2026-11-11, run locally):
+
+| Check | Environment | Result |
+|---|---|---|
+| Full suite with coverage | Home Assistant 2026.11.0, local | 9515 passed; coverage 95.90 % |
+| Changed test files with the release, repository and translation tests | Home Assistant 2026.10.4, 2026.9.2 and 2026.5.4, local | 321 passed on each version |
+| Strict Mypy, Ruff lint and formatting | local | Mypy without findings in 200 files (2026.10.4 and 2026.11.0); Ruff clean; 554 files formatted |
+| Mutation check of these changes | Home Assistant 2026.11.0, private copy | 15 of 15 mutations found by the tests |
+| Release archive, SHA-256 and release notes | local build | rebuilt for version 0.9.0-alpha.5 with 249 files, without tests or bytecode; the release notes come from this version's CHANGELOG section |
+
+The dialogs did not change, so the browser test results above still apply.
+
+On a real room controller, a TC100.2 has confirmed the zone readings,
+switching a zone between manual mode and the schedule, and changing the
+manual setpoint. Every other room controller function was tested with
+simulated data only; the CHANGELOG and the room controller page name them.
+
+## 0.9.0-alpha.4 verification
+
+I am publishing **0.9.0-alpha.4 as a pre-release** for testing from the commit
+tagged `v0.9.0-alpha.4`. Updating from alpha.1, alpha.2 or alpha.3 needs no
+new setup; the storage format stays 4.
+
+Automated checks on the release state (2026-11-10, run locally):
+
+| Check | Environment | Result |
+|---|---|---|
+| Full suite | Home Assistant 2026.10.4, local | 8600 passed; coverage 95.82 % |
+| Full suites, minimum version and 2026.9.2 | Home Assistant 2026.5.4 and 2026.9.2 | GitHub checks only |
+| Strict Mypy, Ruff lint and formatting | local | Mypy without findings in 170 files (2026.10.4 and 2026.11.0); Ruff clean; 463 files formatted |
+| Browser tests of the dialogs | Chromium, local | `npm test` passed; the Home Assistant frontend tests passed in six runs in a row and once more on the release state |
+| Release archive, SHA-256 and release notes | local build | built for version 0.9.0-alpha.4; the release notes come from this version's CHANGELOG section |
+| GitHub checks | release workflow | the release workflow publishes only after the browser tests, both older Home Assistant versions, its Python checks, hassfest and HACS pass |
+
+Many fixes in this release were tested with simulated data only; the
+CHANGELOG names them. The reduced sign-in permissions are not yet confirmed
+with a real sign-in.
+
+## 0.9.0-alpha.3 verification
+
+I am publishing **0.9.0-alpha.3 as a pre-release** for testing from the commit
+tagged `v0.9.0-alpha.3`. Updating from alpha.1 or alpha.2 needs no new
+setup; the storage format stays 4.
+
+Automated checks on the release state (2026-11-09, run locally):
+
+| Check | Environment | Result |
+|---|---|---|
+| Full suite, minimum version | Home Assistant 2026.5.4, local | 7952 passed, 2 skipped (version-dependent); coverage 95.60 % |
+| Full suite | Home Assistant 2026.9.2 | GitHub compatibility check only |
+| Full suite | Home Assistant 2026.10.4, local | 7954 passed; coverage 95.63 % |
+| Full suite with coverage, current version | Home Assistant 2026.11.0, official test package, local | 7954 passed; coverage 95.62 %; no deprecation warnings from the integration |
+| Strict Mypy, Ruff lint and formatting | local | Mypy without findings in 167 files (2026.10.4 and 2026.11.0); Ruff clean; 368 files formatted |
+| GitHub checks | PR and release workflow | the release workflow published only after its Python checks, both older Home Assistant versions, hassfest and HACS passed; the browser tests ran only on the PR and were not a required check at the time |
+| Reproducible archive and SHA-256 | Linux build | checked by the release workflow |
+
+Checks on a real installation (Home Assistant 2026.10.4). On 2026-11-09 a
+build of this state was installed there after a full Home Assistant backup;
+apart from the version number, its files are identical to this release.
+
+| Check | Result after about 2.5 hours |
+|---|---|
+| Live interval of the one-minute group | median 60.0 s, at most 60.1 s for 151 resources |
+| Kept connections | 20,765 reads on kept connections, 298 new connections, none closed by the gateway, no fallback |
+| Start spacing and brake | 200 ms base; the brake followed the gateway's answer time (up to about 360 ms) without delaying live values |
+| Cloud requests and items per hour, compared with alpha.2 | 76 → 60 requests, about 1,660 → 930 items |
+| CPU load of Home Assistant, compared with alpha.2 | about 17 % → 7 % of one core |
+| Warnings and errors from the integration | none |
+| Signals the gateway stops listing | 16 signals disappeared from a gateway's signal list; their entities became unavailable and the reads stopped after two list checks, as intended |
+
+A longer run and any check on other gateways, firmware versions and device
+families are still pending.
+
+## 0.9.0-alpha.2 verification
+
+I am publishing **0.9.0-alpha.2 as a pre-release** for testing from the commit
+tagged `v0.9.0-alpha.2`. **0.8.3 remains Stable/Latest.** Alpha.2 always shows local
+readings while the cloud cannot be used, accepts a new sign-in when a system
+was removed from the account, makes the local access more robust and adds an
+estimated energy sensor for heat sources that report only their current
+power. It also reduces the load on Home Assistant, its database, the cloud and
+the gateway. Updating from alpha.1 needs no new setup; the storage format
+stays 4.
+
+Automated checks on the release state (2026-11-08, run locally):
+
+| Check | Environment | Result |
+|---|---|---|
+| Full suite, minimum version | Home Assistant 2026.5.4, local | 7768 passed, 2 skipped (version-dependent); coverage 95.48 % |
+| Full suite | Home Assistant 2026.9.2 | GitHub compatibility check only |
+| Full suite | Home Assistant 2026.10.4, local | 7770 passed; coverage 95.50 % |
+| Full suite with coverage, current version | Home Assistant 2026.11.0, official test package, local | 7770 passed; coverage 95.50 %; no deprecation warnings from the integration |
+| Strict Mypy, Ruff lint and formatting | local | Mypy without findings in 163 files (2026.10.4 and 2026.11.0); Ruff clean; 354 files formatted |
+| GitHub checks | PR and release workflow | the release workflow published only after its Python checks, both older Home Assistant versions, hassfest and HACS passed; the browser tests ran only on the PR and were not a required check at the time |
+| Reproducible archive and SHA-256 | Linux build | checked by the release workflow |
+
+Checks of the performance and load changes:
+
+| Check | Environment | Result |
+|---|---|---|
+| Entity updates only after real changes of value, availability or source; caches give the same results as before (diagnostics, schema keys, catalog lookups) | full suites above | passed |
+| Request-count sensors: at most one state write per minute, unrecorded attributes, total count with state class `total` and `last_reset` | full suites above; recorder on a real system | automated: passed; real system: pending |
+| Units, options and limits kept while an entity is unavailable; climate entity within the validity limit | full suites above | passed |
+| Fewer requests: settled cloud values, hourly containers, weekly re-check of missing local paths, hourly local system metadata, daily installation date, no serial numbers | full suites above; request counts on a real system over one day | automated: passed; real system: pending |
+| One-time restart of the local search after the update | real system | pending |
+| Storage: compact files (older files still load), parallel loading, hourly "still seen" confirmations, 60-second counter-source delay, private atomic connection inventory, token renewal 2 minutes before expiry | full suites above | passed |
+| Log messages: one warning per cloud outage, info lines on recovery, hand-over warning once per path | full suites above; cloud switched off on a real system | automated: passed; real system: pending |
+| Diagnostics schema 42 | full suites above; download on a real system | automated: passed; real system: pending |
+| Working time of a heat source from the local access; "Heat output (compressor)"; statistics of signal measurements; translated and on/off states | full suites above; real system | automated: passed; real system: pending |
+
+On 2026-11-08 a development build of this state was installed on a real
+installation (Home Assistant 2026.10.4) after a full Home Assistant backup.
+Apart from the
+version number, its files are identical to this release. It started without
+warnings or errors from the integration, and the climate and water heater
+entities kept their states and attributes. I measured the load and the
+requests later the same day, see
+[Load measurement for 0.9.0-alpha.2](#load-measurement-for-090-alpha2). A
+longer run and any check of the estimated energy sensor on a real device
+were still pending at that time.
+
+## Load measurement for 0.9.0-alpha.2
+
+I measured the load of Home Assistant on a real installation with the same
+read-only script for 60 minutes each: before, a development
+build of the 0.9.0-alpha.1 line shortly before 0.9.0-alpha.2; after, the
+0.9.0-alpha.2 state, starting
+about 20 minutes after its installation on 2026-11-08. The numbers compare these
+two 0.9 pre-release states only. I did not measure 0.8.3 this way, so they say
+nothing about the change from 0.8.3.
+
+| Measure | Before | After | Change |
+|---|---|---|---|
+| CPU load of the Home Assistant core, average | 67.2 % of one core | 17.2 % of one core | −74 % |
+| CPU load, maximum | 71.7 % | 23.0 % | −68 % |
+| Memory, average | 893 MB | 815 MB | −78 MB |
+| Recorder rows per hour | 4,367 | 1,098 | −75 % |
+| of these from the cloud request count sensor | 3,413 | 60 | −98 % |
+| Cloud requests per hour | 76 | 76 | unchanged |
+| Cloud items per hour | 1,916 | 1,657 | −14 % |
+
+The later measurement for alpha.3 is in the
+[alpha.3 verification](#090-alpha3-verification). Other systems were not
+measured.
+
+## 0.9.0-alpha.1 verification
+
+I am preparing **0.9.0-alpha.1 as a pre-release** for testing from commit
+`a795e81`. **0.8.3 remains Stable/Latest.** The alpha adds the optional
+local access to K40/K40RF gateways, operation without the cloud, more robust
+cloud operation and the entity review. It requires Home Assistant 2026.5.0 or
+newer and moves the configuration entry to storage format 4, which 0.8.x
+cannot load.
+
+Automated checks on the release state (2026-11-08, run locally; all GitHub checks passed on the PR and in the release workflow):
+
+| Check | Environment | Result |
+|---|---|---|
+| Full suite, minimum version | Home Assistant 2026.5.4 | 7,043 passed, 2 skipped |
+| Full suite | Home Assistant 2026.9.2 | GitHub compatibility check only |
+| Full suite | Home Assistant 2026.10.4 | 7,045 passed |
+| Full suite with coverage, current version | Home Assistant 2026.11.0, official test package | 7,045 passed, 95.5 % coverage, no deprecation warnings from the integration |
+| Strict Mypy | Home Assistant 2026.11.0 and 2026.10.4 | no issues in 162 files |
+| Ruff lint and formatting | | no findings |
+| Browser test of **Search the system again** in the options | Chromium, English and German | passed |
+| Reproducible archive and SHA-256 | Linux build | checked by the release workflow |
+
+Checks on a real installation (Home Assistant 2026.10.4) with development
+builds of this state:
+
+- The last two development builds were installed, each after a full Home
+  Assistant backup.
+- I switched the cloud access off and on again while Home Assistant was
+  running. Without the cloud, the fault display came from the gateway's local
+  error list; after switching it on again, no fault was announced twice.
+- I started **Search the system again**: the search was planned, and a second
+  request while it was pending was refused.
+- An overnight run with all entities enabled passed without a pause of the
+  local access.
+- Every entity was reviewed (names, duplicates, signals and default
+  activation); the resulting changes are part of this release.
+
+Not tested in practice: bell notifications without the cloud, because no fault
+was active during these checks; automated tests cover them. I
+have not installed the published alpha archive yet. Hybrid HM200 signals and
+other device families remain unverified on a real system.
+
+Publication requires all GitHub checks on the final PR revision, including the
+browser tests, followed by the tag-triggered release workflow. I compare the
+published archive and checksum with the local Linux build and the release
+notes with this version's CHANGELOG section.
+
+## 0.8.4-beta.1 verification
+
+I prepared **0.8.4-beta.1 as a pre-release** on 2026-11-02 to investigate the
+renewed sign-in request reported in #49. **0.8.3 remains Stable/Latest.**
+Thank you to lanebe for the report with log lines and a screenshot. The beta
+adds diagnostics only; sign-in, token renewal and reauthentication behave as
+in 0.8.3.
+
+The full suite passed **3,318 automated cases on HA 2026.10.4** and
+**3,318 on HA 2026.9.2**, both with Python **3.14.7** and **96.87% combined
+statement and branch coverage**. These are the same cases on two HA versions,
+including parametrized variants. The new history module has 98% statement
+and branch coverage in its targeted tests. Ruff, formatting and strict Mypy
+passed. Runtime dependencies are unchanged; the tag-triggered release
+workflow repeats the dependency audit, hassfest and HACS validation.
+
+Two Linux builds produced the same **99-file**, **344,936-byte** archive with
+manifest version **0.8.4-beta.1**. SHA-256:
+`c55126668234296c2467086b4e94ca3dd04ccf576e65afb9f29ddfc569276ab1`.
+The package tests verify an import from an isolated ZIP installation.
+
+I have not installed this beta on a physical system. The diagnostics start
+recording with this version and cannot explain earlier rejections.
+
+## 0.8.3 verification
+
+I prepared **0.8.3 as Stable/Latest** on 2026-11-02 from **0.8.3-beta.1**,
+with the startup correction for issue #60 and compatible dependency updates
+from #97, #98 and #99. Thank you to marcinchrzest for the traceback that
+identified the failure on Home Assistant 2026.9.2.
+
+I reproduced the failure with the previous code in an actual HA 2026.9.2
+test environment. Fan, humidifier and water-heater types now use their public
+component exports at runtime. The static type checker uses the locations in
+the newer HA test package. All twelve entity platforms are imported even
+when the installation has no purifier or dehumidifier, so this correction
+also restores startup for heating and water-softener installations.
+
+The full suite passed **3,279 automated cases on HA 2026.9.2** and
+**3,279 on HA 2026.10.4**, both with Python **3.14.7** and **96.82% combined
+statement and branch coverage**. These are the same cases on two HA versions,
+including parametrized variants. The new regression checks start and unload
+all platforms with synthetic water-softener data, with and without heating.
+The isolated ZIP test now imports every platform as well. I also made five
+existing tests explicitly stop their coordinators so the older HA test
+environment can verify their cleanup.
+
+Ruff, formatting and strict Mypy passed. The isolated runtime dependency
+audit found no known vulnerabilities. I retained pytest **9.0.3** and
+pytest-asyncio **1.4.0**, as required by the updated HA test plugin, while
+including the compatible Hypothesis, Mypy, HA test plugin, Ruff and hassfest
+updates.
+
+Two Linux builds produced the same **98-file**, **337,504-byte** archive with
+manifest version **0.8.3**. Compared with the published beta.1 archive, the
+paths are identical and only four platform modules and the manifest differ.
+SHA-256:
+`1b814d0daf80ff0acc2c65a006cd9030c7ef2abc069d92da4d20ab3e6c503b8e`.
+
+All checks passed on the final revision of #100, including the new HA 2026.9.2
+compatibility job and browser tests, followed by the release workflow.
+The main branch requires a linear history, so I included the dependency
+updates through #100 and closed #97, #98 and #99 as superseded.
+The published archive and checksum match the local Linux build byte for byte.
+
+I corrected an outdated note in the release text after checking ReuDa's
+2026-11-01 field report in #95. He confirmed the displayed programs and timely
+heating and hot-water transitions against MyBuderus on a WLW186i with MX400.
+Issue #95 was already closed. The published release notes follow this
+corrected CHANGELOG section; the release tag and installation archive stay
+unchanged. The original documentation at the tag predates this correction.
+
+Update through HACS and restart Home Assistant. I have not installed this
+release on a physical system or performed appliance writes for this fix.
+The low-salt check in #60 still needs field confirmation, so that issue remains
+open. The time-program feedback confirms one installation; I have not tested
+physical clock changes or additional system configurations for this release.
+
+## 0.8.3-beta.1 verification
+
+I prepared **0.8.3-beta.1 as a pre-release** for the read-only heating and
+hot-water time-program contribution in #96. **0.8.2 remains Stable/Latest.**
+Thank you to ReuDa for the implementation and the initial WLW186i/MX400
+device evidence. I corrected clock-change scheduling, gateway time-zone
+selection, preservation of existing entities and updates to program levels.
+
+The local checks passed **3,277 automated cases**, including parametrized
+variants, with **96.82% combined statement and branch coverage**. Ruff,
+formatting and strict Mypy passed. The tests cover both clock changes using
+Home Assistant's timer helpers, actual HA enum-state validation, recovery
+after invalid or unavailable data, preserved registry preferences and cleanup.
+The new program module has full statement and branch coverage.
+
+Two local Linux builds produced the same **98-file**, **337,379-byte** archive
+with manifest version **0.8.3-beta.1**. SHA-256:
+`b843bfcbc9331388fd6628a9923f3231d8135f8c4b84a941b9e691555a466182`.
+The package tests verify an import from an isolated ZIP installation. An
+isolated runtime dependency audit found no known vulnerabilities.
+
+The release must pass all GitHub checks on the final PR revision, including
+the browser tests, followed by the tag-triggered release workflow. Publication
+uses an annotated tag from the verified merged result. I compare the downloaded
+ZIP and checksum with the local Linux build and the English release notes with
+the exact CHANGELOG section before considering publication verified.
+
+The new sensors are disabled by default and make no appliance writes. They
+show the level scheduled for the current local time, which can differ from
+actual operation under a manual setting, holiday or other override. I have
+not installed this beta on a physical system or confirmed the controller's
+clock-change behavior. Issue #95 remains open for the updated display checks.
+
+## 0.8.2 verification
+
+I prepared **0.8.2 as Stable/Latest** on 2026-10-27 from the 0.8.2 beta series,
+the sign-in documentation from #93 and all three remaining maintenance PRs:
+#90, #91 and #92. I retained pytest 9.0.3 because the updated Home Assistant
+test package requires that exact version. The runtime dependencies remain
+unchanged.
+
+The combined local release checks passed **3,190 automated cases** on Home
+Assistant **2026.10.2** and Python **3.14.7**, with **96.78% combined statement
+and branch coverage**. This includes parametrized variants. Ruff 0.17.1,
+formatting, strict Mypy, reproducible packaging and isolated ZIP imports passed.
+I also checked 114 local file and heading links in the changed documentation.
+Publication requires the GitHub checks, including the browser tests, on the
+final PR, followed by the tag-triggered release checks.
+The downloaded ZIP, checksum and release notes must match the local files.
+
+The local Linux archive contains **97 files**, **333,306 bytes**, and version
+**0.8.2** in its root manifest. I compared it with the published Beta.7 ZIP:
+the file paths are identical and only the manifest version differs. SHA-256:
+`48d281b005ecdcdbe08b4e5459b5f5dd26fb929d8a3ceb47acd65fa2207c6d3f`.
+The isolated runtime dependency audit found no known vulnerabilities.
+
+I updated the README, setup and operating guides, roadmap and project status
+to describe stable 0.8.2. Older release records below remain historical.
+I updated the HACS download advice to reflect the maintainer's confirmation
+of the GitHub change and Home Assistant 2026.10.4 correction.
+
+I performed no new Home Assistant installation or physical appliance writes
+for this publication. The earlier Beta.7 appliance tests remain the available
+evidence for those particular controls; broader family and outage validation
+remain open. Issue #49 is not closed by the documentation or token corrections.
+
+### Deutsch
+
+Ich veröffentliche **0.8.2 als Stable/Latest** mit den Änderungen aller sieben
+Betas und den verbleibenden Wartungs-PRs. Die Beschreibungen unterscheiden den
+veröffentlichten Funktionsumfang von noch ausstehenden Praxistests. Bestehende
+Eintragsnamen, Geräte- und Entitätskennungen sowie eigene Namen bleiben erhalten.
+Für dieses Release habe ich keine neuen Schreibtests an der Anlage durchgeführt.
+Die Bestätigung weiterer Gerätefamilien und echter Verbindungsabbrüche steht aus.
+
+## 0.8.2-beta.7 verification
+
+I prepared this beta on 2026-10-25 with the controls dialog, PointT heating-circuit
+climates, native PointT hot-water entity and token-lifecycle corrections from
+PRs #85 to #87. It also introduces the Home Comfort display name and the HACS
+README logo correction from #89. The repository, domain and ZIP filename stay
+the same. Existing entry titles, device/entity identities and custom names remain.
+
+**Beta.7 includes the major changes introduced in Beta.6.** I retained the
+backup and careful-testing warning in the English release notes and README.
+The HACS oversized-response-header download issue remains the first release-note
+notice. This integration release does not patch HACS. **0.8.1 remains Stable/Latest.**
+
+- The combined Python suite passed **3,190 automated cases with 96.78% combined
+  statement and branch coverage**, including separately counted parameter variants.
+- Ruff, formatting and strict Mypy passed. The JavaScript checks and both complete
+  Home Assistant browser tests cover the dialog and native hot-water entity.
+- Reproducible package construction and import from an isolated ZIP passed.
+  The package contains **97 files**, **333,311 bytes**, and manifest version
+  **0.8.2-beta.7**. Its SHA-256 is
+  `15b1dc3d484da3fc4ffbb7acfaa04552662e1a35944b36e6dc854509ba041b6b`.
+
+The [project status](specification-status.md#added-in-beta7) records the actual
+appliance tests. On a real Buderus system with Home Assistant 2026.10.3,
+manual heating 19.0 to 18.5 to 19.0 °C and hot water Auto to Off to Auto through
+the new controls were confirmed. Both directions were checked in MyBuderus and all changed
+settings were restored. This does not confirm other devices, modes or real outage recovery.
+The automatic sign-in helper is deferred to a later beta and is not included.
+
+Publication uses the protected main branch after the dependent PRs and final
+combined checks pass. The tag workflow repeats quality, dependency, Hassfest,
+HACS and package checks. The published ZIP, checksum and English release notes
+must match the locally verified files and this version's CHANGELOG section.
+Historical package records below remain unchanged.
+
+Select Beta.7 explicitly in HACS, restart Home Assistant and reload the browser.
+No new deployment or appliance writes are performed as part of this publication.
+
+## 0.8.2-beta.6 verification
+
+I prepared this substantial beta on 2026-10-24 with the completed P03 and
+P05 through P14 packages, P16 and the subsequent review corrections. I added
+water-heater, climate, fan and dehumidifier entities, read-only wallbox
+sensors, zone and schedule controls, separate cloud connections and corrected
+state freshness and conversions. P15 remains excluded. I updated aiomqtt to 2.5.1 to satisfy the current
+Home Assistant dependency constraints and verified the MQTT transport with it.
+
+**This beta needs careful field testing.** I placed the warning at the start
+of both language sections in the release notes and in the README. I recommend
+a full Home Assistant backup before updating. **0.8.1 remains Stable/Latest.**
+
+- Home Assistant 2026.10.1 and Python 3.14.2: **3,036 automated cases passed**
+  with **96.83% combined statement and branch coverage**. The count includes
+  separately parameterized variants.
+- Ruff, formatting and strict Mypy passed. The suite covers malformed and
+  partial messages, individual field freshness, reconnects, optional-service
+  outages, write confirmation, cancellation, current metadata and conversions.
+- Reproducible package construction and import from an isolated ZIP passed.
+  German and English use the same 585 translation keys with matching
+  placeholders. I checked 75 local documentation file and heading links.
+- The separate validation of filter thresholds and salt warnings matched all
+  707 filter cases and 13 selected salt cases.
+
+The local Linux archive contains **90 files** and **313,016 bytes**, with
+version **0.8.2-beta.6** in its root manifest. Every archived file matches
+the prepared component source and the tracked file list. ZIP SHA-256:
+**f9e7ab347b81a1f3aa7eae01b6796cd45ae9990c777062572a07293c8d3a36e0**.
+
+Publication requires successful quality, dependency-audit, Hassfest, HACS and
+CodeQL checks on the final PR commit. The tag workflow repeats the release
+checks. The published archive, checksum and notes must match this local
+package and the Beta.6 CHANGELOG section.
+
+I performed no new physical-device tests or appliance writes for this release.
+The new device families still need confirmation of readings, reconnects and
+write effects. WE800i controls remain disabled by default pending the response
+in issue #60. Wallbox controls and consumption history are not included.
+Existing PointT heating gateways retain one system device.
+
+Select Beta.6 explicitly in HACS, restart Home Assistant and reload the
+browser after updating. Check readings and test controls individually before
+relying on them in automations.
+
+## 0.8.2-beta.5 verification
+
+I prepared this beta on 2026-10-23 from the combined device extensions in
+PR #76, #77 and #78, with P01, P02 and P04. The release includes initial
+WE800i discovery and readings, controls disabled by default, additional
+heating/cooling zone readings, WDDW2 safety-state and start-counter corrections,
+German resource names and diagnostics schema 17.
+
+The release is a pre-release. **0.8.1 remains Stable/Latest.**
+
+- Home Assistant 2026.10.1 and Python 3.14.2: **1,767 tests passed**, with
+  **96.70% combined statement and branch coverage**. Counts include separately
+  parameterized test variants.
+- Ruff, formatting and strict Mypy passed. The tests include malformed
+  readings, shared discovery limits, regular polling recovery, stable
+  identities, metadata validation, guarded writes and gateway isolation.
+- The suite checks reproducible package construction and an isolated import
+  from the ZIP. Publication also requires the dependency audit, HACS,
+  Hassfest and CodeQL on the combined PR.
+- P02 additionally checked both system/profile language combinations in an
+  isolated actual HA frontend with synthetic data. These browser results do
+  not establish device behavior.
+
+The isolated runtime dependency audit found no known vulnerabilities. I also
+checked 62 local documentation links and the public release text. The Linux
+archive contains **59 files** and **240,642 bytes**, with version
+`0.8.2-beta.5` in the root manifest. Each file matches the Git index and source.
+ZIP SHA-256:
+`574e09af5b7dc59a4ad4c424a1fcb1055c12daf107622ebe3ef51fdb94e6919e`.
+
+The published archive, checksum and notes must match this local package and
+the beta.5 CHANGELOG section. This comparison follows the release workflow.
+
+The device-support work is included through one combined release PR so the
+final checks cover all changes together. Previous package commits and draft
+branches remain available for comparison. The release workflow repeats its
+verification before publishing the archive and checksum.
+
+I performed no new physical installation or appliance writes for this beta.
+WE800i and WDDW2 readings, the additional zone fields and the new softener
+controls still need device confirmation. Available water is the remaining
+volume, not consumption; `/recordings` remains a deferred package. Issue #60
+stays open. The [WE800i validation guide](water-softener-validation.md) explains
+the requested comparisons. Select beta.5 explicitly in HACS, update and
+restart Home Assistant.
+
+## 0.8.2-beta.3 verification
+
+I prepared this beta on 2026-10-21 with the HACS documentation updates from
+PR #73. The integration was accepted into the default HACS catalog through
+[hacs/default#10040](https://github.com/hacs/default/pull/10040).
+Thank you to the HACS maintainers for reviewing and accepting the submission.
+
+I updated the installation guide, HACS search troubleshooting, project status
+and README badge. The README now points to beta.3. The release is a pre-release;
+**0.8.1 remains Stable/Latest.**
+
+- Home Assistant 2026.10.1, Python 3.14.2: **1,460 tests passed**, with
+  **96.64% combined statement and branch coverage**. Counts include
+  parametrized variants.
+- Ruff formatting and lint and strict Mypy passed.
+- The tests include reproducible packaging and an isolated import from the
+  generated archive. I also checked 45 local file and heading links.
+
+I compared the archive with the published beta.2 package. Both contain the
+same 56 paths, and only the manifest version differs. The integration code,
+translations, frontend assets and behavior are unchanged. The updated guides
+are available in the repository; the HACS archive contains the integration.
+
+The Linux archive contains **56 files** and **230,306 bytes**, with
+`manifest.json` at its root and version `0.8.2-beta.3`. Every archived file
+matches the prepared component source. ZIP SHA-256:
+`360bfbf2ca0c9965e47a7e24124c1eddbd2e59a179ffaa4b30b565aff71fcbd7`.
+
+Publication requires successful checks on the final PR commit and a merge
+through the protected main branch. The tag-triggered workflow repeats source
+checks, tests, the isolated dependency audit, Hassfest and HACS validation.
+The published ZIP, checksum and release notes must match the locally verified
+package and the corresponding CHANGELOG section.
+
+I performed no physical appliance writes or new field tests for this release.
+The revised counter recovery and multi-source behavior from beta.2 still need
+field confirmation. Select the beta explicitly in HACS and restart Home
+Assistant after updating.
+
+## 0.8.2-beta.2 verification
+
+I prepared this beta on 2026-10-21 with the start-counter changes from PR #72.
+Thank you, CHLINDE, for the initial implementation and for confirming that the
+missing counter became visible. I keep general and per-source counters
+independent, validate their readings and restore existing entities through
+normal polling. The [implementation report](start-counters.md) and its
+[German version](start-counters.de.md) explain the previous weaknesses and
+the changes in detail.
+
+The release is a pre-release. **0.8.1 remains Stable/Latest.**
+
+- Home Assistant 2026.10.1, Python 3.14.2: **1,460 tests passed**, with
+  **96.64% combined statement and branch coverage**. Counts include
+  parametrized variants; the counter-assessment module has 100% coverage.
+- Ruff formatting and lint and strict Mypy passed.
+- The follow-up review found inconsistent source-ID handling during recovery.
+  Five cases failed before the correction. I added twelve cases covering
+  identity restoration, rejected paths and actual discovery/polling after
+  403, 404 and 406 responses. Forbidden-resource pauses remain effective.
+- Tests also exercise Home Assistant registration and reload with two
+  synthetic gateways, recorder statistics, bounded request batches, malformed
+  readings, cloud failures, deterministic packaging and isolated ZIP imports.
+
+The Linux archive contains **56 files** and **230,306 bytes**, with
+`manifest.json` at its root and version `0.8.2-beta.2`. Every archived file
+matches the prepared component source. ZIP SHA-256:
+`02919378b6036bf537ebef1899f1d943bf4c84aa676c99f194b765f0ca97fa50`.
+
+Publication requires the protected main branch and successful checks on the
+final PR commit. The tag-triggered workflow repeats source checks, tests, the
+isolated dependency audit, Hassfest and HACS before publishing. The published
+ZIP, checksum and release notes must match the locally verified package and
+the matching CHANGELOG section.
+
+CHLINDE's feedback confirms visibility with the initial implementation.
+The revised recovery and multi-source behavior still need field confirmation.
+I performed no physical appliance writes for this beta. Select the beta
+explicitly in HACS and restart Home Assistant after updating.
+
+## 0.8.2-beta.1 verification
+
+I prepared this beta on 2026-10-20 with the pool-heating start counter from
+PR #70 and the manual-setpoint recovery from PR #71. I extended CHLINDE's
+original recovery implementation and tests with bounded outage handling,
+normal polling for late values, error pauses and cancellation checks.
+Thank you, CHLINDE, for the initial contribution.
+
+The release is a pre-release. **0.8.1 remains Stable/Latest.**
+
+- Home Assistant 2026.10.1, Python 3.14.7: **1,350 tests passed**, with
+  **96.55% combined statement and branch coverage**. Counts include parametrized
+  variants.
+- Ruff 0.17.0 formatting and lint and strict Mypy 2.4.0 passed.
+- An isolated runtime dependency audit found no known vulnerabilities.
+- Tests cover at most one 3/10/20-second recovery sequence per outage,
+  continued regular polling, independent circuits and gateways, authentication
+  and rate-limit errors, forbidden-resource pauses, mode changes, unloading,
+  stable entity identities and late pool-counter values.
+- The release tests built two identical component-rooted archives and imported
+  the integration from an isolated extracted installation.
+
+I independently built the Linux archive twice. It contains **55 files** and
+**226,828 bytes**, with `manifest.json` at its root and version
+`0.8.2-beta.1`. Every archived file matches the prepared component source.
+ZIP SHA-256:
+`6234bb5ea0f87166a18b699f7d3c5bf17889bc7f0133b20182516b922b34db4b`.
+
+The protected main branch requires successful combined checks before merging.
+The tag-triggered workflow repeats verification, including the dependency
+audit, Hassfest and HACS, before publication. Published notes, archive and
+checksum must match the verified local artifacts.
+
+I performed no physical appliance writes for this beta. Field confirmation
+of the recovery delay remains open. Select the beta explicitly in HACS and
+restart Home Assistant after updating.
+
 ## 0.8.1 verification
 
 I prepared the full stable release on 2026-10-20 from main, including the HACS
@@ -192,17 +1089,47 @@ After the build, `dist/bosch_buderus_heating.zip` and
 extract the ZIP into an empty directory. `manifest.json` must be located at the
 archive root.
 
+The build refuses to run while the integration directory has changed, staged,
+deleted or untracked files, because the archive would then differ from the one
+the workflow builds from the tag. `--allow-dirty` builds such a state anyway;
+use it only for a local trial, never for an archive that I compare with the
+published one. The archive contains the files that `git ls-files` reports for
+the integration directory, in the plain order of their POSIX paths, so Linux,
+macOS and Windows produce the same entries in the same order.
+
+`scripts/release_notes.py` takes the release notes from the CHANGELOG section
+of the version. It stops when the section points to another section with
+"below" or "above" (for example "the notes of alpha.1 below"), because the
+published notes contain only this one section. Describe such content in the
+section itself or link to it.
+
 ## Publication
 
 1. Ensure that the version in `manifest.json`, `pyproject.toml`, and the
    heading in `CHANGELOG.md` match.
 2. Require a clean working tree and successful local checks.
 3. Push the verified state to GitHub only after explicit release approval.
-4. Create and push the signed or annotated version tag.
+4. Create and push the signed or annotated version tag (`git tag -a` or
+   `git tag -s`). A stable version tag must point to a commit on `main`.
 
-The tag starts the release workflow. It repeats tests, type checks, formatting,
-linting, dependency auditing, hassfest, and HACS validation. Only then does it
-create the GitHub release with the ZIP and checksum.
+The tag starts the release workflow. It first checks the tag: a lightweight
+tag, a tag name that is not `v<version>` and a stable tag on a commit outside
+`main` stop the workflow before any other job runs. Pre-release tags (with a
+`-`, such as `v1.2.0-beta.1`) may also point to a feature branch. Runs for the
+same tag wait for each other.
+
+Then it repeats the browser tests of the dialogs, the full suite on both older
+Home Assistant versions, tests, type checks, formatting, linting, dependency
+auditing, hassfest, and HACS validation. Only then does it create the GitHub
+release with the ZIP and checksum. A tag therefore cannot publish dialogs whose
+browser tests fail, even if a required check is missing from the branch
+protection.
+
+The workflow sets the release type explicitly: `--draft=false` always, and
+`--prerelease=true` or `--prerelease=false` from the tag. An existing draft
+with the same tag is therefore published, and an existing release of the tag
+gets the type that matches the tag. A new release is only created for a tag
+that already exists on GitHub.
 
 ## Field validation before 0.8.1
 
@@ -211,8 +1138,8 @@ appeared to work. Apart from the version number, the integration code and
 packaged assets match beta.3. The release includes all changes from the
 three 0.8.0 betas, including the maintenance updates.
 
-I have tested the notification feature extensively on my own installation
-and closed #36 as implemented and tested locally.
+The notification feature was tested extensively on a real installation
+and #36 was closed as implemented and tested locally.
 
 A 48-hour connection test and preservation of the expected solar entities
 after restart and reload on the affected installation still need specific
@@ -220,7 +1147,7 @@ confirmation.
 The original cause of the connection loss in #49 has not been established.
 Issues #48 and #49 remain open for that feedback.
 
-I tested beta.1 on my installation: notifications appeared when faults
+Beta.1 was tested on a real installation: notifications appeared when faults
 occurred and changed to resolved when they cleared. Retained details are
 kept only for the visible message and are cleared on dismissal, disabling
 notifications, unloading or restart. Solar entities belong to the gateway

@@ -2,17 +2,24 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
+from . import hybrid_controls
+
 _POINTT_TO_HA: dict[str, dict[str, str]] = {
     "holiday_mode": {
         value: value.lower()
         for value in (
             "SATURDAY",
+            "AUTO_SAT",
             "FIX_TEMPERATURE",
+            "FIX_TEMP",
             "OFF",
             "ECO",
             "LOW",
             "HIGH",
             "OFF_TD",
+            "TD_OFF",
             "MIN",
             "RED",
             "NOM",
@@ -22,6 +29,7 @@ _POINTT_TO_HA: dict[str, dict[str, str]] = {
         )
     },
     "compressor_status": {"poolHeat": "pool_heat"},
+    "hybrid_control_strategy": dict(hybrid_controls.STRATEGY_KEYS),
     "data_processing_status": {
         "IN_PROGRESS": "in_progress",
         "inProgress": "in_progress",
@@ -66,6 +74,10 @@ _POINTT_TO_HA: dict[str, dict[str, str]] = {
         "notSupportedPairingEnabled": "not_supported_pairing_enabled",
         "inEvaluation": "in_evaluation",
     },
+    "ventilation_operation_mode": {
+        "powerVent": "power_vent",
+        "fallAsleep": "fall_asleep",
+    },
     "season_optimizer_mode": {
         "forcedHeat": "forced_heat",
         "forcedCool": "forced_cool",
@@ -100,17 +112,37 @@ def enum_value_to_pointt(translation_key: str, value: str) -> str:
 
 
 def writable_enum_options(
-    translation_key: str, values: tuple[str, ...]
+    translation_key: str,
+    values: tuple[str, ...],
+    overrides: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
     """Map display keys to exact wire codes, without aliases swallowing new codes.
 
     Reserved display keys and the escape prefix are escaped consistently even
     when only one spelling is advertised. Metadata changes cannot silently
-    redirect an existing option to a different wire value.
+    redirect an existing option to a different wire value. ``overrides`` (an
+    RRC contract's ``option_keys``) name wire codes first; a key already
+    taken falls back to the escaped code. Two codes the overrides give the
+    same key are spellings of one option, such as "Off" and "off": only the
+    first one is offered.
     """
     aliases = _POINTT_TO_HA.get(translation_key, {})
     canonical = {key: raw for raw, key in reversed(tuple(aliases.items()))}
     result: dict[str, str] = {}
+    if overrides:
+        reserved = {key for raw, key in overrides.items() if raw in values and key}
+        for raw in values:
+            key = overrides.get(raw)
+            if key and key not in result:
+                result[key] = raw
+            elif key and overrides.get(result[key]) == key:
+                continue
+            else:
+                fallback = aliases.get(raw, raw)
+                if fallback in reserved or fallback in result:
+                    fallback = f"pointt:{raw}"
+                result[fallback] = raw
+        return result
     for raw in values:
         translated = aliases.get(raw, raw)
         if canonical.get(translated) == raw:

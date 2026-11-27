@@ -7,7 +7,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 from homeassistant.core import HomeAssistant
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.bosch_buderus_heating.const import DOMAIN
 from custom_components.bosch_buderus_heating.coordinator import (
@@ -25,6 +24,7 @@ from custom_components.bosch_buderus_heating.switch import (
     async_setup_entry,
     build_switch_descriptions,
 )
+from tests.ha_test_helpers import MockConfigEntry
 
 PATH = "/dhwCircuits/dhw1/charge"
 
@@ -93,7 +93,7 @@ def test_switch_state_identity_and_device(hass: HomeAssistant) -> None:
     assert entity.available
     assert not entity.is_on
     assert entity.entity_description.entity_registry_enabled_default
-    assert entity.name == "Hot water 1 \u2013 Extra hot water"
+    assert entity.name == "DHW 1: Extra hot water"
     assert entity.unique_id == "gateway-one:dhwCircuits:dhw1:charge:control"
     assert entity.device_info["identifiers"] == {(DOMAIN, "gateway-one")}
 
@@ -143,11 +143,15 @@ async def test_platform_adds_switches(hass: HomeAssistant) -> None:
     entity = _switch(hass)
     entry = SimpleNamespace(
         async_on_unload=Mock(),
-        runtime_data=SimpleNamespace(coordinators=(entity.coordinator,)),
+        runtime_data=SimpleNamespace(bacon=None, coordinators=(entity.coordinator,)),
     )
     added: list[BoschBuderusSwitch] = []
 
     await async_setup_entry(hass, entry, added.extend)
-    entry.async_on_unload.call_args.args[0]()
+    # Every unload callback, as a config entry runs them: removing the
+    # listeners also stops the coordinator's refresh timer.
+    for call in entry.async_on_unload.call_args_list:
+        call.args[0]()
 
     assert len(added) == 1
+    assert entity.coordinator._unsub_refresh is None

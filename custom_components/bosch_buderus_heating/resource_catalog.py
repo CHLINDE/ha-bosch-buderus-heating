@@ -4,23 +4,27 @@ from __future__ import annotations
 
 import base64
 import binascii
+import math
 import re
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import lru_cache
 
+from . import rrc, rrc_contracts
+from .dhw_safety import assess_dhw_safety, is_dhw_safety_path
+from .i18n import localize
+from .legacy_holidays import is_legacy_holiday_path
+from .name_translations import name_part
 from .pointt import Resource
+from .poll_group import PollGroup as PollGroup
+from .read_contracts import assess_runtime, is_monitor_collection, is_runtime_path
+from .start_counters import assess_start_counter, is_start_counter_path
 from .startup_data import is_static_startup_resource
-
-
-class PollGroup(StrEnum):
-    """Cloud polling cadence for one discovered resource."""
-
-    FAST = "fast"
-    NOTIFICATIONS = "notifications"
-    CONTROL = "control"
-    ENERGY = "energy"
-    SLOW = "slow"
-    STATIC = "static"
+from .switch_programs import assess_switch_program, is_switch_program_path
+from .unit_contracts import canonical_unit
+from .water_softener import softener_capability, softener_schema_issue
+from .write_policies import rrc_kwargs
 
 
 class CapabilityMaturity(StrEnum):
@@ -33,8 +37,8 @@ class CapabilityMaturity(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class LogicalDevice:
-    """Stable logical-device identity derived from a PointT path."""
+class FunctionGroup:
+    """A resource group, never evidence of a separate PointT device."""
 
     kind: str
     logical_id: str
@@ -43,7 +47,7 @@ class LogicalDevice:
 
 @dataclass(frozen=True, slots=True)
 class _EntitySchemaRule:
-    """Expected live schema for an optional vendor-app resource."""
+    """Expected live schema for an optional catalog resource."""
 
     pattern: re.Pattern[str]
     resource_types: frozenset[str]
@@ -53,8 +57,57 @@ class _EntitySchemaRule:
         """Return whether a resource matches the narrowly accepted schema."""
         metadata = resource.metadata
         return metadata.resource_type in self.resource_types and (
-            not self.units or metadata.unit in self.units
+            not self.units
+            or canonical_unit(metadata.unit)
+            in {canonical_unit(unit) for unit in self.units}
         )
+
+
+_ADDITIONAL_SCALAR_RULES = (
+    _EntitySchemaRule(
+        re.compile(
+            r"^/zones/zone[^/]+/(?:heating|cooling)/(?:manualRoomSetpoint|temporaryRoomSetpoint)$"
+        ),
+        frozenset({"floatValue"}),
+        frozenset({"C"}),
+    ),
+    _EntitySchemaRule(
+        re.compile(r"^/zones/zone[^/]+/(?:heating|cooling)/operationMode$"),
+        frozenset({"stringValue"}),
+    ),
+    _EntitySchemaRule(
+        re.compile(r"^/dhwCircuits/[^/]+/dhwType$"),
+        frozenset({"stringValue"}),
+    ),
+)
+
+
+def is_additional_app_scalar(path: str) -> bool:
+    """Recognize the separately reviewed zone and DHW scalar additions."""
+    return any(rule.pattern.fullmatch(path) for rule in _ADDITIONAL_SCALAR_RULES)
+
+
+def additional_app_value(resource: Resource) -> float | str | None:
+    """Reject malformed samples and changed units on every state update."""
+    if not resource.has_value or not _matches_optional_app_schema(resource):
+        return None
+    value = resource.value
+    if resource.metadata.resource_type == "stringValue":
+        return (
+            value
+            if isinstance(value, str) and 0 < len(value) <= 64 and value.isprintable()
+            else None
+        )
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int | float)
+        or not math.isfinite(value)
+        or value in {32767, -32768}
+        or not resource.metadata.numeric_error_states_valid
+        or value in resource.metadata.numeric_error_values
+    ):
+        return None
+    return float(value)
 
 
 _PRIVATE_PATHS = frozenset(
@@ -74,6 +127,24 @@ _PRIVATE_PREFIXES = ("/gateway/wifi",)
 _PRIVATE_PATTERNS = (
     re.compile(r"^/devices/[^/]+/(?:inclusionTime|sgtin)$", re.IGNORECASE),
     re.compile(r"^/pv/commissioning(?:/.*)?$", re.IGNORECASE),
+)
+
+# C8 (CT-E07, CT-F05): resources of RRC controllers that hold device keys,
+# passwords, personal or location data. They are never requested, stored,
+# polled or exported: ``/devices/devN`` lists the radio key (``dlk``) and the
+# radio identifier (``sgtin``) of a device, the product lookup takes an
+# identifier as its query, and the user and installer resources hold names,
+# addresses, phone numbers and e-mail addresses.
+_NEVER_READ_PATHS = frozenset({"/gateway/userPassword", "/system/autoAway/users/list"})
+_NEVER_READ_PATTERNS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"^/devices/dev[0-9]+(?:/.*)?$",
+        r"^/devices/productLookup.*$",
+        r"^/devices/[^/]+/homematicip(?:/.*)?$",
+        r"^/gateway/(?:user|installer)(?:/.*)?$",
+        r"^/system/location(?:/.*)?$",
+    )
 )
 
 _OPT_IN_DIAGNOSTIC_PATHS = frozenset(
@@ -111,7 +182,6 @@ _NO_ENTITY_PATHS = frozenset(
         "/dhwCircuits",
         "/heatSources",
         "/heatSources/info",
-        "/heatSources/numberOfStarts",
         "/holidayMode/list",
         "/holidayMode/configuration",
         "/holidayMode/activeModes",
@@ -188,6 +258,10 @@ _UNDERSTOOD_PATHS = frozenset(
         "/gateway/tzInfo",
         "/gateway/tzInfo/timeZone",
         "/gateway/update",
+        # Readings of the automatic update (a text, shown as reported).
+        "/gateway/update/enabled",
+        "/gateway/update/lastCheck",
+        "/gateway/update/lastUpdate",
         "/gateway/update/status",
         "/gateway/uuid",
         "/gateway/versionFirmware",
@@ -257,6 +331,9 @@ _UNDERSTOOD_PATTERNS = tuple(
         r"^/solarCircuits/[^/]+(?:/(?:collectorTemperature|dhwTankBottomTemperature|maxCylinderTemperature|maxTemperatureReached|pumpModulation|solarYield))?$",
         r"^/pool/(?:additionalHeater/poolMode|currentTemp|enabled|setpointTemp)$",
         r"^/ventilation/(?:operationModes/manual/fanSetpoint|zone[^/]+(?:/(?:exhaustFanLevel|maxIndoorAirQuality|maxRelativeHumidity|operationMode|ventilationLevels|filter/(?:maxRunTime|remainingTime)|sensors/supplyTemp))?)$",
+        # Read-only diagnostic readings of a ventilation unit, disabled by
+        # default (not in the default-enabled patterns below).
+        r"^/ventilation/zone[^/]+/(?:demand/(?:indoorAirQuality|relativeHumidity)|sensors/(?:exhaustTemp|extractTemp|internalAirQuality|internalHumidity|outdoorTemp))$",
         r"^/zones/zone[^/]+(?:/(?:averageActualHumidity|averageCurrentTemperature|childLock|currentRoomSetpoint|icon|name|(?:cool|heat|heatCool)/(?:manualRoomSetpoint|operationMode|temporaryRoomSetpoint)))?$",
         r"^/devices/(?!list$)[^/]+(?:/(?:actualHumidity|assignedHC|battery|errors|name|productName|rfTimeofConnectionLost|roomtemperature|signal|type|versionFirmware|zoneId))?$",
         r"^/pv/(?:enable|surplusAvailable)$",
@@ -276,6 +353,7 @@ _DEFAULT_ENABLED_PATHS = frozenset(
         "/heatSources/currentEmergencyMode",
         "/heatSources/emStatus",
         "/heatSources/flameStatus",
+        "/heatSources/numberOfStarts",
         "/heatSources/returnTemperature",
         "/heatSources/passiveCooling/inflowTemp",
         "/heatSources/pvContactState",
@@ -356,16 +434,27 @@ _APP_RESOURCE_SCHEMA_RULES = (
     ),
     _EntitySchemaRule(
         re.compile(
-            r"^(?:/heatingCircuits/[^/]+/(?:actualSupplyTemperature|awayTemperature|boostTemperature|roomtemperature|suWiCoolingThreshold|suWiThreshold|temporaryRoomSetpoint|cooling/(?:manualRoomSetpoint|outdoorThreshold|roomTempSetpoint|temporaryRoomSetpoint)|cooling/temperatureLevels/on)|/dhwCircuits/[^/]+/(?:currentFriwaSupplyTemperature|inletTemperature|manualsetpoint|outletTemperature|outTemp|safetyTemperature|sensor/(?:airBoxTemperature|exhaustFlueGasTemperature|externalTankTemperature|heatExchangerFlueGasTemperature|heatExchangerTemperature))|/system/(?:awayMode/temperature|sensors/temperatures/(?:chimney|return|supply_t1|supply_t1_setpoint)|seasonOptimizer/(?:coolingThreshold|heatingThreshold)|variableTariff/ch/(?:currentSetpoint|highPriceDelta|lowPriceDelta|midPriceSetpoint))|/heatSources/(?:hybrid/bivalentSetpoint|poolSetpointTemperature|poolTemperature)|/solarCircuits/[^/]+/(?:collectorTemperature|dhwTankBottomTemperature|maxCylinderTemperature)|/pool/(?:currentTemp|setpointTemp)|/ventilation/zone[^/]+/sensors/supplyTemp|/zones/zone[^/]+/(?:averageCurrentTemperature|currentRoomSetpoint|(?:cool|heat|heatCool)/(?:manualRoomSetpoint|temporaryRoomSetpoint))|/devices/(?!list$)[^/]+/roomtemperature)$"
+            r"^(?:/heatingCircuits/[^/]+/(?:actualSupplyTemperature|awayTemperature|boostTemperature|roomtemperature|suWiCoolingThreshold|suWiThreshold|temporaryRoomSetpoint|cooling/(?:manualRoomSetpoint|outdoorThreshold|roomTempSetpoint|temporaryRoomSetpoint)|cooling/temperatureLevels/on)|/dhwCircuits/[^/]+/(?:currentFriwaSupplyTemperature|inletTemperature|manualsetpoint|outletTemperature|outTemp|sensor/(?:airBoxTemperature|exhaustFlueGasTemperature|externalTankTemperature|heatExchangerFlueGasTemperature|heatExchangerTemperature))|/system/(?:awayMode/temperature|sensors/temperatures/(?:chimney|return|supply_t1|supply_t1_setpoint)|seasonOptimizer/(?:coolingThreshold|heatingThreshold)|variableTariff/ch/(?:currentSetpoint|highPriceDelta|lowPriceDelta|midPriceSetpoint))|/heatSources/(?:hybrid/bivalentSetpoint|poolSetpointTemperature|poolTemperature)|/solarCircuits/[^/]+/(?:collectorTemperature|dhwTankBottomTemperature|maxCylinderTemperature)|/pool/(?:currentTemp|setpointTemp)|/ventilation/zone[^/]+/sensors/(?:supplyTemp|exhaustTemp|extractTemp|outdoorTemp)|/zones/zone[^/]+/(?:averageCurrentTemperature|currentRoomSetpoint|(?:cool|heat|heatCool)/(?:manualRoomSetpoint|temporaryRoomSetpoint))|/devices/(?!list$)[^/]+/roomtemperature)$"
         ),
         frozenset({"floatValue"}),
         frozenset({"C"}),
     ),
     _EntitySchemaRule(
         re.compile(
-            r"^(?:/heatingCircuits/[^/]+/(?:actualHumidity|pumpModulation)|/dhwCircuits/[^/]+/(?:friwaPrimaryPumpModulation|sensor/fanSpeed)|/system/silentMode/powerReduction|/solarCircuits/[^/]+/pumpModulation|/zones/zone[^/]+/averageActualHumidity|/devices/(?!list$)[^/]+/(?:actualHumidity|battery|signal))$"
+            r"^(?:/heatingCircuits/[^/]+/(?:actualHumidity|pumpModulation)|/dhwCircuits/[^/]+/(?:friwaPrimaryPumpModulation|sensor/fanSpeed)|/solarCircuits/[^/]+/pumpModulation|/zones/zone[^/]+/averageActualHumidity|/devices/(?!list$)[^/]+/(?:actualHumidity|battery|signal))$"
         ),
         frozenset({"floatValue"}),
+        frozenset({"%"}),
+    ),
+    _EntitySchemaRule(
+        re.compile(r"^/gateway/update/(?:enabled|lastCheck|lastUpdate)$"),
+        frozenset({"stringValue"}),
+    ),
+    # The power reduction of the silent mode is a whole percentage the
+    # gateway reports as an integer (``system_controls_extra``).
+    _EntitySchemaRule(
+        re.compile(r"^/system/silentMode/powerReduction$"),
+        frozenset({"floatValue", "integerValue"}),
         frozenset({"%"}),
     ),
     _EntitySchemaRule(
@@ -502,7 +591,7 @@ _GERMAN_NAMES = {
     "remainingTime": "Restlaufzeit",
     "rfTimeofConnectionLost": "Funkverbindung unterbrochen seit",
     "roomtemperature": "Raumtemperatur",
-    "safetyTemperature": "Sicherheitstemperatur",
+    "safetyTemperature": "Sicherheitstemperatur aktiv",
     "systemOfUnits": "Einheitensystem",
     "tariffId": "Tarif-ID",
     "setpointOptimization": "Sollwertoptimierung",
@@ -517,7 +606,7 @@ _GERMAN_NAMES = {
     "waterFlow": "Wasserdurchfluss",
     "waterTotalConsumption": "Wasserverbrauch gesamt",
     "zoneId": "Zonenzuordnung",
-    "flameStatus": "Brennerstatus",
+    "flameStatus": "Wärmeerzeuger aktiv",
     "heatCoolMode": "Heiz-/Kühlbetrieb",
     "heatingType": "Heizsystem",
     "heatPumpType": "Wärmepumpentyp",
@@ -539,7 +628,7 @@ _GERMAN_NAMES = {
     "tdMode": "Thermische Desinfektion",
     "timeZone": "Zeitzone",
     "type": "Anlagentyp",
-    "uuid": "Gateway-UUID",
+    "uuid": "Gateway-ID",
     "versionFirmware": "Firmwareversion",
     "versionHardware": "Hardwareversion",
     "workingTime": "Betriebszeit",
@@ -547,10 +636,19 @@ _GERMAN_NAMES = {
     "outdoorTemperatureSource": "Quelle der Außentemperatur",
     "supportStatus": "Unterstützungsstatus",
     "info": "Systeminformationen",
+    "swPrefix": "Softwarefamilie",
 }
 
+# The heat sources' supply temperature is the system supply ("system supply
+# flow temperature" in the API documentation): behind a buffer cylinder it is
+# the heating side's flow, not the heat pump's own flow (TC1). The name of a
+# heating circuit's supply temperature stays. The heat sources' return
+# temperature is the return into the heat source (TC0 of a heat pump), not
+# the return of a heating circuit.
 _GERMAN_PATH_NAMES = {
     "/gateway/dataProcessing/status": "Datenverarbeitungsstatus",
+    "/heatSources/actualSupplyTemperature": "Vorlauftemperatur Anlage",
+    "/heatSources/returnTemperature": "Rücklauf zum Wärmeerzeuger",
     "/heatSources/Source/eHeater/status": "Status elektrischer Zuheizer",
     "/heatSources/additionalHeater/operationMode": "Betriebsart des Zuheizers",
     "/heatSources/additionalHeater/primary/status": "Status des primären Zuheizers",
@@ -566,15 +664,18 @@ _GERMAN_PATH_NAMES = {
     "/system/appliance/enabled": "Anlage aktiviert",
     "/system/powerGuard/active": "Power Guard aktiv",
     "/system/powerLimitation/active": "Leistungsbegrenzung aktiv",
-    "/system/silentMode/enabled": "Silent Mode aktiviert",
+    "/system/silentMode/enabled": "Flüstermodus aktiviert",
     "/pv/enable": "Photovoltaik aktiviert",
     "/pv/surplusAvailable": "PV-Überschuss verfügbar",
     "/holidayMode/activeModes": "Aktive Urlaubsmodi",
     "/holidayMode/configuration": "Urlaubskonfiguration",
     "/holidayMode/list": "Urlaubszeiten",
+    "/system/holidayMode": "Urlaubsmodus",
     "/system/globalSeasonOptimizer/currentMode": "Aktueller Heiz-/Kühlstatus",
     "/system/seasonOptimizer/mode": "Saisonumschaltung",
     "/system/iSRC/supportStatus": "iSRC-Unterstützung",
+    "/system/iSRC/installationStatus": "iSRC-Installationsstatus",
+    "/system/variableTariff/supportStatus": "Variabler Tarif \N{EN DASH} Unterstützung",
 }
 
 _ENGLISH_NAMES = {
@@ -661,7 +762,7 @@ _ENGLISH_NAMES = {
     "remainingTime": "Remaining time",
     "rfTimeofConnectionLost": "RF connection lost since",
     "roomtemperature": "Room temperature",
-    "safetyTemperature": "Safety temperature",
+    "safetyTemperature": "Safety temperature active",
     "systemOfUnits": "System of units",
     "tariffId": "Tariff ID",
     "setpointOptimization": "Setpoint optimization",
@@ -676,7 +777,7 @@ _ENGLISH_NAMES = {
     "waterFlow": "Water flow",
     "waterTotalConsumption": "Total water consumption",
     "zoneId": "Zone assignment",
-    "flameStatus": "Burner status",
+    "flameStatus": "Heat source active",
     "heatCoolMode": "Heating/cooling mode",
     "heatingType": "Heating system",
     "heatPumpType": "Heat pump type",
@@ -698,7 +799,7 @@ _ENGLISH_NAMES = {
     "tdMode": "Thermal disinfection",
     "timeZone": "Time zone",
     "type": "System type",
-    "uuid": "Gateway UUID",
+    "uuid": "Gateway ID",
     "versionFirmware": "Firmware version",
     "versionHardware": "Hardware version",
     "workingTime": "Operating time",
@@ -706,10 +807,13 @@ _ENGLISH_NAMES = {
     "outdoorTemperatureSource": "Outdoor temperature source",
     "supportStatus": "Support status",
     "info": "System information",
+    "swPrefix": "Software family",
 }
 
 _ENGLISH_PATH_NAMES = {
     "/gateway/dataProcessing/status": "Data processing status",
+    "/heatSources/actualSupplyTemperature": "System supply temperature",
+    "/heatSources/returnTemperature": "Return to the heat source",
     "/heatSources/Source/eHeater/status": "Auxiliary heater status",
     "/heatSources/additionalHeater/operationMode": "Auxiliary heater operation mode",
     "/heatSources/additionalHeater/primary/status": "Primary auxiliary heater status",
@@ -731,9 +835,213 @@ _ENGLISH_PATH_NAMES = {
     "/holidayMode/activeModes": "Active holiday modes",
     "/holidayMode/configuration": "Holiday configuration",
     "/holidayMode/list": "Holiday periods",
+    "/system/holidayMode": "Holiday mode",
     "/system/globalSeasonOptimizer/currentMode": "Current heating/cooling status",
     "/system/seasonOptimizer/mode": "Season switching",
     "/system/iSRC/supportStatus": "iSRC support",
+    "/system/iSRC/installationStatus": "iSRC installation status",
+    "/system/variableTariff/supportStatus": "Variable tariff \N{EN DASH} support",
+}
+
+# The weekly programs of the further program kinds, by translation key.
+_PROGRAM_ROOT = re.compile(r"^/(heatingCircuits|dhwCircuits|ventilation|zones)/[^/]+/")
+_FURTHER_PROGRAM_NAMES = {
+    "/heatingCircuits/*/cooling/switchPrograms/A": "name_part_program_cooling",
+    "/zones/*/switchPrograms/heating": "name_part_program_zone_heating",
+    "/zones/*/switchPrograms/cooling": "name_part_program_zone_cooling",
+    "/ventilation/*/switchPrograms/cp": "name_part_program_ventilation",
+    "/dhwCircuits/*/switchPrograms/program1": "name_part_program_hot_water",
+}
+
+# Reviewed names whose meaning depends on the parent resource. A wildcard
+# occupies exactly one circuit/zone ID, never an arbitrary suffix or subtree.
+# Keep both languages together so a technical leaf such as "on" or "gas"
+# cannot acquire the meaning of a different device family.
+_APP_PATH_NAMES = {
+    "/heatingCircuits/*/switchPrograms/A": ("Zeitprogramm A", "Time program A"),
+    "/heatingCircuits/*/switchPrograms/B": ("Zeitprogramm B", "Time program B"),
+    "/dhwCircuits/*/switchPrograms/A": ("Zeitprogramm A", "Time program A"),
+    "/dhwCircuits/*/switchPrograms/B": ("Zeitprogramm B", "Time program B"),
+    "/heatSources/hybrid/controlStrategy": (
+        "Hybrid-Regelungsstrategie",
+        "Hybrid control strategy",
+    ),
+    "/heatSources/hybrid/outdoorStatus": (
+        "Verbindungsstatus der Außeneinheit",
+        "Outdoor unit connection status",
+    ),
+    "/heatSources/hybrid/outdoorVariant": (
+        "Variante der Außeneinheit",
+        "Outdoor unit variant",
+    ),
+    "/heatSources/hybrid/reminderDate": (
+        "Energiepreis-Erinnerung: Datum",
+        "Energy price reminder date",
+    ),
+    "/heatSources/hybrid/reminderEnable": (
+        "Energiepreis-Erinnerung aktiviert",
+        "Energy price reminder enabled",
+    ),
+    "/heatSources/hybrid/reminderLapsed": (
+        "Energiepreis-Erinnerung fällig",
+        "Energy price reminder due",
+    ),
+    "/heatingCircuits/*/awayTemperature": (
+        "Abwesenheitstemperatur",
+        "Away temperature",
+    ),
+    "/heatingCircuits/*/temperatureLevels/awayTemperature": (
+        "Abwesenheitstemperatur",
+        "Away temperature",
+    ),
+    "/heatingCircuits/*/cooling/outdoorThreshold": (
+        "Kühlbetrieb ab Außentemperatur",
+        "Start cooling at outdoor temperature",
+    ),
+    "/heatingCircuits/*/cooling/roomTempSetpoint": (
+        "Kühlen: Raum-Solltemperatur",
+        "Cooling: room setpoint",
+    ),
+    "/heatingCircuits/*/cooling/temperatureLevels/on": (
+        "Kühlen: Temperaturstufe",
+        "Cooling: target temperature level",
+    ),
+    # Own names for the cooling paths of a circuit, so that they are not read
+    # as the heating circuit's second operating mode, control type or setpoint.
+    "/heatingCircuits/*/cooling/operationMode": (
+        "Kühlen: Betriebsart",
+        "Cooling: operation mode",
+    ),
+    "/heatingCircuits/*/cooling/controlType": (
+        "Kühlen: Regelungsart",
+        "Cooling: control type",
+    ),
+    "/heatingCircuits/*/cooling/manualRoomSetpoint": (
+        "Kühlen: Manueller Sollwert",
+        "Cooling: manual setpoint",
+    ),
+    "/heatingCircuits/*/cooling/temporaryRoomSetpoint": (
+        "Kühlen: Vorübergehender Raum-Sollwert",
+        "Cooling: temporary room setpoint",
+    ),
+    "/heatingCircuits/*/openWindowDetection/enabled": (
+        "Fenster-offen-Erkennung",
+        "Open window detection",
+    ),
+    "/heatingCircuits/*/suWiCoolingThreshold": (
+        "Kühlbetrieb ab Außentemperatur",
+        "Start cooling at outdoor temperature",
+    ),
+    "/heatingCircuits/*/suWiSwitchMode": (
+        "Sommer-/Winterumschaltung",
+        "Summer/winter switching",
+    ),
+    "/heatingCircuits/*/suWiThreshold": (
+        "Heizbetrieb bis Außentemperatur",
+        "Stop heating at outdoor temperature",
+    ),
+    "/heatingCircuits/*/temporaryRoomSetpoint": (
+        "Vorübergehender Raum-Sollwert",
+        "Temporary room setpoint",
+    ),
+    "/pool/setpointTemp": ("Pool-Solltemperatur", "Pool target temperature"),
+    "/solarCircuits/*/pumpModulation": (
+        "Modulation der Solarpumpe",
+        "Solar pump modulation",
+    ),
+    "/system/energyTariff/electricity": ("Strompreis", "Electricity price"),
+    "/system/energyTariff/gas": ("Gaspreis", "Gas price"),
+    "/system/energyTariff/oil": ("Ölpreis", "Oil price"),
+    "/system/energyTariff/pv": ("Einspeisevergütung", "Feed-in tariff"),
+    "/system/lowNoise/mode": (
+        "Leiser Betrieb: Betriebsart",
+        "Low-noise operation mode",
+    ),
+    "/system/lowNoise/duration": (
+        "Leiser Betrieb: Dauer",
+        "Low-noise operation: duration",
+    ),
+    "/system/silentMode/powerReduction": (
+        "Flüstermodus: Leistungsreduzierung",
+        "Silent mode: power reduction",
+    ),
+    "/system/silentMode/startTime": (
+        "Flüstermodus: Startzeit",
+        "Silent mode: start time",
+    ),
+    "/system/silentMode/stopTime": (
+        "Flüstermodus: Endzeit",
+        "Silent mode: stop time",
+    ),
+    "/gateway/update/enabled": ("Automatische Updates", "Automatic updates"),
+    "/gateway/update/lastCheck": ("Letzte Update-Prüfung", "Last update check"),
+    "/gateway/update/lastUpdate": ("Letztes Update", "Last update"),
+    "/gateway/leds/inactivityTimeout": (
+        "LED-Abschaltzeit",
+        "LED switch-off time",
+    ),
+    "/system/seasonOptimizer/coolingThreshold": (
+        "Kühlbetrieb ab Außentemperatur",
+        "Start cooling at outdoor temperature",
+    ),
+    "/system/seasonOptimizer/heatingThreshold": (
+        "Heizbetrieb bis Außentemperatur",
+        "Stop heating at outdoor temperature",
+    ),
+    "/ventilation/*/sensors/supplyTemp": ("Zulufttemperatur", "Supply air temperature"),
+    "/ventilation/*/sensors/exhaustTemp": (
+        "Fortlufttemperatur",
+        "Exhaust air temperature",
+    ),
+    "/ventilation/*/sensors/extractTemp": (
+        "Ablufttemperatur",
+        "Extract air temperature",
+    ),
+    "/ventilation/*/sensors/outdoorTemp": (
+        "Außenlufttemperatur",
+        "Outdoor air temperature",
+    ),
+    "/ventilation/*/sensors/internalAirQuality": (
+        "Luftqualität innen",
+        "Indoor air quality",
+    ),
+    "/ventilation/*/sensors/internalHumidity": (
+        "Luftfeuchtigkeit innen",
+        "Indoor humidity",
+    ),
+    "/ventilation/*/demand/indoorAirQuality": (
+        "Bedarf nach Luftqualität",
+        "Air quality demand",
+    ),
+    "/ventilation/*/demand/relativeHumidity": (
+        "Bedarf nach Luftfeuchtigkeit",
+        "Humidity demand",
+    ),
+    "/system/awayMode/temperature": ("Abwesenheitstemperatur", "Away temperature"),
+    "/dhwCircuits/*/sensor/airBoxTemperature": (
+        "Lufttemperatur im Gerätegehäuse",
+        "Casing air temperature",
+    ),
+    "/dhwCircuits/*/sensor/exhaustFlueGasTemperature": (
+        "Abgastemperatur",
+        "Exhaust gas temperature",
+    ),
+    "/dhwCircuits/*/sensor/externalTankTemperature": (
+        "Externe Speichertemperatur",
+        "External tank temperature",
+    ),
+    "/dhwCircuits/*/sensor/heatExchangerFlueGasTemperature": (
+        "Abgastemperatur am Wärmetauscher",
+        "Heat exchanger flue gas temperature",
+    ),
+    "/dhwCircuits/*/sensor/heatExchangerTemperature": (
+        "Wärmetauschertemperatur",
+        "Heat exchanger temperature",
+    ),
+    "/dhwCircuits/*/monitorValues": (
+        "Warmwasser-Messwerte",
+        "Hot water monitoring values",
+    ),
 }
 
 _SUBKEY_NAMES = {
@@ -754,6 +1062,7 @@ _SUBKEY_NAMES = {
     "nsteps": "Update-Schritte gesamt",
     "outputProduced": "Erzeugte Wärme",
     "percent": "Update-Fortschritt",
+    "pool": "Poolheizung",
     "progress.cur_percent": "Aktueller Fortschritt",
     "progress.cur_step": "Aktueller Schritt",
     "progress.nsteps": "Schritte gesamt",
@@ -782,6 +1091,7 @@ _ENGLISH_SUBKEY_NAMES = {
     "nsteps": "Total update steps",
     "outputProduced": "Heat produced",
     "percent": "Update progress",
+    "pool": "Pool heating",
     "progress.cur_percent": "Current progress",
     "progress.cur_step": "Current step",
     "progress.nsteps": "Total steps",
@@ -793,10 +1103,18 @@ _ENGLISH_SUBKEY_NAMES = {
 }
 
 
+def is_never_read(path: str) -> bool:
+    """C8: a resource with keys or personal data that is never requested."""
+    return path in _NEVER_READ_PATHS or any(
+        pattern.fullmatch(path) for pattern in _NEVER_READ_PATTERNS
+    )
+
+
 def is_private_resource(path: str) -> bool:
     """Return whether a resource must never become an entity or diagnostic."""
     return (
-        path in _PRIVATE_PATHS
+        is_never_read(path)
+        or path in _PRIVATE_PATHS
         or path.startswith(_PRIVATE_PREFIXES)
         or any(pattern.fullmatch(path) for pattern in _PRIVATE_PATTERNS)
     )
@@ -807,21 +1125,258 @@ def is_opt_in_diagnostic_resource(path: str) -> bool:
     return path in _OPT_IN_DIAGNOSTIC_PATHS
 
 
-def is_read_only_control_mirror(path: str) -> bool:
-    """Return whether a read-only entity duplicates an available control."""
+def is_read_only_control_mirror(path: str, *, rrc_plant: bool = False) -> bool:
+    """Return whether a read-only entity duplicates an available control.
+
+    ``rrc_plant``: the gateway is an RRC controller, whose contracts may
+    declare further mirrors (S11).
+    """
     return any(
         pattern.fullmatch(path) for pattern in _READ_ONLY_CONTROL_MIRROR_PATTERNS
+    ) or (rrc_plant and rrc_contracts.is_mirror(path))
+
+
+# The words of a reading name that denote an identifier, address, location or
+# secret, in any spelling (ID, Id, Ssid, Mac ...). Shared by the local and the
+# cloud readings. Words that only count as the last word of a name:
+_PRIVATE_LAST_WORDS = frozenset(
+    {
+        "id",
+        "ski",
+        "ssid",
+        "mac",
+        "uuid",
+        "fingerprint",
+        "address",
+        "key",
+        "token",
+        "pin",
+        "user",
+        "username",
+        "owner",
+        "location",
+        "coordinates",
+        "lat",
+        "lon",
+        "lng",
+    }
+)
+# Since 0.9.0-alpha.2; like all words added since then, only for the last
+# segment of a path when deciding whether a known entity is retired.
+_ADDED_LAST_WORDS = frozenset({"ids", "addr"})
+# Words that mark a name wherever they appear.
+_PRIVATE_WORDS = frozenset(
+    {
+        "ip",
+        "zip",
+        "postal",
+        "postcode",
+        "gtin",
+        "sgtin",
+        "ean",
+        "imei",
+        "iban",
+        "phone",
+        "email",
+        "password",
+        "secret",
+        "latitude",
+        "longitude",
+    }
+)
+_ADDED_WORDS = frozenset(
+    {
+        "latlong",
+        "latlng",
+        "gps",
+        "identifier",
+        "identifiers",
+        "identification",
+        "customer",
+        "host",
+        "hostname",
+        "netmask",
+        # C8: the key of a radio device (device link key).
+        "dlk",
+    }
+)
+_PRIVATE_WORD_PREFIXES = (
+    "mac",
+    "ipv",
+    "serial",
+    "passw",
+    "cert",
+    "uuid",
+    "ssid",
+    "latitud",
+    "longitud",
+    "coordinat",
+    "postal",
+    "imei",
+    "iban",
+    "secret",
+)
+_ADDED_WORD_PREFIXES = ("geoloc", "geopos", "bssid", "subnet", "ipaddr")
+# "...Number" or "...Nr" after one of these words is a number that identifies.
+_NUMBER_OWNERS = frozenset(
+    {"house", "customer", "contract", "account", "order", "article", "part", "ser"}
+)
+_NUMBER_WORDS = frozenset({"number", "nr"})
+_LONGITUDE_WORDS = frozenset({"long", "lng", "lon"})
+# A code is private when it opens something.
+_PRIVATE_CODE_WORDS = frozenset({"installer", "pairing", "access", "pin", "pass"})
+_IP_VERSION = re.compile(r"ip(?:v?[46])(?![a-z])", re.IGNORECASE)
+# "IDs" as one word ("gatewayIDs"), like "Ids".
+_ID_PLURAL = re.compile(r"IDs(?![a-z])")
+_WORD = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+", re.ASCII)
+# Types of a single readable value; everything else is a structure, a list
+# or configuration that feeds other features.
+_UNKNOWN_VALUE_TYPES = frozenset({"floatValue", "integerValue", "stringValue"})
+UNKNOWN_NUMBER = "number"
+UNKNOWN_ENUM = "enum"
+UNKNOWN_FLAG = "flag"
+
+
+def identifier_name(name: str) -> bool:
+    """A reading name that denotes an identifier, address, location or secret."""
+    return _identifier_name(name, added=True)
+
+
+def _earlier_identifier_name(name: str) -> bool:
+    """The rules before 0.9.0-alpha.2, for the parents of a path."""
+    return _identifier_name(name, added=False)
+
+
+def _identifier_name(name: str, *, added: bool) -> bool:
+    # "IPv4", "ipv6", "Ip4" as one word, whatever their spelling.
+    last = _IP_VERSION.sub("_Ip_", name.rsplit(".", 1)[-1])
+    if added:
+        last = _ID_PLURAL.sub("Ids", last)
+    spelled = _WORD.findall(last)
+    words = [word.casefold() for word in spelled]
+    if not words:
+        return False
+    if (
+        words[-1] in _PRIVATE_LAST_WORDS
+        or any(
+            word in _PRIVATE_WORDS or word.startswith(_PRIVATE_WORD_PREFIXES)
+            for word in words
+        )
+        or ("code" in words and not _PRIVATE_CODE_WORDS.isdisjoint(words))
+    ):
+        return True
+    return (
+        added
+        and (
+            words[-1] in _ADDED_LAST_WORDS
+            # "moduleNo", "SerNo": "No" only as its own last word of a longer
+            # name, never inside a word or at the start ("NoOfStarts").
+            or (len(spelled) > 1 and spelled[-1] == "No")
+            or any(
+                word in _ADDED_WORDS or word.startswith(_ADDED_WORD_PREFIXES)
+                for word in words
+            )
+            or ("lat" in words and not _LONGITUDE_WORDS.isdisjoint(words))
+            or (
+                len(words) > 1
+                and words[-1] in _NUMBER_WORDS
+                and words[-2] in _NUMBER_OWNERS
+            )
+            or words[-2:] == ["net", "mask"]
+        )
     )
 
 
-def supports_entity(resource: Resource) -> bool:
+def is_identifier_path(path: str) -> bool:
+    """A path whose leaf or parents name an identifier, address or secret."""
+    return _identifier_path(path)
+
+
+def _identifier_path(path: str) -> bool:
+    """An identifier in a path: the leaf by every rule, its parents only by
+    the earlier ones, so a newer word never retires a whole subtree."""
+    *parents, leaf = path.strip("/").split("/")
+    return identifier_name(leaf) or any(
+        _earlier_identifier_name(part) for part in parents
+    )
+
+
+def unknown_never_entity(resource: Resource) -> bool:
+    """An unknown resource that can never become an entity, whatever its
+    current value: private, an identifier, a name, a structure or
+    configuration. Only these lose a registered entity (create-all)."""
+    path = resource.path
+    return bool(
+        is_private_resource(path)
+        or is_opt_in_diagnostic_resource(path)
+        or path in _NO_ENTITY_PATHS
+        or any(pattern.fullmatch(path) for pattern in _NO_ENTITY_PATTERNS)
+        or _identifier_path(path)
+        or path.endswith("/name")
+        or resource.references
+        or isinstance(resource.value, dict | list)
+        or is_monitor_collection(path)
+        or (
+            resource.metadata.resource_type is not None
+            and resource.metadata.resource_type not in _UNKNOWN_VALUE_TYPES
+        )
+    )
+
+
+def unknown_entity_kind(resource: Resource) -> str | None:
+    """Create-all (owner decision): the form of a cloud resource the
+    integration does not know.
+
+    A single number, a text with declared values or a true/false value
+    becomes a read-only, disabled diagnostic sensor; never a control.
+    Identifiers, network and privacy data, free text, names, lists,
+    structures and configuration stay out. A known resource in a shape its
+    rules reject stays without an entity (its schema guard): an entity under
+    its ID would replace the known entity's unit and statistics, and the
+    known entity returns once the shape fits again.
+    """
+    path = resource.path
+    if capability_maturity(path) is not CapabilityMaturity.OBSERVED:
+        return None  # known: its own rules and guards decide
+    if (
+        is_private_resource(path)
+        or is_opt_in_diagnostic_resource(path)
+        or path in _NO_ENTITY_PATHS
+        or any(pattern.fullmatch(path) for pattern in _NO_ENTITY_PATTERNS)
+        or any(identifier_name(part) for part in path.strip("/").split("/"))
+        or path.endswith("/name")
+        or resource.references
+        or is_monitor_collection(path)
+        or resource.values
+        or resource.has_values
+        or not resource.has_value
+        or resource.metadata.resource_type not in _UNKNOWN_VALUE_TYPES
+    ):
+        return None
+    value = resource.value
+    if isinstance(value, bool):
+        return UNKNOWN_FLAG
+    if isinstance(value, int | float):
+        return UNKNOWN_NUMBER if math.isfinite(value) else None
+    if not isinstance(value, str):
+        return None
+    if any(isinstance(item, str) for item in resource.metadata.allowed_values):
+        return UNKNOWN_ENUM
+    if value.strip().casefold() in ("true", "false"):
+        return UNKNOWN_FLAG
+    return None  # free text could carry an identifier
+
+
+def supports_entity(resource: Resource, *, rrc_plant: bool = False) -> bool:
     """Return whether the resource can yield at least one safe HA state."""
     return (
-        capability_maturity(resource.path) is not CapabilityMaturity.OBSERVED
+        capability_maturity(resource.path, **rrc_kwargs(rrc_plant))
+        is not CapabilityMaturity.OBSERVED
         and not is_private_resource(resource.path)
         and resource.path not in _NO_ENTITY_PATHS
         and not any(pattern.fullmatch(resource.path) for pattern in _NO_ENTITY_PATTERNS)
         and not resource.references
+        and not is_monitor_collection(resource.path)
         and resource.metadata.resource_type != "licenseInformation"
         and _matches_optional_app_schema(resource)
     )
@@ -829,14 +1384,49 @@ def supports_entity(resource: Resource) -> bool:
 
 def _matches_optional_app_schema(resource: Resource) -> bool:
     """Reject optional app paths whose live type or unit is unexpected."""
+    if rrc.scalar_field(resource.path):
+        return rrc.scalar_value(resource) is not None
+    if is_runtime_path(resource.path):
+        return assess_runtime(resource).supported
+    if is_dhw_safety_path(resource.path):
+        return assess_dhw_safety(resource).supported
+    if softener_capability(resource.path) is not None:
+        return softener_schema_issue(resource) is None
+    if is_start_counter_path(resource.path):
+        return assess_start_counter(resource).supported
+    if is_switch_program_path(resource.path):
+        return assess_switch_program(resource).supported
+    for rule in _ADDITIONAL_SCALAR_RULES:
+        if rule.pattern.fullmatch(resource.path):
+            return (
+                rule.matches(resource)
+                and not resource.references
+                and not resource.values
+                and not isinstance(resource.value, dict | list)
+            )
     for rule in _APP_RESOURCE_SCHEMA_RULES:
         if rule.pattern.fullmatch(resource.path):
             return rule.matches(resource)
     return True
 
 
-def capability_maturity(path: str) -> CapabilityMaturity:
-    """Return the curated evidence level for a concrete PointT path."""
+@lru_cache(maxsize=4096)
+def capability_maturity(path: str, *, rrc_plant: bool = False) -> CapabilityMaturity:
+    """Return the curated evidence level for a concrete PointT path.
+
+    On an RRC controller (``rrc_plant``) the paths of its contracts are
+    understood (S11).
+    """
+    if rrc_plant and rrc_contracts.is_understood(path):
+        return CapabilityMaturity.UNDERSTOOD
+    if rrc.scalar_field(path):
+        return CapabilityMaturity.UNDERSTOOD
+    if is_switch_program_path(path):
+        return CapabilityMaturity.UNDERSTOOD
+    if softener_capability(path) is not None:
+        return CapabilityMaturity.UNDERSTOOD
+    if is_additional_app_scalar(path):
+        return CapabilityMaturity.UNDERSTOOD
     if any(pattern.fullmatch(path) for pattern in _WRITE_VERIFIED_PATTERNS):
         return CapabilityMaturity.WRITE_VERIFIED
     if path in _VERIFIED_PATHS or any(
@@ -850,24 +1440,200 @@ def capability_maturity(path: str) -> CapabilityMaturity:
     return CapabilityMaturity.OBSERVED
 
 
-def entity_enabled_by_default(path: str) -> bool:
+_HEAT_SOURCE_ID = re.compile(r"^/heatSources/(hs\d+)(?:/|$)")
+_HEAT_PUMP_TYPE = re.compile(r"^/heatSources/hs\d+/heatPumpType$")
+SOURCE_TOTAL_PATHS = frozenset(
+    {"/heatSources/numberOfStarts", "/heatSources/workingTime/totalSystem"}
+)
+FLAME_STATUS_PATH = "/heatSources/flameStatus"
+
+
+def plant_duplicate_paths(paths: Iterable[str]) -> frozenset[str]:
+    """Paths whose entities only repeat another entity on this plant.
+
+    With exactly one heat source, the totals of all heat sources (starts and
+    system run time) are the counters of that heat source. On a heat pump
+    without a second heat source or a hybrid manager, the burner status
+    follows the compressor. Such entities are created disabled; an entity
+    that already exists keeps its setting, because Home Assistant applies an
+    enabled default only when it registers an entity.
+    """
+    known = tuple(paths)
+    sources = {
+        match.group(1)
+        for path in known
+        if (match := _HEAT_SOURCE_ID.match(path)) is not None
+    }
+    duplicates: set[str] = set()
+    if len(sources) == 1:
+        duplicates.update(SOURCE_TOTAL_PATHS)
+    if (
+        len(sources) <= 1
+        and any(_HEAT_PUMP_TYPE.fullmatch(path) for path in known)
+        and not any(path.startswith("/heatSources/hybrid") for path in known)
+    ):
+        duplicates.add(FLAME_STATUS_PATH)
+    return frozenset(duplicates)
+
+
+def entity_enabled_by_default(path: str, *, rrc_plant: bool = False) -> bool:
     """Apply the explicit user-facing default entity policy."""
-    if is_opt_in_diagnostic_resource(path) or is_read_only_control_mirror(path):
+    if rrc_plant and (enabled := rrc_contracts.default_enabled(path)) is not None:
+        return enabled
+    if rrc.scalar_field(path):
+        return rrc.scalar_field(path) in {
+            "temperatureActual",
+            "temperatureHeatingSetpoint",
+        }
+    if softener_capability(path) is not None:
+        return True
+    if is_additional_app_scalar(path):
+        return not path.endswith("/dhwType")
+    if is_opt_in_diagnostic_resource(path) or is_read_only_control_mirror(
+        path, **rrc_kwargs(rrc_plant)
+    ):
         return False
     return path in _DEFAULT_ENABLED_PATHS or any(
         pattern.fullmatch(path) for pattern in _DEFAULT_ENABLED_PATTERNS
     )
 
 
-def poll_group(resource: Resource) -> PollGroup:
-    """Classify a discovered resource into a cloud-friendly cadence."""
+# Read with the slow group so a firmware update while running is noticed (P22).
+FIRMWARE_PATHS = ("/gateway/versionFirmware", "/system/appliance/versionFirmware")
+
+
+# O50: cloud containers and lists that never become an entity. They only
+# show new devices, zones or circuits, so an hourly read is enough.
+_HOURLY_CONTAINER_PATHS = frozenset(
+    {
+        "/devices",
+        "/devices/list",
+        "/devices/inclusionWhitelist",
+        "/solarCircuits",
+        "/ventilation",
+        "/zones/list",
+        "/zones/configuration",
+        "/heatSources/info",
+    }
+)
+_HOURLY_CONTAINER_PATTERN = re.compile(r"^/(?:solarCircuits|ventilation)/[^/]+$")
+# O40: settled cloud values that the 60-second group read only because their
+# names contain "status" or "temperature".
+_STATIC_SETTLED_PATHS = frozenset(
+    {
+        "/system/iSRC/installationStatus",
+        "/system/variableTariff/supportStatus",
+        # The variable tariff of an iCom gateway, read once (0.9.2).
+        "/application/tbso/enable",
+        "/application/tbso/electricity/tariffID",
+    }
+)
+_SLOW_SETTLED_PATHS = frozenset(
+    {
+        "/system/sensors/temperatures/outdoorTemperatureSource",
+        "/gateway/update/status",
+        # The automatic update changes rarely. The gateway clock stays in the
+        # regular cycle: the hot water program level needs a fresh reading.
+        "/gateway/update/enabled",
+        "/gateway/update/lastCheck",
+        "/gateway/update/lastUpdate",
+    }
+)
+_FAST_HEAT_SOURCE_PATTERN = re.compile(
+    r"/heatSources/(?:passiveCooling/inflowTemp|hs[^/]+/(?:actualPower|defrostActive|powerPercentage|brineCircuit/(?:collectorInflowTemp|collectorOutflowTemp)))"
+)
+
+
+def poll_group(resource: Resource, *, rrc_plant: bool = False) -> PollGroup:
+    """Classify a discovered resource into a cloud-friendly cadence.
+
+    On an RRC controller (``rrc_plant``) its contracts' groups come first.
+    """
+    group = _poll_group(resource, rrc_plant)
+    if (
+        group in (PollGroup.FAST, PollGroup.CONTROL, PollGroup.SLOW)
+        and (
+            resource.path in _HOURLY_CONTAINER_PATHS
+            or _HOURLY_CONTAINER_PATTERN.fullmatch(resource.path) is not None
+        )
+        and not supports_entity(resource, **rrc_kwargs(rrc_plant))
+        # An RRC contract that reads a list for its entities (the zone list
+        # for an open window and the standby, W1) keeps its own group.
+        and not (rrc_plant and rrc_contracts.poll_group(resource.path) is not None)
+    ):
+        return PollGroup.HOURLY
+    return group
+
+
+# O51: control paths the climate entity of a heating circuit reads besides
+# its own entities; with the hot water, holiday and calendar paths they keep
+# the control pace while their own entities are disabled.
+_CLIMATE_CONTROL_PATTERN = re.compile(
+    r"/heatingCircuits/[^/]+/(?:operationMode|heatCoolMode|currentSuWiMode"
+    r"|roomtemperature|manualRoomSetpoint|currentRoomSetpoint|temporaryRoomSetpoint)"
+)
+_CLIMATE_CONTROL_PATHS = frozenset(
+    {"/system/seasonOptimizer/mode", "/system/globalSeasonOptimizer/currentMode"}
+)
+
+
+@lru_cache(maxsize=4096)
+def slows_when_unused(path: str) -> bool:
+    """O51: a control path whose entities are all disabled may use the slow
+    group (15 minutes), except the holiday, calendar, climate and hot water
+    paths (also those the entities of their own read)."""
+    return not (
+        path.startswith(("/holidayMode", "/dhwCircuits/"))
+        or is_legacy_holiday_path(path)
+        or path in _CLIMATE_CONTROL_PATHS
+        or _CLIMATE_CONTROL_PATTERN.fullmatch(path) is not None
+    )
+
+
+def _poll_group(resource: Resource, rrc_plant: bool = False) -> PollGroup:
+    if rrc_plant and (group := rrc_contracts.poll_group(resource.path)) is not None:
+        return group
+    if resource.path in FIRMWARE_PATHS:
+        return PollGroup.SLOW
+    if rrc.scalar_field(resource.path):
+        return PollGroup.CONTROL if resource.metadata.writable else PollGroup.FAST
+    if rrc.PROGRAM.match(resource.path) or resource.path == rrc.PROGRAM_LIST:
+        return (
+            PollGroup.CONTROL
+            if resource.path.endswith("/week") or resource.path == rrc.PROGRAM_LIST
+            else PollGroup.STATIC
+        )
+    if is_runtime_path(resource.path):
+        return PollGroup.SLOW
+    if is_monitor_collection(resource.path):
+        return PollGroup.STATIC
+    if is_dhw_safety_path(resource.path):
+        # Invalid samples must not stop an already discovered state recovering.
+        return PollGroup.CONTROL if resource.metadata.writable else PollGroup.FAST
+    if is_additional_app_scalar(resource.path):
+        if resource.path.endswith("/dhwType"):
+            return PollGroup.STATIC
+        # Keep discovered live zone paths recoverable after a malformed sample,
+        # including when a startup read rebuilds the coordinator's polling plan.
+        return PollGroup.CONTROL if resource.metadata.writable else PollGroup.FAST
+    if (softener := softener_capability(resource.path)) is not None:
+        return PollGroup(softener.poll)
+    if resource.path == "/swCircuits" or resource.path.startswith("/swCircuits/"):
+        return PollGroup.STATIC
+    if is_start_counter_path(resource.path):
+        # An empty or malformed sample must not permanently stop recovery.
+        return PollGroup.SLOW
+    if is_switch_program_path(resource.path):
+        return PollGroup.SLOW
     if is_static_startup_resource(resource):
         return PollGroup.STATIC
     # Historical failure lists are probed during discovery, but are not polled
     # repeatedly until the integration exposes a history feature that uses them.
     if resource.path.endswith("/failurelist"):
         return PollGroup.STATIC
-    if resource.path.startswith("/holidayMode/"):
+    if resource.path.startswith("/holidayMode/") or is_legacy_holiday_path(
+        resource.path
+    ):
         return PollGroup.CONTROL
     if not _matches_optional_app_schema(resource):
         # Keep the unexpected schema in redacted diagnostics without spending
@@ -892,8 +1658,13 @@ def poll_group(resource: Resource) -> PollGroup:
         "/system/appliance/model",
         "/system/appliance/versionFirmware",
         "/system/iSRC/supportStatus",
+        rrc.PRODUCT_TYPE_PATH,
     }:
         return PollGroup.STATIC
+    if resource.path in _STATIC_SETTLED_PATHS:
+        return PollGroup.STATIC
+    if resource.path in _SLOW_SETTLED_PATHS:
+        return PollGroup.SLOW
     if "/emon/" in resource.path or resource.path.endswith(
         ("TotalConsumption", "/solarYield")
     ):
@@ -907,10 +1678,7 @@ def poll_group(resource: Resource) -> PollGroup:
         "/heatSources/smartFunction/active",
     }:
         return PollGroup.FAST
-    if re.fullmatch(
-        r"/heatSources/(?:passiveCooling/inflowTemp|hs[^/]+/(?:actualPower|defrostActive|powerPercentage|brineCircuit/(?:collectorInflowTemp|collectorOutflowTemp)))",
-        resource.path,
-    ):
+    if _FAST_HEAT_SOURCE_PATTERN.fullmatch(resource.path):
         return PollGroup.FAST
     tail = resource.path.rsplit("/", 1)[-1].lower()
     if tail in _STATIC_TOKENS:
@@ -922,106 +1690,165 @@ def poll_group(resource: Resource) -> PollGroup:
     return PollGroup.SLOW
 
 
-def logical_device_for_path(path: str) -> LogicalDevice | None:
-    """Map dynamic PointT object IDs to stable Home Assistant devices."""
-    for root, kind, label in (
-        ("heatingCircuits", "heating_circuit", "Heizkreis"),
-        ("dhwCircuits", "hot_water_circuit", "Warmwasser"),
-        ("heatSources", "heat_source", "Wärmeerzeuger"),
-    ):
-        prefix = {
-            "heatingCircuits": "hc",
-            "dhwCircuits": "dhw",
-            "heatSources": "hs",
-        }[root]
-        match = re.match(rf"^/{root}/({prefix}\d+)(?:/|$)", path, re.IGNORECASE)
+_FUNCTION_GROUP_PATTERNS = (
+    *(
+        (re.compile(rf"^/{root}/({prefix}\d+)(?:/|$)", re.IGNORECASE), kind, label)
+        for root, prefix, kind, label in (
+            ("heatingCircuits", "hc", "heating_circuit", "Heizkreis"),
+            ("dhwCircuits", "dhw", "hot_water_circuit", "Warmwasser"),
+            ("heatSources", "hs", "heat_source", "Wärmeerzeuger"),
+        )
+    ),
+    *(
+        (re.compile(pattern, re.IGNORECASE), kind, label)
+        for pattern, kind, label in (
+            (rf"^/zones/(zn{rrc.RRC_ID})(?:/|$)", "rrc_zone", "RRC zone"),
+            (r"^/swCircuits/([^/]+)(?:/|$)", "water_softener", "Water softener"),
+            (r"^/solarCircuits/(sc[^/]+)(?:/|$)", "solar_circuit", "Solar circuit"),
+            (
+                r"^/ventilation/(zone[^/]+)(?:/|$)",
+                "ventilation_zone",
+                "Ventilation zone",
+            ),
+            (r"^/zones/(zone[^/]+)(?:/|$)", "room_zone", "Zone"),
+            (r"^/devices/((?!list$)[^/]+)(?:/|$)", "room_device", "Room device"),
+        )
+    ),
+)
+_TRAILING_NUMBER = re.compile(r"(\d+)$")
+
+
+@lru_cache(maxsize=4096)
+def function_group_for_path(path: str) -> FunctionGroup | None:
+    """Classify a PointT path without creating devices or proving presence."""
+    for pattern, kind, label in _FUNCTION_GROUP_PATTERNS:
+        match = pattern.match(path)
         if match:
             logical_id = match.group(1)
-            number = re.search(r"(\d+)$", logical_id)
+            number = _TRAILING_NUMBER.search(logical_id)
             suffix = number.group(1) if number else logical_id
-            return LogicalDevice(kind, logical_id, f"{label} {suffix}")
-    for pattern, kind, label in (
-        (r"^/solarCircuits/(sc[^/]+)(?:/|$)", "solar_circuit", "Solar circuit"),
-        (r"^/ventilation/(zone[^/]+)(?:/|$)", "ventilation_zone", "Ventilation zone"),
-        (r"^/zones/(zone[^/]+)(?:/|$)", "room_zone", "Zone"),
-        (r"^/devices/((?!list$)[^/]+)(?:/|$)", "room_device", "Room device"),
-    ):
-        match = re.match(pattern, path, re.IGNORECASE)
-        if match:
-            logical_id = match.group(1)
-            number = re.search(r"(\d+)$", logical_id)
-            suffix = number.group(1) if number else logical_id
-            return LogicalDevice(kind, logical_id, f"{label} {suffix}")
+            return FunctionGroup(kind, logical_id, f"{label} {suffix}")
     return None
 
 
-def resource_name(path: str, subkey: str | None = None, *, language: str = "de") -> str:
-    """Return a localized user-facing name without exposing technical IDs."""
-    german = language.casefold().startswith("de")
-    names = _GERMAN_NAMES if german else _ENGLISH_NAMES
-    path_names = _GERMAN_PATH_NAMES if german else _ENGLISH_PATH_NAMES
-    subkey_names = _SUBKEY_NAMES if german else _ENGLISH_SUBKEY_NAMES
-    tail = path.rsplit("/", 1)[-1]
-    if "/heatingCircuits/" in path and "/temperatureLevels/" in path:
-        temperature_names = (
-            {"comfort2": "Heizen", "eco": "Absenken"}
-            if german
-            else {"comfort2": "Heating", "eco": "Reduced"}
+# Preserve existing imports while distinguishing groups from real devices.
+LogicalDevice = FunctionGroup
+logical_device_for_path = function_group_for_path
+
+
+_APP_PATH_ROOT = re.compile(
+    r"^/(heatingCircuits|dhwCircuits|solarCircuits|ventilation)/[^/]+/"
+)
+_PROGRAM_NAME = re.compile(r"name[A-Z0-9]+")
+_HEAT_SOURCE_TYPE = re.compile(r"/heatSources(?:/hs\d+)?/type")
+_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+
+
+@lru_cache(maxsize=4096)
+def resource_name(
+    path: str,
+    subkey: str | None = None,
+    *,
+    language: str = "de",
+    rrc_plant: bool = False,
+) -> str:
+    """Return a localized user-facing name without exposing technical IDs.
+
+    On an RRC controller (``rrc_plant``) its contracts' names come first.
+    """
+    if (
+        rrc_plant
+        and subkey is None
+        and (label := rrc_contracts.name(path, language)) is not None
+    ):
+        return label
+    if (label := rrc.name(path, language)) is not None:
+        return label
+    if (softener := softener_capability(path)) is not None:
+        if subkey == "low_salt":
+            return name_part(language, "name_part_low_salt")
+        return localize(language, softener.name_de, softener.name_en)
+    if is_additional_app_scalar(path):
+        if path.endswith("/dhwType"):
+            return name_part(language, "name_part_hot_water_device_type")
+        mode = (
+            name_part(language, "name_part_mode_heating")
+            if "/heating/" in path
+            else name_part(language, "name_part_mode_cooling")
         )
+        key = path.rsplit("/", 1)[-1]
+        label = (
+            name_part(language, "name_part_temporary_setpoint")
+            if key == "temporaryRoomSetpoint"
+            else _name(language, _GERMAN_NAMES, _ENGLISH_NAMES, key)
+        )
+        return f"{mode}: {label}"
+    tail = path.rsplit("/", 1)[-1]
+    app_path = _APP_PATH_ROOT.sub(r"/\1/*/", path)
+    if (app_names := _APP_PATH_NAMES.get(app_path)) is not None:
+        base = localize(language, *app_names)
+    elif (
+        program := _FURTHER_PROGRAM_NAMES.get(_PROGRAM_ROOT.sub(r"/\1/*/", path))
+    ) is not None:
+        base = name_part(language, program)
+    elif "/heatingCircuits/" in path and "/temperatureLevels/" in path:
+        temperature_names = {
+            "comfort2": name_part(language, "name_part_heating_temperature"),
+            "eco": name_part(language, "name_part_setback_temperature"),
+        }
         base = temperature_names.get(tail, _humanize(tail))
     elif "/dhwCircuits/" in path and "/temperatureLevels/" in path:
-        temperature_names = (
-            {
-                "eco": "Eco+ Starttemperatur",
-                "high": "Komfort Starttemperatur",
-                "low": "Eco Starttemperatur",
-                "off": "Aus",
-            }
-            if german
-            else {
-                "eco": "Eco+ start temperature",
-                "high": "Comfort start temperature",
-                "low": "Eco start temperature",
-                "off": "Off",
-            }
-        )
+        temperature_names = {
+            "eco": name_part(language, "name_part_start_threshold_eco_plus"),
+            "high": name_part(language, "name_part_start_threshold_comfort"),
+            "low": name_part(language, "name_part_start_threshold_eco"),
+            "off": name_part(language, "name_part_setpoint_level_off"),
+        }
         base = temperature_names.get(tail, _humanize(tail))
-    elif re.fullmatch(r"name[A-Z0-9]+", tail):
+    elif _PROGRAM_NAME.fullmatch(tail):
         suffix = tail.removeprefix("name")
-        base = (
-            f"Name des Zeitprogramms {suffix}" if german else f"Schedule {suffix} name"
-        )
+        base = name_part(language, "name_part_schedule_name", suffix=suffix)
     elif path == "/gateway/update/status":
-        base = "Softwareupdate" if german else "Software update"
+        base = name_part(language, "name_part_software_update")
+    elif path in _ENGLISH_PATH_NAMES:
+        base = _name(language, _GERMAN_PATH_NAMES, _ENGLISH_PATH_NAMES, path)
+    elif _HEAT_SOURCE_TYPE.fullmatch(path):
+        # The kind of heat source, told apart from the system type.
+        base = name_part(language, "name_part_heat_source_type")
+    elif tail in _ENGLISH_NAMES:
+        base = _name(language, _GERMAN_NAMES, _ENGLISH_NAMES, tail)
     else:
-        base = path_names.get(path, names.get(tail, _humanize(tail)))
+        base = _humanize(tail)
     if "/emon/" in path:
-        energy_domains = (
-            {
-                "totalConsumption": "Gesamt",
-                "chConsumption": "Heizung",
-                "dhwConsumption": "Warmwasser",
-                "coolingConsumption": "Kühlung",
-            }
-            if german
-            else {
-                "totalConsumption": "Total",
-                "chConsumption": "Heating",
-                "dhwConsumption": "Hot water",
-                "coolingConsumption": "Cooling",
-            }
-        )
+        energy_domains = {
+            "totalConsumption": name_part(language, "name_part_consumption_total"),
+            "chConsumption": name_part(language, "name_part_consumption_heating"),
+            "dhwConsumption": name_part(language, "name_part_consumption_hot_water"),
+            "coolingConsumption": name_part(language, "name_part_consumption_cooling"),
+        }
         domain = energy_domains.get(tail, base)
         if subkey is None:
             return domain
-        subname = subkey_names.get(subkey, _humanize(subkey))
+        subname = _subkey_name(language, subkey)
         if subkey == "outputProduced" and tail == "coolingConsumption":
-            subname = "Erzeugte Kühlenergie" if german else "Cooling energy produced"
+            subname = name_part(language, "name_part_cooling_energy_produced")
         return f"{domain} \N{EN DASH} {subname}"
     if subkey is None:
         return base
-    subname = subkey_names.get(subkey, _humanize(subkey))
-    return f"{base} {subname}"
+    return f"{base} {_subkey_name(language, subkey)}"
+
+
+def _name(
+    language: str, german: Mapping[str, str], english: Mapping[str, str], key: str
+) -> str:
+    """One entry of a German/English name table in the given language."""
+    return localize(language, german[key], english[key])
+
+
+def _subkey_name(language: str, subkey: str) -> str:
+    if subkey in _ENGLISH_SUBKEY_NAMES:
+        return _name(language, _SUBKEY_NAMES, _ENGLISH_SUBKEY_NAMES, subkey)
+    return _humanize(subkey)
 
 
 def configured_device_name(value: str) -> str | None:
@@ -1045,7 +1872,7 @@ def configured_device_name(value: str) -> str | None:
 
 
 def _humanize(value: str) -> str:
-    words = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", value)
+    words = _CAMEL_BOUNDARY.sub(" ", value)
     words = words.replace("_", " ").replace(".", " ").strip()
     return words[:1].upper() + words[1:] if words else "Wert"
 

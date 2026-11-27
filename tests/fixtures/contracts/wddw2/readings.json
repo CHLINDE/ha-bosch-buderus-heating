@@ -1,0 +1,73 @@
+{
+  "schema": 1,
+  "family": "wddw2",
+  "provenance": {
+    "kind": "synthetic",
+    "basis": "compatibility_mapping",
+    "firmware": null,
+    "capture_date": null,
+    "created": "2026-10-23",
+    "redaction": "Constructed examples with fixture-local IDs; no captured response or private data.",
+    "physical_device_verified": false
+  },
+  "cases": [
+    {
+      "id": "operation_hours_without_unit",
+      "payload": {
+        "id": "/heatSources/hs1/operationHours",
+        "type": "floatValue",
+        "value": 2,
+        "writeable": 0
+      },
+      "expected": {
+        "value": 2,
+        "unit": "h",
+        "part": null
+      }
+    },
+    {
+      "id": "operation_hours_with_unit",
+      "payload": {
+        "id": "/heatSources/hs1/operationHours",
+        "type": "floatValue",
+        "value": 120,
+        "writeable": 0,
+        "unitOfMeasure": "min"
+      },
+      "expected": {
+        "value": 2,
+        "unit": "h",
+        "part": null
+      }
+    },
+    {
+      "id": "scalar_starts",
+      "payload": {
+        "id": "/heatSources/hs1/numberOfStarts",
+        "type": "floatValue",
+        "value": 42,
+        "writeable": 0
+      },
+      "expected": {
+        "value": 42,
+        "unit": null,
+        "part": null
+      }
+    },
+    {
+      "id": "inlet_temperature",
+      "payload": {
+        "id": "/dhwCircuits/dhw1/inletTemperature",
+        "type": "floatValue",
+        "value": 18,
+        "writeable": 0,
+        "unitOfMeasure": "C"
+      },
+      "expected": {
+        "value": 18,
+        "unit": "°C",
+        "part": null
+      }
+    }
+  ]
+}

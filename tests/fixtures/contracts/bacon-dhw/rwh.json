@@ -1,0 +1,108 @@
+{
+  "schema": 1,
+  "family": "bacon_dhw_rwh",
+  "provenance": {
+    "kind": "synthetic",
+    "basis": "compatibility_mapping",
+    "firmware": null,
+    "capture_date": null,
+    "created": "2026-10-24",
+    "redaction": "Constructed example, no captured device data.",
+    "physical_device_verified": false
+  },
+  "fixture": "Synthetic contract example, not captured from an installation",
+  "info": {
+    "timestamp": 2,
+    "online": true,
+    "appliance": {
+      "type": "hpwh_fs_mpp_v1"
+    }
+  },
+  "metadata": {
+    "shadows": {
+      "state": {
+        "powerEnabled": {
+          "ro": false
+        },
+        "opMode": {
+          "ro": false,
+          "enum": [
+            "comfort",
+            "dual",
+            "eco"
+          ]
+        },
+        "tempSetpoint": {
+          "ro": false,
+          "unit": "C",
+          "min": 30,
+          "max": 70,
+          "step": 1
+        }
+      }
+    },
+    "topics": {
+      "sensor": {
+        "timestamp": {
+          "ro": true
+        },
+        "currentTemp": {
+          "ro": true,
+          "unit": "C",
+          "min": 0,
+          "max": 100
+        },
+        "energySavingModeEnabled": {
+          "ro": true
+        },
+        "standardModeEnabled": {
+          "ro": true
+        },
+        "thermalDisinfectionEnabled": {
+          "ro": true
+        },
+        "vacationModeEnabled": {
+          "ro": true
+        },
+        "topElectricHeatEnabled": {
+          "ro": true
+        },
+        "bottomElectricHeatEnabled": {
+          "ro": true
+        }
+      }
+    }
+  },
+  "sensor": {
+    "items": [
+      {
+        "timestamp": 2,
+        "currentTemp": 48,
+        "energySavingModeEnabled": false,
+        "standardModeEnabled": false,
+        "thermalDisinfectionEnabled": false,
+        "vacationModeEnabled": false,
+        "topElectricHeatEnabled": false,
+        "bottomElectricHeatEnabled": false
+      }
+    ]
+  },
+  "shadow": {
+    "version": 1,
+    "timestamp": 2,
+    "state": {
+      "reported": {
+        "powerEnabled": true,
+        "opMode": "comfort",
+        "tempSetpoint": 50,
+        "setTempMax": 70,
+        "customTitle": "Synthetic private title",
+        "vacationOnTimestamp": 0,
+        "vacationOffTimestamp": 0,
+        "manualThermalDisinfectionEnabled": false,
+        "thermalDisinfectionTemp": 70
+      },
+      "desired": {}
+    }
+  }
+}

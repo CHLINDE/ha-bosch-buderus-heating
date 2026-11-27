@@ -92,7 +92,7 @@ def _validate_privacy(value: object, *, schema: object = None) -> None:
     if value.get("contains_raw_resource_values") is False:
         return
     if (
-        schema == 14
+        (schema in range(14, 49) or schema == 54)
         and value.get("contains_raw_resource_values") is True
         and value.get("raw_resource_values_scope") == "allowlisted_technical_metadata"
     ):
@@ -162,7 +162,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Create a privacy-safe PointT capability inventory from a downloaded "
-            "Bosch/Buderus Heating diagnostics JSON file."
+            "Bosch/Buderus Home Comfort diagnostics JSON file."
         )
     )
     parser.add_argument("diagnostics", type=Path, help="Downloaded diagnostics JSON")

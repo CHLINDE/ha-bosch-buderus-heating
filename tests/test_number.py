@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from homeassistant.core import HomeAssistant
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.bosch_buderus_heating.const import DOMAIN
 from custom_components.bosch_buderus_heating.coordinator import (
@@ -26,6 +25,7 @@ from custom_components.bosch_buderus_heating.pointt import (
     Resource,
     ResourceMetadata,
 )
+from tests.ha_test_helpers import MockConfigEntry
 
 PATH = "/heatingCircuits/hc1/manualRoomSetpoint"
 
@@ -67,9 +67,12 @@ def _number(
         current.path: ResourceSnapshot(current, True, datetime.now(UTC))
     }
     coordinator.last_update_success = True
-    return BoschBuderusNumber(
+    entity = BoschBuderusNumber(
         coordinator, build_number_descriptions(coordinator.resources)[0]
     )
+    # A temperature number converts with the unit system of the installation.
+    entity.hass = hass
+    return entity
 
 
 def test_number_uses_live_limits_and_identity(hass: HomeAssistant) -> None:
@@ -81,7 +84,7 @@ def test_number_uses_live_limits_and_identity(hass: HomeAssistant) -> None:
     assert entity.native_max_value == 30.0
     assert entity.native_step == 0.5
     assert entity.entity_description.entity_registry_enabled_default
-    assert entity.name == "Heating circuit 1 \u2013 Manual setpoint"
+    assert entity.name == "HC 1: Manual setpoint"
     assert entity.unique_id == (
         "gateway-one:heatingCircuits:hc1:manualRoomSetpoint:control"
     )
@@ -155,9 +158,9 @@ def test_all_released_numeric_controls_are_discovered() -> None:
         if item.resource_path.startswith("/dhwCircuits/")
         and "/temperatureLevels/" in item.resource_path
     } == {
-        "Eco+ Starttemperatur",
-        "Komfort Starttemperatur",
-        "Eco Starttemperatur",
+        "Startschwelle Eco+",
+        "Startschwelle Komfort",
+        "Startschwelle Eco",
     }
     assert all(
         item.native_step == 1.0
@@ -253,7 +256,14 @@ async def test_number_calls_confirmed_coordinator_write(hass: HomeAssistant) -> 
 
     await entity.async_set_native_value(20.5)
 
-    writer.assert_awaited_once_with(PATH, 20.5, entity.entity_description.write_policy)
+    # The setting is read again with its write (limits from that reading).
+    writer.assert_awaited_once_with(
+        PATH,
+        20.5,
+        entity.entity_description.write_policy,
+        expected=(),
+        fresh=(entity.coordinator.data[PATH].resource,),
+    )
 
 
 async def test_maximum_supply_temperature_uses_confirmed_write(
@@ -271,7 +281,7 @@ async def test_maximum_supply_temperature_uses_confirmed_write(
 
     assert entity.native_value == 40.0
     assert entity.native_step == 1.0
-    assert entity.name == "Heating circuit 1 \N{EN DASH} Maximum supply temperature"
+    assert entity.name == "HC 1: Flow temperature limit"
     assert not entity.entity_description.entity_registry_enabled_default
 
     await entity.async_set_native_value(41.0)
@@ -287,11 +297,15 @@ async def test_platform_adds_numeric_controls(hass: HomeAssistant) -> None:
     entity = _number(hass)
     entry = SimpleNamespace(
         async_on_unload=Mock(),
-        runtime_data=SimpleNamespace(coordinators=(entity.coordinator,)),
+        runtime_data=SimpleNamespace(bacon=None, coordinators=(entity.coordinator,)),
     )
     added: list[BoschBuderusNumber] = []
 
     await async_setup_entry(hass, entry, added.extend)
-    entry.async_on_unload.call_args.args[0]()
+    # Every unload callback, as a config entry runs them: removing the
+    # listeners also stops the coordinator's refresh timer.
+    for call in entry.async_on_unload.call_args_list:
+        call.args[0]()
 
     assert len(added) == 1
+    assert entity.coordinator._unsub_refresh is None

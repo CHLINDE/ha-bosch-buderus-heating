@@ -477,7 +477,7 @@ async def test_discovery_probes_known_unadvertised_status_resources() -> None:
     assert expected.issubset(resources)
 
 
-async def test_discovery_probes_app_paths_for_each_reported_heat_source() -> None:
+async def test_discovery_probes_catalog_paths_for_each_reported_heat_source() -> None:
     client = AsyncMock()
     heat_source = "/heatSources/hs7"
     expected = {
@@ -521,9 +521,7 @@ async def test_discovery_probes_app_paths_for_each_reported_heat_source() -> Non
     assert not any(path.startswith("/heatSources/hs1/") for path in discovered)
 
 
-async def test_discovery_probes_optional_app_families_only_after_container_exists() -> (
-    None
-):
+async def test_discovery_probes_optional_families_only_after_container_exists() -> None:
     client = AsyncMock()
     roots = {
         "/heatingCircuits": Resource(
@@ -644,20 +642,28 @@ def test_catalog_privacy_polling_devices_and_names() -> None:
     )
     assert (
         resource_name("/system/variableTariff/supportStatus", language="en")
-        == "Support status"
+        == "Variable tariff \N{EN DASH} support"
     )
-    assert resource_name("/heatingCircuits/hc1/temperatureLevels/comfort2") == "Heizen"
-    assert resource_name("/heatingCircuits/hc1/temperatureLevels/eco") == "Absenken"
+    assert (
+        resource_name("/heatingCircuits/hc1/temperatureLevels/comfort2")
+        == "Heiztemperatur"
+    )
+    assert (
+        resource_name("/heatingCircuits/hc1/temperatureLevels/eco")
+        == "Absenktemperatur"
+    )
     assert resource_name("/dhwCircuits/dhw1/temperatureLevels/high") == (
-        "Komfort Starttemperatur"
+        "Startschwelle Komfort"
     )
     assert resource_name("/dhwCircuits/dhw1/temperatureLevels/low") == (
-        "Eco Starttemperatur"
+        "Startschwelle Eco"
     )
     assert resource_name("/dhwCircuits/dhw1/temperatureLevels/eco") == (
-        "Eco+ Starttemperatur"
+        "Startschwelle Eco+"
     )
-    assert resource_name("/dhwCircuits/dhw1/temperatureLevels/off") == "Aus"
+    assert resource_name("/dhwCircuits/dhw1/temperatureLevels/off") == (
+        "Sollwert Stufe Aus"
+    )
     assert (
         resource_name("/heatingCircuits/hc1/switchPrograms/nameA")
         == "Name des Zeitprogramms A"
@@ -668,6 +674,13 @@ def test_catalog_privacy_polling_devices_and_names() -> None:
     )
     assert resource_name("/heatSources/hs1/workingTime", "total") == (
         "Betriebszeit Gesamt"
+    )
+    assert resource_name("/heatSources/hs1/numberOfStarts", "pool") == (
+        "Anzahl der Starts Poolheizung"
+    )
+    assert (
+        resource_name("/heatSources/hs1/numberOfStarts", "pool", language="en")
+        == "Number of starts Pool heating"
     )
     assert (
         resource_name("/heatSources/emon/coolingConsumption", "outputProduced")
@@ -736,7 +749,7 @@ def test_catalog_privacy_polling_devices_and_names() -> None:
     )
 
 
-def test_optional_app_paths_require_the_expected_live_schema() -> None:
+def test_optional_catalog_paths_require_the_expected_live_schema() -> None:
     assert supports_entity(
         Resource(
             path="/heatSources/hs1/actualPower",
@@ -866,3 +879,25 @@ def test_configured_device_name_decodes_observed_pointt_format() -> None:
     assert configured_device_name("Obergeschoss") == "Obergeschoss"
     assert configured_device_name("  ") is None
     assert configured_device_name("bad\x00name") is None
+
+
+@pytest.mark.parametrize(
+    ("resource_type", "supported"),
+    [
+        ("floatValue", True),
+        ("emonValue", False),
+        ("stringValue", False),
+    ],
+)
+def test_global_number_of_starts_requires_scalar_schema(
+    resource_type: str, supported: bool
+) -> None:
+    resource = Resource(
+        path="/heatSources/numberOfStarts",
+        value=1234,
+        has_value=True,
+        metadata=ResourceMetadata(resource_type=resource_type, unit="other"),
+    )
+    assert supports_entity(resource) is supported
+    assert entity_enabled_by_default(resource.path)
+    assert poll_group(resource) is PollGroup.SLOW

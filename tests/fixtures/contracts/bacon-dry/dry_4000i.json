@@ -1,0 +1,98 @@
+{
+  "schema": 1,
+  "family": "bacon_dry_4000i",
+  "provenance": {
+    "kind": "synthetic",
+    "basis": "compatibility_mapping",
+    "firmware": null,
+    "capture_date": null,
+    "created": "2026-10-24",
+    "redaction": "Constructed capability profiles, not observations of retail devices.",
+    "physical_device_verified": false
+  },
+  "info": {
+    "timestamp": 2,
+    "online": true,
+    "error": null,
+    "appliance": {
+      "type": "Dry 4000i synthetic profile"
+    }
+  },
+  "metadata": {
+    "shadows": {
+      "state": {
+        "powerEnabled": {
+          "ro": false
+        },
+        "opMode": {
+          "ro": false,
+          "enum": [
+            "auto",
+            "night"
+          ]
+        },
+        "humiditySetpoint": {
+          "ro": false,
+          "unit": "%",
+          "min": 40,
+          "max": 65,
+          "step": 5
+        },
+        "childLockEnabled": {
+          "ro": true
+        },
+        "displayEnabled": {
+          "ro": false
+        },
+        "laundryModeTimestamp": {
+          "ro": false
+        }
+      }
+    },
+    "topics": {
+      "sensor": {
+        "relHumidity": {
+          "unit": "%",
+          "min": 0,
+          "max": 100
+        },
+        "roomTemperature": {
+          "unit": "degC"
+        },
+        "waterTankFull": {},
+        "defrostingActive": {},
+        "idleState": {}
+      }
+    }
+  },
+  "sensor": {
+    "items": [
+      {
+        "timestamp": 2,
+        "relHumidity": 60,
+        "roomTemperature": 22.5,
+        "waterTankFull": false,
+        "defrostingActive": false,
+        "idleState": false
+      }
+    ]
+  },
+  "shadow": {
+    "version": 1,
+    "timestamp": 2,
+    "state": {
+      "reported": {
+        "powerEnabled": true,
+        "opMode": "auto",
+        "humiditySetpoint": 55,
+        "childLockEnabled": false,
+        "displayEnabled": true,
+        "laundryModeTimestamp": 0,
+        "onTimestamp": 1234,
+        "offTimestamp": 5678,
+        "customTitle": "private synthetic title"
+      },
+      "desired": {}
+    }
+  }
+}

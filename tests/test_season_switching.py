@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.bosch_buderus_heating.const import DOMAIN
 from custom_components.bosch_buderus_heating.coordinator import (
@@ -38,6 +37,7 @@ from custom_components.bosch_buderus_heating.sensor import (
     build_sensor_descriptions,
 )
 from custom_components.bosch_buderus_heating.writes import WriteService
+from tests.ha_test_helpers import MockConfigEntry
 
 PATH = "/system/seasonOptimizer/mode"
 STATUS_PATH = "/system/globalSeasonOptimizer/currentMode"
@@ -97,7 +97,8 @@ def test_season_select_is_central_and_does_not_invent_cooling(
     "resource",
     [
         replace(_resource(), path=STATUS_PATH),
-        replace(_resource(), path="/heatingCircuits/hc1/suWiSwitchMode"),
+        # A circuit's own switching has a select of its own since 0.9.2
+        # (test_summer_winter_circuit.py), never the central one.
         replace(_resource(), path="/system/seasonOptimizer/mode/other"),
         replace(_resource(), metadata=replace(_resource().metadata, writable=False)),
         replace(

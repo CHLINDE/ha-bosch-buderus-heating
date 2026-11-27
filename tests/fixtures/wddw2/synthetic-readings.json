@@ -1,0 +1,17 @@
+{
+  "provenance": {
+    "kind": "synthetic",
+    "physical_device_verified": false,
+    "scope": "Types and on/off mapping are supported by the compatibility mapping. Payloads, counts, IDs and absent units are synthetic regression examples, not captured device responses."
+  },
+  "safety": {
+    "id": "/dhwCircuits/dhw1/safetyTemperature",
+    "type": "stringValue",
+    "value": "on"
+  },
+  "source_counter": {
+    "id": "/heatSources/hs1/numberOfStarts",
+    "type": "floatValue",
+    "value": 42
+  }
+}

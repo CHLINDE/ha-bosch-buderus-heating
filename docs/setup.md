@@ -3,12 +3,23 @@
 This guide walks through installation and sign-in step by step. No previous
 knowledge of OAuth, APIs, or the PointT Cloud API is required.
 
-**Bosch/Buderus Heating** connects compatible Bosch and Buderus heating systems
-to Home Assistant through the PointT Cloud API. After setup, detected devices
-and entities are created automatically in Home Assistant.
+**Bosch/Buderus Home Comfort**, formerly **Bosch/Buderus Heating**, connects
+compatible Bosch and Buderus heating systems and supported additional cloud
+appliances to Home Assistant. Detected devices and entities are created
+automatically according to their reported capabilities.
+
+The new display name is included in stable **0.8.2** and was introduced in
+**0.8.2-beta.7**. Older 0.8.1 and
+0.8.2-beta.6 installations still show **Bosch/Buderus Heating**. Both
+names refer to the same repository and integration; update the existing entry.
+Its saved title and custom device/entity names are retained. The instructions
+below use the new project name; use the former name where the installed version
+still displays it.
 
 ## Requirements
 
+- Home Assistant 2026.5.0 or newer (HACS does not offer the integration to
+  older versions);
 - a compatible Bosch or Buderus heating system with an MX300, MX400, K30/K30RF,
   K40/K40RF, or another compatible PointT gateway;
 - a working SingleKey ID account that is already connected to the heating app;
@@ -33,42 +44,45 @@ Neither Home Assistant nor this integration asks for that password.
 
 HACS then appears in the Home Assistant sidebar.
 
-### Install Bosch/Buderus Heating
+<a id="install-boschbuderus-heating"></a>
 
-HACS will notify you about future updates.
+### Install Bosch/Buderus Home Comfort
+
+The integration is included in the default HACS catalog. Find it
+using the search below; HACS will notify you about future updates.
 
 1. Open **HACS** in Home Assistant.
-2. Enter **Bosch/Buderus Heating** in the **Search** field at the top.
-3. Open the **Bosch/Buderus Heating** result. Do not confuse it with other
-   Bosch or Buderus projects in the HACS catalog.
+2. Enter **Bosch/Buderus** in the **Search** field at the top.
+3. Open **Bosch/Buderus Home Comfort**, or **Bosch/Buderus Heating** while the
+   former name is still shown. Check that the repository is
+   `SoftwareSchmied/ha-bosch-buderus-heating`.
 4. Select **Download**.
 5. Confirm the suggested current version.
 6. Restart Home Assistant completely when HACS asks you to do so.
 
 > [!NOTE]
-> The HACS download installs the required files. **Bosch/Buderus Heating**
+> The HACS download installs the required files. **Bosch/Buderus Home Comfort**
 > becomes available under **Settings → Devices & services** only after Home
 > Assistant has restarted.
 
 #### Repository does not appear in HACS search
 
-Until **Bosch/Buderus Heating** is included in the default HACS catalog, the
-same published repository can be installed and updated safely as a custom
-repository:
+The integration is listed in the default catalog. If it is missing from your
+search results:
 
-1. Open **HACS**.
-2. Open the three-dot menu **⋮** in the upper-right corner.
-3. Select **Custom repositories**.
-4. Enter
-   `https://github.com/SoftwareSchmied/ha-bosch-buderus-heating` as the
-   repository.
-5. Select **Integration** as the category.
-6. Select **Add**.
-7. Search for **Bosch/Buderus Heating** in the HACS dashboard and follow the
-   download steps above.
+1. Search in **HACS**, rather than Home Assistant's **Add integration** dialog.
+2. Clear any filters that limit the results, such as showing only downloaded
+   repositories, and search for **Bosch/Buderus** or **Buderus**.
+3. Check that HACS is up to date and can connect to GitHub. If HACS reports a
+   connection or rate-limit error, resolve it or wait for the indicated retry
+   time, then search again after the catalog has refreshed.
+4. If it is still missing, include your HACS version and any displayed error
+   when [requesting help](#request-help).
 
-This additional step is needed only while the project is not yet in the
-default HACS catalog. Use only the repository address shown above.
+The standard installation does not require a custom repository entry. If you
+previously installed this same repository manually through HACS, continue to
+update that installation through HACS; reinstalling the integration is not
+required.
 
 ## Add the integration
 
@@ -80,12 +94,34 @@ default HACS catalog. Use only the repository address shown above.
 
 *The button is in the lower-right corner.*
 
-4. Search for **Bosch/Buderus Heating**.
+4. Search for **Bosch/Buderus**, then select the name shown by the installed version.
 5. Confirm the Home Assistant prompt with **OK**.
+6. Choose how Home Assistant connects to the system:
 
-![Prompt to start Bosch/Buderus Heating setup](images/setup/02-start-integration.jpg)
+   - **Cloud access** signs in to your account. It offers controls, time
+     programs, holidays and system information.
+   - **Cloud and local access** (recommended when both are possible) first
+     sets up the cloud access and then continues directly with the local
+     access to the gateway in your home network.
+   - **Local access only** sets up the system from its gateway in the home
+     network, without an account. The local access only reads: no controls
+     and no settings. It updates many readings more often and can add
+     technical readings the cloud does not offer, such as the refrigerant circuit,
+     pumps and internal signals. The system is shown under its gateway ID,
+     with the manufacturer and controller model the gateway reports.
 
-6. Select the brand of the smartphone app that is already connected to the
+   If the local setup is cancelled, the entry stays and a repair note asks to
+   finish it with **Set up local access** in the entry's options. The cloud
+   access can be added to a system set up with local access only later, in the
+   same entry's options; the system is compared with the cloud first and then
+   continues as the same system (see
+   [adding the cloud later](source-selection.md#adding-the-cloud-later)).
+
+For the cloud access:
+
+![Setup prompt using the former Bosch/Buderus Heating display name](images/setup/02-start-integration.jpg)
+
+7. Select the brand of the smartphone app that is already connected to the
    heating system:
 
    - **Bosch** when using the Bosch app;
@@ -111,13 +147,18 @@ link directly from that dialog.
 size, and language. Enter the email address or mobile number of the existing
 SingleKey ID account.*
 
-The following procedure has been verified with Google Chrome. Open Developer
-Tools before signing in so Chrome displays the required redirect address:
+Use Google Chrome on a computer for the steps below. Open Developer Tools
+before signing in and keep its messages across page changes:
 
 1. Keep the Home Assistant setup dialog open.
 2. Open its **SingleKey ID** link in a new Chrome tab.
 3. Press `F12` in the SingleKey ID tab.
 4. Select **Console** at the top of Developer Tools.
+
+   Open **Console settings** using the small gear on the Console toolbar and
+   enable **Preserve log** (German: **Protokoll beibehalten**). This keeps
+   messages when the sign-in page redirects. Clear the **Filter** field and
+   select **All levels** so errors are not hidden.
 
    ![Chrome Developer Tools with the Console tab highlighted](images/setup/04-chrome-console.png)
 
@@ -154,10 +195,11 @@ Tools before signing in so Chrome displays the required redirect address:
     `code=`.
 16. Select **OK**.
 
-If the Console contains no matching message, repeat sign-in while Developer
-Tools is open. Always use the redirect address from the same attempt as the
-currently open Home Assistant setup dialog. An address from an older attempt
-is rejected for security reasons.
+If the Console contains no matching message, follow
+[Chrome Console is empty or the redirect address is missing](#chrome-console-is-empty-or-the-redirect-address-is-missing).
+Always use the redirect address from the same attempt as the currently open
+Home Assistant setup dialog. An address from an older attempt is rejected for
+security reasons.
 
 > [!IMPORTANT]
 > The redirect address contains a short-lived one-time code. Never publish it
@@ -174,17 +216,291 @@ the account.
    distinguish them.
 4. Select **Submit**.
 
-**Bosch/Buderus Heating** now appears as a configured integration. Open
+If the device list was loaded more than five minutes ago, Home Assistant asks
+to load it again before saving. You stay signed in; select **Submit** and
+choose the devices again.
+
+**Bosch/Buderus Home Comfort** now appears as a configured integration. Open
 **Devices** on its integration card to find the detected heating equipment and
 entities. Devices can then be assigned to areas and dashboards.
+
+## Set up the local access
+
+The local access reads the system directly from a K40 or K40RF gateway in the
+home network. I checked it with gateway firmware 15.00.01; older firmware
+pauses the local access (see [compatibility](compatibility.md#checked-systems)).
+
+1. Choose **Cloud and local access** when adding the integration, or add the
+   local access later under **Configure → Connections → Set up local
+   access**.
+2. If the entry already has a system, choose it in **Choose the
+   installation**: the heating system you connect locally, the heat pump or
+   the boiler, not a wallbox or an air conditioner. The list shows the device
+   names; if only one installation fits, it is preselected. **New system
+   (gateway not in your account)** is only for a gateway that is not in your
+   account; for a gateway that is, it would set the system up a second time.
+   Without any system, this step does not appear.
+3. Select the discovered gateway address or enter its IP address or hostname.
+4. Confirm the gateway certificate when Home Assistant asks for it.
+5. Sign in with the device label: enter **Login** and **Pass** from the label
+   on the gateway. The login is shown as you type it; the pass field can be
+   shown with its eye symbol. Spaces and line breaks at the start or end, for
+   example from copying, are removed. Home Assistant does not save them.
+6. Release the local sign-in on the gateway: press the Wi-Fi and wireless
+   buttons together for 1 second, wait for the blue signal and continue within
+   five minutes. After a typo, press the buttons again, because the gateway
+   accepts a sign-in only within five minutes after the release.
+7. Confirm the certificate once more. The gateway has its own certificate for
+   the sign-in port 9442 and for the data port 9443, so this page can appear
+   twice.
+
+If the read check reports that the gateway's system information is not
+complete yet, the gateway is still collecting it. This can take several
+minutes; on a K40RF with firmware 15.00.01 it took about nine minutes during
+the first local setup. Wait a few minutes and try the read check again; there
+is no need to start over.
+
+If Home Assistant shows more than one "Discovered" card for the gateway, open
+the one of Bosch/Buderus Home Comfort.
+
+The local access only reads. With the first local access of a system,
+**Use local values for existing entities** is switched on, so existing
+entities show the current local readings; a choice saved before stays.
+Without the cloud, local readings are shown whatever this option says. Details
+are in [operation without the cloud](operation-without-cloud.md).
+
+### Keep the gateway's address stable
+
+Many routers hand out a different IP address after a restart. The local access
+then cannot reach its gateway until the address is updated. Give the gateway a
+fixed address in one of two ways:
+
+- **DHCP reservation:** reserve the gateway's current IP address in the
+  router's device list. This works everywhere and is the recommended way.
+- **Host name:** enter the gateway's host name instead of its IP address. The
+  address step offers it when Home Assistant found the gateway in the network.
+  This only helps if the computer running Home Assistant can resolve that name;
+  if in doubt, use the reservation.
+
+While the local access cannot reach its gateway, its status in **Configure →
+Connections** repeats this tip. If the gateway announces itself at a new
+address, the integration checks that address with one TLS handshake, without
+sending the token. Only when the gateway presents exactly the certificate
+confirmed during setup does a repair note offer to use the new address; see
+[a new gateway address](local-setup-dialogs.md#a-new-gateway-address). The
+address changes only after you confirm it there.
+
+When Home Assistant finds a gateway in the network, it shows a discovery
+notice. If you select **Ignore**, that notice stays ignored, also after a
+restart; you can still add the local access from the entry's options.
+Without any entry of this integration yet, the notice sets the gateway up with
+**Local access only**: continuing creates an entry without a cloud and opens
+its local setup, with the found address offered. With an entry, the notice asks
+which existing setup the gateway belongs to.
+
+<a id="everyday-operation-in-the-development-version"></a>
+
+<a id="everyday-operation-from-beta7"></a>
+
+## Everyday operation since 0.8.2
+
+The following controls are included since stable **0.8.2** and were introduced
+in Beta.7. The older 0.8.2-beta.6 and 0.8.1 packages do not contain this dialog.
+Update to the latest release through HACS, restart Home Assistant and reload the
+browser.
+
+1. Open **Settings > Devices & services > Bosch/Buderus Home Comfort > Configure**.
+2. Select **Operate appliance**. With several PointT gateways, select the
+   appliance first.
+3. Choose the heating-circuit, hot-water or system tab. Additional settings stay
+   visible under **More settings**.
+4. Edit the desired fields and select **Apply**. Wait for confirmation before
+   treating an edit as applied. **Discard** or **Escape** discards unsaved edits.
+
+The German route is **Einstellungen > Geräte & Dienste > Bosch/Buderus Home Comfort >
+Konfigurieren > Anlage bedienen**. The dialog follows the profile language.
+This is separate from **Reconfigure**, which changes gateway selection and
+polling and starts resource discovery again.
+
+### Moving around in Configure
+
+Since 0.9.0-alpha.6 every menu below the main menu of **Configure** ends with
+**← Back**, which leads to the menu above it: **Connections** back to the
+main menu, a single connection back to **Connections**. A finished action no
+longer closes the dialog: after a saved connection setting, a removed
+access, saved notification settings, a saved, changed or deleted holiday, a
+saved heating or hot water schedule, a saved room controller switch point or
+a planned search, the dialog returns to its menu and shows the result there,
+so several things can be done in one session. The settings are saved at once,
+as before; the dialog is closed with **X**. Input pages keep only their
+submit button and **X**. A dialog that hands over to another one (signing in
+again, adding a cloud access, setting up the local access) and every error
+message end as before.
+
+Seit 0.9.0-alpha.6 endet jedes Menü unterhalb des Hauptmenüs von
+**Konfigurieren** mit **← Zurück**, das zum übergeordneten Menü führt:
+**Verbindungen** zurück zum Hauptmenü, eine einzelne Verbindung zurück zu
+**Verbindungen**. Eine abgeschlossene Aktion schließt den Dialog nicht mehr:
+Nach einer gespeicherten Verbindungseinstellung, einem entfernten Zugang,
+gespeicherten Benachrichtigungen, einem gespeicherten, geänderten oder
+gelöschten Urlaub, einem gespeicherten Heiz- oder Warmwasserprogramm, einem
+gespeicherten Schaltpunkt eines Raumreglers oder einer geplanten Suche kehrt
+der Dialog zu seinem Menü zurück und zeigt dort das Ergebnis, sodass sich
+mehreres in einer Sitzung erledigen lässt. Die Einstellungen werden wie
+bisher sofort gespeichert; geschlossen wird der Dialog mit **X**.
+Eingabeseiten haben weiter nur ihre Bestätigen-Schaltfläche und **X**. Dialoge,
+die an einen anderen übergeben (erneut anmelden, Cloud-Zugang hinzufügen,
+lokalen Zugang einrichten), und alle Fehlermeldungen enden wie bisher.
+
+On the device page, tap the heating-circuit climate or hot-water entity to open
+Home Assistant's native controls. Those controls write immediately. The original
+controls for the heating mode, manual target and hot-water mode remain under
+**Configuration**, with their IDs and custom names retained.
+See the [heating guide](heating-controls.md) and
+[PointT hot-water guide](pointt-hot-water.md) for supported operations and limits.
 
 ## Updating
 
 For a HACS installation, Home Assistant displays an available new version.
 Open the notification, read the release notes, and select **Update**. Restart
-Home Assistant if HACS requests it.
+Home Assistant if HACS requests it. Reload the browser after an update that
+changes the dialogs. Reinstalling the integration or deleting existing entities
+is not necessary.
 
 ## Troubleshooting
+
+### The new controls are missing or look different
+
+- Check the installed integration version and its release notes. The PointT
+  dialog, climate and hot-water entity described above are included since
+  stable **0.8.2** and Beta.7. The published Beta.6 and 0.8.1 packages do not contain them.
+- After installing a build that includes them, restart Home Assistant and
+  reload the browser. Check disabled entities as well.
+- Entities follow the resources offered by each circuit. A missing valid
+  capability can prevent a combined entity from appearing; existing individual
+  controls can still be available. The [heating guide](heating-controls.md)
+  explains availability and automatic-mode limitations.
+- A profile-language change translates dialogs but does not rename entities.
+  Names follow the system language or a custom name; see the
+  [language guide](resource-names-and-languages.md).
+
+### Entities are "not provided" or unavailable after a restart
+
+- **All entities unavailable after a restart:** if the cloud does not answer
+  while Home Assistant starts, each cloud access starts its systems with the
+  resources it found at an earlier start (at most 30 days since they were last
+  confirmed). The entities exist but are
+  unavailable until the cloud answers again; their values then return within
+  one polling cycle, without a restart. The log shows a warning starting with
+  `PointT start-up failed temporarily`.
+- **All entities "not provided":** this happens only without such a saved
+  inventory, for example right after installing or upgrading, or if the
+  system has not answered successfully for more than 30 days. Home Assistant
+  then retries on its own: the cloud access starts the system again about
+  every minute (the setup of older entries is retried by Home Assistant).
+- **Other cloud devices** (air conditioners, air purifiers, dehumidifiers or
+  water heaters) do not hold back the start either. If they cannot sign in
+  while Home Assistant starts, they connect in the background and their
+  entities return once the connection is up; until then they are shown as
+  "not provided". The log shows `Other cloud devices could not sign in during
+  start-up`.
+- **Some entities "not provided":** if parts of the system were missing after
+  the start, the integration searches them again 5, 15 and 60 minutes later
+  and then every six hours until one day has passed. The log names the missing
+  parts as path templates.
+
+Diagnostics show both under `startup_inventory` and `discovery_recovery` for
+each gateway.
+
+### A device that no longer exists
+
+Since 0.9.0-alpha.6 a device of the integration can be deleted on its device
+page (**⋮ > Delete**) once it has no entity left, for example a heating circuit
+removed at the controller. A disabled entity and an entity that is no longer
+provided count as well: delete those entities first (on the entity page or in
+**Settings > Devices & services > Entities**), then the device. While the
+device or a device connected through it still has an entity, Home Assistant
+offers no Delete, so no entity setting gets lost. If the system reports the
+device again, the next start creates it anew.
+
+### Chrome Console is empty or the redirect address is missing
+
+An empty Console does not show whether sign-in completed or the browser tried
+to open the app address. It is not enough to identify an expired token.
+
+1. Start a fresh sign-in attempt in Home Assistant. Keep that dialog open and
+   open its **SingleKey ID** link in a new Chrome tab. Use this link rather
+   than a bookmark or the general SingleKey ID website.
+2. In the **SingleKey ID tab**, press `F12` and select **Console** before
+   signing in. Open the small **Console settings** gear and enable
+   **Preserve log**. Clear **Filter** and select **All levels**. Keep Developer
+   Tools open while completing every sign-in step.
+3. After the sign-in, SingleKey ID may show a page saying that you will be
+   redirected, for example in about three seconds, and then nothing happens.
+   Select the link or button on that page; only then does the app address
+   appear in the Console. Do not copy the address of that page itself
+   (`singlekey-id.com/...`): it is not the app address, and the dialog says
+   so if it is pasted.
+4. Look for **Failed to launch** or **Connecting to** and the
+   `com.bosch...://` or `com.buderus...://` address. If it appears, use
+   **Copy link address** and paste the full address into the still-open
+   Home Assistant dialog.
+5. If no address appears, note the page displayed after sign-in. If it is the
+   SingleKey ID account home page, follow
+   [SingleKey ID home page appears after sign-in](#singlekey-id-home-page-appears-after-sign-in).
+   Otherwise, [request help](#request-help) with your Chrome version, operating
+   system, Home Assistant version and integration version, plus any visible
+   page error. Mention whether Developer Tools was open before signing in.
+
+Each Home Assistant sign-in attempt is valid for ten minutes. After that,
+start a new attempt and use its new link. Do not delete an existing integration
+entry to do this. If a rate-limit message asks you to wait, wait for that
+interval before trying again.
+
+When describing the page, share only its domain and path, omitting everything
+from `?` or `#` onward. Do not share the app redirect address, sign-in codes,
+tokens or account details. Check any screenshot for these details first.
+
+**Preserve log** prevents messages from being cleared during page changes; it
+does not guarantee that Chrome will produce the expected redirect message.
+See the [Chrome documentation](https://developer.chrome.com/docs/devtools/console/reference#persist)
+for the setting.
+
+#### Deutsch: Keine Rückleitungsadresse in der Konsole
+
+Eine leere Konsole allein zeigt nicht, ob die Anmeldung abgeschlossen wurde
+oder der Browser versucht hat, die App-Adresse zu öffnen.
+
+1. Starte in Home Assistant einen neuen Anmeldeversuch und öffne dessen
+   **SingleKey ID**-Link in einem neuen Chrome-Tab. Lasse den Dialog in
+   Home Assistant geöffnet. Verwende kein Lesezeichen und nicht die allgemeine
+   SingleKey-ID-Webseite.
+2. Öffne im **SingleKey-ID-Tab vor der Anmeldung** mit `F12` die **Konsole**.
+   Aktiviere über das kleine Zahnrad der Konsolenleiste
+   **Protokoll beibehalten / Preserve log**. Leere das Filterfeld und wähle
+   **Alle Ebenen / All levels**. Lasse die Entwicklerwerkzeuge während der
+   gesamten Anmeldung geöffnet.
+3. Nach der Anmeldung kann SingleKey ID eine Seite zeigen, die eine
+   Weiterleitung ankündigt, etwa in rund drei Sekunden, und dann passiert
+   nichts. Wähle den Link oder die Schaltfläche auf dieser Seite; erst danach
+   erscheint die App-Adresse in der Konsole. Kopiere nicht die Adresse dieser
+   Seite selbst (`singlekey-id.com/...`): Sie ist keine App-Adresse, und der
+   Dialog weist darauf hin, wenn sie eingefügt wird.
+4. Suche nach **Failed to launch** oder **Connecting to** und der
+   `com.bosch...://`- beziehungsweise `com.buderus...://`-Adresse. Kopiere sie
+   über **Link-Adresse kopieren** vollständig in den offenen HA-Dialog.
+5. Bleibt die Adresse aus, nenne bei einer Rückfrage die Chrome-Version,
+   das Betriebssystem, die HA- und Integrationsversion sowie die nach der
+   Anmeldung angezeigte Seite oder Fehlermeldung. Schreibe dazu, ob die
+   Entwicklerwerkzeuge schon vor der Anmeldung geöffnet waren.
+
+Ein Anmeldeversuch gilt zehn Minuten. Beginne danach mit einem neuen Link;
+ein bestehender Integrationseintrag muss dafür nicht gelöscht werden. Halte
+eine angezeigte Wartezeit ein. Teile von einer Webseitenadresse nur Domain
+und Pfad ohne den Teil ab `?` oder `#`. Veröffentliche keine App-Rückleitungsadresse,
+Anmeldecodes, Tokens oder Kontodaten, auch nicht in Screenshots.
+**Protokoll beibehalten** erhält vorhandene Meldungen bei Seitenwechseln,
+garantiert aber nicht, dass die erwartete Meldung entsteht.
 
 ### SingleKey ID home page appears after sign-in
 
@@ -195,7 +511,7 @@ sign-in result and must not be pasted into Home Assistant.
 2. Open the **SingleKey ID** link shown in the setup dialog again. Do not open
    SingleKey ID from a bookmark or by manually entering its website address.
 3. If the home page appears again, close the setup dialog.
-4. Add **Bosch/Buderus Heating** again and repeat sign-in with the newly
+4. Add **Bosch/Buderus Home Comfort** again and repeat sign-in with the newly
    generated link.
 
 ### Browser opens the heating app
@@ -205,6 +521,15 @@ before opening the app, select **Cancel**. Before the next attempt, press
 `F12` and open the Console. Then copy the complete
 `com.bosch...://` or `com.buderus...://` address from the **Failed to
 launch** or **Connecting to** message as described above.
+
+### Signing in with a tablet or phone does not work
+
+Doing part of the sign-in on a tablet or phone and copying the address to a
+computer is error-prone: the address may be cut off, come from an older
+attempt or arrive after the attempt has expired. Do the whole sign-in on one
+computer in one browser instead: open Home Assistant and the **SingleKey ID**
+link from the dialog in the same browser, sign in, copy the `com.bosch...://`
+or `com.buderus...://` address from the console and paste it straight away.
 
 ### Home Assistant reports an invalid redirect address
 
@@ -226,26 +551,72 @@ wait in seconds. Wait for that interval and select **Submit** to obtain a new
 sign-in link. Submitting early does not send another token request or extend
 the wait. Without a usable wait time from the server, the pause is five minutes.
 
-### PointT service cannot be reached
+### The cloud access cannot be reached
 
 Check the Home Assistant internet connection and wait briefly. If Home
 Assistant displays **Retry gateway discovery**, select **Submit** again; no new
-sign-in is required.
+sign-in is required. The same applies when the step says that the cloud has
+requested a pause: wait, then select **Submit**.
 
 ### No gateway is found
 
 - Open the official heating app and confirm that the system is online.
 - Confirm that the correct SingleKey ID account was used.
 - Confirm the selected brand.
-- Compare the gateway with the compatibility list in the README. If it is
-  listed, create a bug report as described below.
+- Compare the gateway with the
+  [supported systems](compatibility.md#supported-systems-at-a-glance). If it
+  is listed, create a bug report as described below.
+
+### A new sign-in does not find every system
+
+A new sign-in of the cloud access must use the same account as before; the
+integration compares a hash of the account and refuses a different one. It is
+accepted when at least one switched-on system or additional device of that
+access appears in the account. Missing
+ones stay configured but unavailable, and the repair note **Systems not found
+in the cloud account** names them by their last characters. It disappears
+when they appear in the account again.
+
+If they were removed from the account, open **Configure → Connections →** the
+cloud access, switch them off under **Use for systems and devices** and remove
+them with **Forget deselected systems**; this works for gateways and
+additional devices alike. Their devices and entities stay in Home Assistant
+until you delete them. If a gateway was exchanged, keep it switched on: a
+separate repair note offers to continue the system with its history.
+
+A cloud access that has no system or device left can only sign in again with
+the same account. If that is not possible, remove the cloud access and add it
+again.
+
+A sign-in that finds none of the switched-on systems and devices, or that
+belongs to a different account, is refused, and the previous sign-in is kept.
+When it finds none of them, the dialog shows a new sign-in link right away,
+so you can sign in again with the right account.
+
+### The local gateway certificate changed
+
+The local access stops reading and the repair note **Local gateway
+certificate changed** appears. If you know why, for example after a gateway
+update or reset, open the entry's options, choose the local access and select
+**Change local access**. Confirm the new certificate there and sign in again
+with the device label, which is recommended. **Keep the current token** sends
+the stored token to the device with the newly confirmed certificate; the
+dialog warns about this first, so choose it only if you are sure that it is
+your own gateway.
+
+### The saved configuration cannot be read
+
+If the entry does not start and reports that its saved configuration cannot
+be read, nothing was changed. Restore a backup from before the problem, or
+delete the entry and add the integration again.
 
 ### Integration is not shown in search
 
 First determine where the search fails:
 
-- **Not found in HACS:** add the project as a custom repository as described
-  under [Repository does not appear in HACS search](#repository-does-not-appear-in-hacs-search).
+- **Not found in HACS:** check the search term, active filters and HACS catalog
+  access as described under
+  [Repository does not appear in HACS search](#repository-does-not-appear-in-hacs-search).
 - **Downloaded in HACS but missing from Add integration:** restart Home
   Assistant completely. Then check **Settings → System → Logs** for a loading
   error involving `bosch_buderus_heating`.

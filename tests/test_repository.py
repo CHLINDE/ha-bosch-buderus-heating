@@ -31,12 +31,14 @@ def test_stable_project_identity() -> None:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
     assert manifest["domain"] == "bosch_buderus_heating"
-    assert manifest["name"] == "Bosch/Buderus Heating"
-    assert manifest["version"] == "0.8.1"
+    assert manifest["name"] == "Bosch/Buderus Home Comfort"
+    assert manifest["version"] == "0.9.2"
     assert project["project"]["version"] == manifest["version"]
-    assert manifest["requirements"] == []
+    assert manifest["requirements"] == ["aiomqtt==2.5.1"]
+    assert set(manifest["requirements"]).issubset(project["project"]["dependencies"])
     assert manifest["config_flow"] is True
     assert hacs["name"] == manifest["name"]
+    assert hacs["homeassistant"] == "2026.5.0"
     assert hacs["zip_release"] is True
     assert hacs["filename"] == "bosch_buderus_heating.zip"
     assert strings["title"] == manifest["name"]
@@ -46,7 +48,7 @@ def test_stable_project_identity() -> None:
 def test_translation_title(language: str) -> None:
     """German and English translation catalogs expose the stable title."""
     translation = load_json(INTEGRATION / "translations" / f"{language}.json")
-    assert translation["title"] == "Bosch/Buderus Heating"
+    assert translation["title"] == "Bosch/Buderus Home Comfort"
     assert (
         "{holiday}" not in translation["options"]["step"]["new_holiday"]["description"]
     )
@@ -105,8 +107,8 @@ def test_all_known_sensor_enum_options_have_translations() -> None:
             assert set(sensors[translation_key]["state"]) == set(options)
 
 
-def test_heat_source_status_translations_match_vendor_app_terms() -> None:
-    """Operational status labels follow the MyBuderus/HomeCom terminology."""
+def test_heat_source_status_translations_are_consistent() -> None:
+    """Operational status labels use consistent, clear terminology."""
     german = load_json(INTEGRATION / "translations" / "de.json")
     sensor = german["entity"]["sensor"]
 
@@ -143,8 +145,8 @@ def test_heat_source_type_translations_are_complete() -> None:
     }
 
 
-def test_schedule_type_translations_match_vendor_app_terms() -> None:
-    """Schedule types use the terms found in both official app variants."""
+def test_schedule_type_translations_are_consistent() -> None:
+    """Schedule types use consistent terms in both UI languages."""
     source = load_json(INTEGRATION / "strings.json")["entity"]["sensor"]
     german = load_json(INTEGRATION / "translations" / "de.json")["entity"]["sensor"]
     english = load_json(INTEGRATION / "translations" / "en.json")["entity"]["sensor"]
@@ -178,8 +180,8 @@ def test_schedule_type_translations_match_vendor_app_terms() -> None:
         "system_type",
     ],
 )
-def test_app_audited_enum_translations_are_complete(translation_key: str) -> None:
-    """Expanded app enum groups remain aligned in both UI languages."""
+def test_enum_translations_are_complete(translation_key: str) -> None:
+    """Expanded enum groups remain aligned in both UI languages."""
     source = load_json(INTEGRATION / "strings.json")["entity"]["sensor"]
     german = load_json(INTEGRATION / "translations" / "de.json")["entity"]["sensor"]
     english = load_json(INTEGRATION / "translations" / "en.json")["entity"]["sensor"]
@@ -191,8 +193,8 @@ def test_app_audited_enum_translations_are_complete(translation_key: str) -> Non
     )
 
 
-def test_holiday_translations_are_clear_and_match_vendor_terms() -> None:
-    """Holiday labels stay consistent with the official app terminology."""
+def test_holiday_translations_are_clear_and_consistent() -> None:
+    """Holiday labels stay clear and consistent."""
     german = load_json(INTEGRATION / "translations" / "de.json")["entity"]
     english = load_json(INTEGRATION / "translations" / "en.json")["entity"]
 
@@ -214,17 +216,19 @@ def test_holiday_options_are_translated_and_structurally_aligned() -> None:
     assert source["options"].keys() == english["options"].keys()
     assert german["selector"]["holiday_heating_mode"]["options"] == {
         "saturday": "Wie Samstag",
+        "auto_sat": "Wie Samstag",
         "fix_temperature": "Konstante Temperatur",
-        "off": "AUS",
+        "fix_temp": "Konstante Temperatur",
+        "off": "Aus",
         "eco": "Absenken",
     }
     assert german["selector"]["holiday_dhw_mode"]["options"]["off_td"] == (
-        "AUS bei thermischer Desinfektion"
+        "Aus bei thermischer Desinfektion"
     )
     assert german["options"]["step"]["holiday"]["data"] == {
         "holiday_name": "Name",
         "holiday_start": "Beginn",
-        "holiday_end": "Ende (exklusiv)",
+        "holiday_end": "Ende (ab hier wieder Normalbetrieb)",
         "holiday_assigned_to": "Anwenden auf",
         "holiday_heating_mode": "Heizung",
         "holiday_dhw_mode": "Warmwasser",
@@ -237,7 +241,7 @@ def test_holiday_options_are_translated_and_structurally_aligned() -> None:
         for selector in translations["selector"].values():
             assert all(
                 re.fullmatch(r"[a-z0-9]+(?:[-_][a-z0-9]+)*", option)
-                for option in selector["options"]
+                for option in selector.get("options", selector.get("fields", {}))
             )
 
 
@@ -257,3 +261,14 @@ def test_fixable_issue_translations_use_only_fix_flow(path: Path) -> None:
     for issue in issues.values():
         assert isinstance(issue, dict)
         assert not ({"description", "fix_flow"} <= issue.keys())
+
+
+def test_every_test_has_a_time_limit(request: pytest.FixtureRequest) -> None:
+    """D49: a hanging test is stopped and named, not the whole CI job."""
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert project["tool"]["pytest"]["ini_options"]["timeout"] == 120
+    test_extras = project["project"]["optional-dependencies"]["test"]
+    assert "pytest-timeout==2.4.0" in test_extras
+    # Where the plugin is installed (every CI job), the option is applied.
+    if request.config.pluginmanager.hasplugin("timeout"):
+        assert request.config.getini("timeout") == "120"

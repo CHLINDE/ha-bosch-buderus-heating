@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "family": "icom",
+  "provenance": {
+    "kind": "synthetic",
+    "basis": "compatibility_mapping",
+    "firmware": null,
+    "capture_date": null,
+    "created": "2026-10-23",
+    "redaction": "Constructed examples with fixture-local IDs; no captured response or private data.",
+    "physical_device_verified": false
+  },
+  "cases": [
+    {
+      "id": "room_temperature",
+      "payload": {
+        "id": "/heatingCircuits/hc2/roomtemperature",
+        "type": "floatValue",
+        "value": 21,
+        "writeable": 0,
+        "unitOfMeasure": "C"
+      },
+      "expected": {
+        "value": 21,
+        "unit": "°C",
+        "part": null
+      }
+    },
+    {
+      "id": "hot_water_temperature",
+      "payload": {
+        "id": "/dhwCircuits/dhw2/actualTemp",
+        "type": "floatValue",
+        "value": 48,
+        "writeable": 0,
+        "unitOfMeasure": "C"
+      },
+      "expected": {
+        "value": 48,
+        "unit": "°C",
+        "part": null
+      }
+    }
+  ]
+}

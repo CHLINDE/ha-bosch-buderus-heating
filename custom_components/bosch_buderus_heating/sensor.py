@@ -5,11 +5,12 @@ from __future__ import annotations
 import logging
 import re
 from collections import Counter
-from collections.abc import Mapping
-from dataclasses import dataclass
-from datetime import UTC, datetime
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime, timedelta
+from functools import partial
 from math import fsum, isfinite
-from typing import Literal, TypeIs, cast
+from typing import Literal, cast
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -18,8 +19,10 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.const import (
+    EVENT_HOMEASSISTANT_STOP,
     PERCENTAGE,
     EntityCategory,
+    Platform,
     UnitOfEnergy,
     UnitOfPower,
     UnitOfPressure,
@@ -28,57 +31,153 @@ from homeassistant.const import (
     UnitOfVolume,
     UnitOfVolumeFlowRate,
 )
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.event import (
+    async_track_time_interval,
+    async_track_utc_time_change,
+)
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
+from homeassistant.util.unit_conversion import TemperatureConverter
 
-from . import BoschBuderusConfigEntry
-from .coordinator import BoschBuderusDataUpdateCoordinator, ResourceSnapshot
+from . import (
+    BoschBuderusConfigEntry,
+    exchange_counters,
+    hybrid_controls,
+    rrc,
+    rrc_platforms,
+    switch_program_sensor,
+)
+from .aircon_program_sensor import track_aircon_program_sensors
+from .bacon import purifier
+from .bacon.dry_entities import track_entities as track_dry_entities
+from .bacon.purifier_entities import (
+    BaconPurifierSensor,
+)
+from .bacon.purifier_entities import (
+    track_entities as track_purifier_entities,
+)
+from .bacon.rac_entities import track_entities as track_rac_entities
+from .control import HeldCapabilities, track_entity_once, unchanged_input
+from .coordinator import BoschBuderusDataUpdateCoordinator, Freshness, ResourceSnapshot
 from .derived import (
     MAGNUS_A,
     MAGNUS_B_CELSIUS,
     DewPointCalculation,
     calculate_dew_point,
 )
+from .derived_sensors import track_calculated_sensors
 from .device import device_info_for_resource, grouped_entity_name
+from .dhw_safety import is_dhw_safety_path
+from .energy_contracts import assess_energy, is_energy_collection
 from .enum_translation import enum_value_to_ha
+from .environmental_energy import (
+    ENABLED_BY_DEFAULT as ENVIRONMENTAL_ENABLED_BY_DEFAULT,
+)
+from .environmental_energy import environmental_energy, has_environmental_energy
+from .estimated_energy import track_estimated_energy_sensors
+from .exchange_counters import (
+    COUNTER_STATE_CLASSES,
+    ExchangeCounterGuard,
+    async_counter_guard,
+)
 from .faults import (
     MAX_FAULT_ATTRIBUTES,
     ActiveFault,
+    fault_code_search_url,
     fault_severity_label,
     fault_summary,
     no_active_faults_label,
 )
+from .gateway_clock import track_clock_deviation_sensor
+from .heat_generator_sensor import track_heat_generator_sensor
 from .holidays import (
-    HOLIDAY_PERIOD_PATHS,
-    HOLIDAY_RESOURCE_PATHS,
-    HOLIDAY_TIMEZONE_PATH,
     HolidayPeriod,
     HolidayState,
+    holiday_timezone,
+    is_holiday_period_path,
+    is_holiday_resource_path,
     parse_holiday_state,
 )
+from .i18n import localize
+from .local_only import (
+    MAX_STATES,
+    below_range_attributes,
+    flag_state,
+    state_key,
+)
+from .local_only_sensor import (
+    FLOW_TRANSLATION_KEY,
+    clean_registered_local_only,
+    hand_over_open,
+    hand_over_while_running,
+    keeps_local_entity,
+    track_local_only_sensors,
+)
+from .outdoor_unit_software import track_outdoor_unit_software_sensor
+from .performance_sensors import track_performance_sensors
+from .platform_scope import DiscoveryLifecycle, PlatformScope, setup_platform
 from .pointt import Resource
 from .pointt.metrics import RequestMetrics
 from .pointt.models import JsonValue
 from .pointt.redaction import resource_path_template
+from .read_contracts import assess_runtime, is_monitor_collection, is_runtime_path
+from .recordings.sensor import track_recording_sensors
 from .resource_catalog import (
+    UNKNOWN_ENUM,
+    UNKNOWN_NUMBER,
     CapabilityMaturity,
     PollGroup,
+    additional_app_value,
     capability_maturity,
     configured_device_name,
     entity_enabled_by_default,
+    is_additional_app_scalar,
     is_opt_in_diagnostic_resource,
     is_read_only_control_mirror,
+    plant_duplicate_paths,
     poll_group,
     resource_name,
     supports_entity,
+    unknown_entity_kind,
+)
+from .rrc_device_entities import RadioSignalSensor, track_radio_devices
+from .rrc_platforms import generic_presentation
+from .start_counters import (
+    OPTIONAL_START_COUNTER_KEY,
+    START_COUNTER_KEYS,
+    assess_start_counter,
+    is_start_counter_path,
+    start_counter_placeholder,
 )
 from .startup_data import startup_placeholder
+from .switch_programs import (
+    assess_switch_program,
+    is_switch_program_path,
+)
+from .unit_contracts import DURATION_UNITS, ENERGY_UNITS, TEMPERATURE_UNITS
+from .variable_tariff_entities import track_tariff_sensor
+from .wallbox_entities import track_wallbox_entities
+from .wallbox_history_sensor import track_wallbox_history_sensors
+from .wallbox_sensor import DESCRIPTIONS as WALLBOX_DESCRIPTIONS
+from .wallbox_sensor import WallboxSensor
+from .water_softener import PHASES, softener_capability, softener_unit, softener_value
+from .water_softener_history import track_softener_history_sensors
+from .write_policies import context_of, rrc_kwargs
+from .zone_radio_devices import (
+    ZoneRadioConnectionLostSensor,
+    ZoneRadioSignalSensor,
+    is_zone_radio_connection_lost,
+    track_zone_radio_devices,
+)
 
 type ValueKind = Literal[
     "value",
+    "unknown_number",
+    "unknown_enum",
+    "unknown_flag",
     "nested",
     "values",
     "enum_values",
@@ -88,25 +187,26 @@ type ValueKind = Literal[
     "system_info",
     "pressure_status",
     "dew_point",
+    "switch_program",
 ]
 
 _LOGGER = logging.getLogger(__name__)
 _MAX_TRACKED_UNKNOWN_ENUM_VALUES = 16
+_METRIC_WRITE_INTERVAL = timedelta(seconds=60)
 
 _REQUEST_METRIC_DESCRIPTIONS = (
     SensorEntityDescription(
         key="pointt_api_requests_total",
         translation_key="pointt_api_requests_total",
-        icon="mdi:counter",
         native_unit_of_measurement="requests",
-        state_class=SensorStateClass.TOTAL_INCREASING,
+        # O104: counts from the start of the integration (``last_reset``).
+        state_class=SensorStateClass.TOTAL,
         entity_category=EntityCategory.DIAGNOSTIC,
         entity_registry_enabled_default=False,
     ),
     SensorEntityDescription(
         key="pointt_api_requests_last_hour",
         translation_key="pointt_api_requests_last_hour",
-        icon="mdi:cloud-sync-outline",
         native_unit_of_measurement="requests",
         state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
@@ -115,7 +215,6 @@ _REQUEST_METRIC_DESCRIPTIONS = (
     SensorEntityDescription(
         key="pointt_api_response_time_last_hour",
         translation_key="pointt_api_response_time_last_hour",
-        icon="mdi:timer-outline",
         native_unit_of_measurement=UnitOfTime.MILLISECONDS,
         device_class=SensorDeviceClass.DURATION,
         state_class=SensorStateClass.MEASUREMENT,
@@ -130,7 +229,14 @@ _SYSTEM_PRESSURE_RANGE_PATH = "/heatSources/systemPressureRange"
 _HEATING_CIRCUIT_ROOM_TEMPERATURE = re.compile(
     r"^/heatingCircuits/(?P<circuit>[^/]+)/roomtemperature$"
 )
-_ENERGY_BALANCE_EPSILON = 1e-9
+# A4: volume flows (pump, brine circuit, hot water) carry the translations of
+# their measuring range attribute.
+_VOLUME_FLOW = re.compile(r"volumeflow$", re.IGNORECASE)
+_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+# O107: the enums whose device spellings are matched to their options.
+_NORMALIZED_ENUM_KEYS = frozenset(
+    {"isrc_installation_status", "isrc_support_status", "season_optimizer_mode"}
+)
 _PRESSURE_STATUS_OPTIONS = (
     "critical_low",
     "low",
@@ -145,7 +251,7 @@ _PRESSURE_STATUS_OPTIONS = (
 _PERCENTAGE_DEVICE_CLASS_PATTERNS = (
     (
         re.compile(
-            r"^(?:/heatingCircuits/[^/]+/actualHumidity|/zones/zone[^/]+/averageActualHumidity|/devices/(?!list$)[^/]+/actualHumidity|/ventilation/zone[^/]+/maxRelativeHumidity)$"
+            r"^(?:/heatingCircuits/[^/]+/actualHumidity|/zones/zone[^/]+/averageActualHumidity|/devices/(?!list$)[^/]+/actualHumidity|/ventilation/zone[^/]+/(?:maxRelativeHumidity|sensors/internalHumidity))$"
         ),
         SensorDeviceClass.HUMIDITY,
     ),
@@ -210,6 +316,7 @@ _SYSTEM_INFO_VERSION_FIELDS = ("Ver", "HwVersion", "SwIdenStr")
 _MAX_SENSOR_STATE_LENGTH = 255
 
 _ENUM_OPTIONS: dict[str, tuple[str, ...]] = {
+    "rrc_user_mode": ("manual", "clock"),
     "heat_demand": _HEAT_DEMAND_OPTIONS,
     "compressor_status": (
         "off",
@@ -233,6 +340,7 @@ _ENUM_OPTIONS: dict[str, tuple[str, ...]] = {
     "auxiliary_heater_operation_mode": ("off", "manual", "auto"),
     "pv_contact_state": ("inactive", "active"),
     "data_processing_status": ("in_progress", "completed"),
+    "hybrid_control_strategy": tuple(hybrid_controls.STRATEGY_KEYS.values()),
     "season_optimizer_mode": (
         "off",
         "heating",
@@ -247,6 +355,8 @@ _ENUM_OPTIONS: dict[str, tuple[str, ...]] = {
         "supported",
         "in_evaluation",
     ),
+    # O107: seen on a real plant; further advertised values are added.
+    "isrc_installation_status": ("timeout",),
     "heating_circuit_switch_program_mode": ("level", "levels", "absolute"),
     "heating_circuit_operation_mode": ("off", "manual", "auto"),
     "heating_circuit_overall_status": (
@@ -422,33 +532,137 @@ async def async_setup_entry(
     entry: BoschBuderusConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
+    setup_platform(entry, Platform.SENSOR, async_add_entities, _setup_entities)
+
+
+def _setup_entities(
+    entry: PlatformScope,
+    async_add_entities: AddConfigEntryEntitiesCallback,
+) -> None:
     """Create entities from every safe resource found during discovery."""
+    from . import enable_promoted_defaults, remove_never_entities
+
+    # 8C-c (P49b): hand over or remove local-only entries before any entity
+    # is added; Home Assistant may register added entities at once.
+    for coordinator in entry.coordinators:
+        clean_registered_local_only(coordinator)
+        # Managed entries: the entry setup's cleanup of entries that can
+        # never be entities, per cloud view (legacy entries run it there).
+        remove_never_entities(coordinator)
+        # LOE-1: entries disabled by an earlier default, now enabled by
+        # default (the user's choice stays); before the entities are added.
+        enable_promoted_defaults(coordinator)
+    if (account := entry.bacon) is not None:
+        track_dry_entities(entry, account, async_add_entities, "sensor")
+        track_rac_entities(entry, account, async_add_entities, "sensor")
+        track_purifier_entities(
+            entry,
+            account,
+            async_add_entities,
+            BaconPurifierSensor,
+            purifier.SENSORS,
+            sensor=True,
+        )
+    track_wallbox_entities(Platform.SENSOR, entry, async_add_entities)
+    track_wallbox_history_sensors(entry, async_add_entities)
+    track_aircon_program_sensors(entry, async_add_entities)
     entities: list[SensorEntity] = []
-    if entry.runtime_data.coordinators:
+    entities.extend(
+        WallboxSensor(coordinator, description)
+        for coordinator in entry.wallboxes
+        for description in WALLBOX_DESCRIPTIONS
+    )
+    if entry.metrics is not None:
         entities.extend(
             BoschBuderusRequestMetricSensor(
                 entry.entry_id,
-                entry.runtime_data.client.metrics,
-                entry.runtime_data.coordinators,
+                entry.metrics,
                 description,
+                current=entry.current,
             )
             for description in _REQUEST_METRIC_DESCRIPTIONS
         )
-    for coordinator in entry.runtime_data.coordinators:
+    for coordinator in entry.coordinators:
         entities.extend(
             (
                 BoschBuderusActiveFaultsSensor(coordinator),
                 BoschBuderusActiveNotificationsSensor(coordinator),
             )
         )
-        if any(path in coordinator.resources for path in HOLIDAY_PERIOD_PATHS):
-            entities.append(BoschBuderusNextHolidaySensor(coordinator))
+        track_entity_once(
+            entry,
+            coordinator,
+            async_add_entities,
+            partial(_has_holiday_periods, coordinator),
+            partial(BoschBuderusNextHolidaySensor, coordinator),
+        )
         _track_resource_sensors(entry, coordinator, async_add_entities)
+        _track_source_sensors(entry, coordinator, async_add_entities)
+        track_estimated_energy_sensors(entry, coordinator, async_add_entities)
+        track_calculated_sensors(entry, coordinator, async_add_entities)
+        track_local_only_sensors(entry, coordinator, async_add_entities)
+        track_recording_sensors(entry, coordinator, async_add_entities)
+        track_softener_history_sensors(entry, coordinator, async_add_entities)
+        track_performance_sensors(entry, coordinator, async_add_entities)
+        track_heat_generator_sensor(entry, coordinator, async_add_entities)
+        track_outdoor_unit_software_sensor(entry, coordinator, async_add_entities)
+        track_tariff_sensor(entry, coordinator, async_add_entities)
+        track_clock_deviation_sensor(entry, coordinator, async_add_entities)
+        track_radio_devices(entry, coordinator, async_add_entities, RadioSignalSensor)
+        track_zone_radio_devices(
+            entry, coordinator, async_add_entities, ZoneRadioSignalSensor
+        )
+        track_zone_radio_devices(
+            entry, coordinator, async_add_entities, ZoneRadioConnectionLostSensor
+        )
+        rrc_platforms.track(Platform.SENSOR, entry, coordinator, async_add_entities)
     async_add_entities(entities)
 
 
+def _track_source_sensors(
+    entry: DiscoveryLifecycle,
+    coordinator: BoschBuderusDataUpdateCoordinator,
+    async_add_entities: AddConfigEntryEntitiesCallback,
+) -> None:
+    """Add the optional per-source entities once a local access exists."""
+    seen: set[str] = set()
+    checked: list[frozenset[str]] = []
+
+    @callback
+    def discover() -> None:
+        selection = coordinator.local_selection
+        if selection is None or not selection.has_local_access:
+            return
+        paths = frozenset(coordinator.resources)
+        if checked and checked[-1] == paths:
+            return  # nothing new since the last check
+        checked[:] = [paths]
+        additions = []
+        for description in build_sensor_descriptions(
+            coordinator.resources, **rrc_kwargs(context_of(coordinator).rrc_plant)
+        ):
+            if not source_entity_eligible(description):
+                continue
+            for source in SOURCES:
+                key = f"{description.unique_key}:{source}"
+                if key not in seen:
+                    seen.add(key)
+                    additions.append(
+                        BoschBuderusSourceSensor(coordinator, description, source)
+                    )
+        if additions:
+            async_add_entities(additions)
+
+    discover()
+    entry.async_on_unload(coordinator.async_add_listener(discover))
+
+
+def _has_holiday_periods(coordinator: BoschBuderusDataUpdateCoordinator) -> bool:
+    return any(is_holiday_period_path(path) for path in coordinator.resources)
+
+
 def _track_resource_sensors(
-    entry: BoschBuderusConfigEntry,
+    entry: DiscoveryLifecycle,
     coordinator: BoschBuderusDataUpdateCoordinator,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
@@ -457,67 +671,270 @@ def _track_resource_sensors(
     for path in coordinator.startup_data.registered_paths():
         if path not in resources:
             resources[path] = startup_placeholder(path)
-    descriptions = build_sensor_descriptions(resources)
+    rrc_plant = context_of(coordinator).rrc_plant
+    descriptions_by_key = {
+        item.unique_key: item
+        for item in build_sensor_descriptions(resources, **rrc_kwargs(rrc_plant))
+    }
+    for path in coordinator.registered_start_counter_paths:
+        # Keep both registered identities after a schema change. The scalar
+        # and multipart total must never share a statistic or replace each other.
+        for scalar in coordinator.registered_start_counter_shapes[path]:
+            placeholder = start_counter_placeholder(path, scalar=scalar)
+            for item in build_sensor_descriptions(
+                {path: placeholder}, **rrc_kwargs(rrc_plant)
+            ):
+                descriptions_by_key.setdefault(item.unique_key, item)
+    descriptions = tuple(descriptions_by_key.values())
     seen = {description.unique_key for description in descriptions}
-    async_add_entities([BoschBuderusSensor(coordinator, item) for item in descriptions])
+    checked: list[Mapping[str, Resource]] = []
+    # O83: paths whose failed hand-over was already reported as a warning.
+    warned: set[str] = set()
+    # A reviewed local-only entity of the same reading stays its entity; the
+    # cloud reading becomes its second source (``local_only_pair``).
+    async_add_entities(
+        [
+            BoschBuderusSensor(coordinator, item)
+            for item in descriptions
+            if not keeps_local_entity(coordinator, item.resource_path)
+        ]
+    )
 
     @callback
     def recover() -> None:
         recovered = {
             path: snapshot.resource
             for path, snapshot in (coordinator.data or {}).items()
-            if coordinator.startup_data.tracks(path) and snapshot.available
+            if snapshot.available
         }
+        if unchanged_input(checked, recovered):
+            return
         entities = []
-        for description in build_sensor_descriptions(recovered):
+        for description in build_sensor_descriptions(
+            recovered, **rrc_kwargs(context_of(coordinator).rrc_plant)
+        ):
             if description.unique_key not in seen:
                 seen.add(description.unique_key)
+                if keeps_local_entity(coordinator, description.resource_path):
+                    continue  # the reviewed local-only entity stays
                 entities.append(BoschBuderusSensor(coordinator, description))
-        if entities:
+        if not entities:
+            return
+        # 8C-c while running: a local-only entry of the same reading is
+        # handed over first, so this sensor continues its entity ID.
+        handing = hand_over_while_running(
+            coordinator, {item.entity_description.resource_path for item in entities}
+        )
+        if handing is None:
             async_add_entities(entities)
+            return
+        paths, done = handing
+        if now := [
+            item
+            for item in entities
+            if item.entity_description.resource_path not in paths
+        ]:
+            async_add_entities(now)
+        later = [
+            item for item in entities if item.entity_description.resource_path in paths
+        ]
+
+        async def add_after_hand_over() -> None:
+            errors = sorted(
+                {
+                    type(item).__name__
+                    for item in await done
+                    if isinstance(item, Exception)
+                }
+            )
+            # A failed, skipped or still pending hand-over: never a second
+            # entity ID now; the next update tries again.
+            retry = [
+                item
+                for item in later
+                if hand_over_open(coordinator, item.entity_description.resource_path)
+            ]
+            if errors:
+                _log_hand_over_failure(
+                    warned,
+                    {item.entity_description.resource_path for item in retry or later},
+                    errors,
+                )
+            for item in retry:
+                seen.discard(item.entity_description.unique_key)
+            if retry:
+                checked.clear()  # the next update builds them again
+                _LOGGER.debug(
+                    "%d cloud sensors wait for their local-only entities and are "
+                    "added with a later update",
+                    len(retry),
+                )
+            if ready := [item for item in later if item not in retry]:
+                if recovered_paths := sorted(
+                    path
+                    for item in ready
+                    if (path := item.entity_description.resource_path) in warned
+                ):
+                    warned.difference_update(recovered_paths)
+                    _LOGGER.info(
+                        "Handing local-only entities over to cloud sensors "
+                        "succeeded on a later try: %s",
+                        ", ".join(resource_path_template(p) for p in recovered_paths),
+                    )
+                async_add_entities(ready)
+
+        if (owner := coordinator.config_entry) is not None:
+            # Cancelled with the entry: nothing is added after an unload.
+            owner.async_create_background_task(
+                coordinator.hass,
+                add_after_hand_over(),
+                "home_comfort_sensor_after_hand_over",
+            )
 
     entry.async_on_unload(coordinator.async_add_listener(recover))
 
 
+def _log_hand_over_failure(
+    warned: set[str], paths: set[str], errors: list[str]
+) -> None:
+    """O83: a warning once per path with the error type, then debug only."""
+    new = sorted(path for path in paths if path not in warned)
+    warned.update(new)
+    if new:
+        _LOGGER.warning(
+            "Handing local-only entities over to cloud sensors failed (%s) for "
+            "%s; it is tried again with a later update",
+            ", ".join(errors),
+            ", ".join(resource_path_template(path) for path in new),
+        )
+    if repeated := sorted(paths.difference(new)):
+        _LOGGER.debug(
+            "Handing local-only entities over to cloud sensors failed again (%s) "
+            "for %s",
+            ", ".join(errors),
+            ", ".join(resource_path_template(path) for path in repeated),
+        )
+
+
 class BoschBuderusRequestMetricSensor(SensorEntity):
-    """Expose account-wide PointT request metrics without causing API calls."""
+    """Expose account-wide PointT request metrics without causing API calls.
+
+    G2: one trigger, a minute timer, writes the state only when a shown value
+    changed; the observation time alone is no change. The last state is
+    written when Home Assistant stops or the entity is removed.
+    """
 
     _attr_has_entity_name = True
     _attr_should_poll = False
+    # Per-category counters and the observation time change with nearly every
+    # request: shown as attributes, but not recorded.
+    _unrecorded_attributes = frozenset(
+        {
+            "observation_seconds",
+            "requests_by_category",
+            "requests_by_method",
+            "responses_by_status_class",
+            "outcomes",
+            "requests_by_type",
+            "responses_by_http_status",
+        }
+    )
 
     def __init__(
         self,
         entry_id: str,
         metrics: RequestMetrics,
-        coordinators: tuple[BoschBuderusDataUpdateCoordinator, ...],
         description: SensorEntityDescription,
+        *,
+        current: Callable[[], bool] = lambda: True,
     ) -> None:
         self.entity_description = description
         self._metrics = metrics
-        self._coordinators = coordinators
+        self._current = current
         self._attr_unique_id = f"{entry_id}:request_metrics:{description.key}"
+        if description.state_class is SensorStateClass.TOTAL:
+            # The count starts anew with each start of the integration.
+            self._attr_last_reset = metrics.started_utc
+        # Worked out once per state write; None before the first one.
+        self._summary: dict[str, object] | None = None
+        self._written: tuple[object, ...] | None = None
+        self._stop_unsub: CALLBACK_TYPE | None = None
 
     async def async_added_to_hass(self) -> None:
-        """Update locally whenever any gateway coordinator completes a cycle."""
+        """Check for changed values once a minute; no other listener.
+
+        Removal writes nothing: the counts start anew with the next start, and
+        stopping Home Assistant records the last ones.
+        """
         await super().async_added_to_hass()
-        for coordinator in self._coordinators:
-            self.async_on_remove(
-                coordinator.async_add_listener(self.async_write_ha_state)
+        # Home Assistant writes this first state right after this method.
+        self._summary = self._metrics.entity_summary()
+        self._written = self._shown()
+        self.async_on_remove(
+            async_track_time_interval(
+                self.hass, self._minute_reached, _METRIC_WRITE_INTERVAL
             )
+        )
+        self._stop_unsub = self.hass.bus.async_listen_once(
+            EVENT_HOMEASSISTANT_STOP, self._stopping
+        )
+        self.async_on_remove(self._cancel_stop)
+
+    @callback
+    def _minute_reached(self, _now: datetime) -> None:
+        if self._changed():
+            self.async_write_ha_state()
+
+    @callback
+    def _stopping(self, _event: Event) -> None:
+        self._stop_unsub = None
+        if self._changed():
+            self.async_write_ha_state()
+
+    @callback
+    def _cancel_stop(self) -> None:
+        if self._stop_unsub is not None:
+            self._stop_unsub()
+            self._stop_unsub = None
+
+    def _changed(self) -> bool:
+        """Refresh the summary; whether the shown state differs from the last."""
+        self._summary = self._metrics.entity_summary()
+        shown = self._shown()
+        if shown == self._written:
+            return False
+        self._written = shown
+        return True
+
+    def _shown(self) -> tuple[object, ...]:
+        if not self.available:
+            return (False,)
+        attributes = dict(self.extra_state_attributes)
+        attributes.pop("observation_seconds", None)
+        return (True, self.native_value, attributes)
+
+    def _current_summary(self) -> dict[str, object]:
+        if self._summary is None:
+            return self._metrics.entity_summary()
+        return self._summary
+
+    @property
+    def available(self) -> bool:
+        return self._current()
 
     @property
     def native_value(self) -> int | float | None:
-        snapshot = self._metrics.snapshot()
+        summary = self._current_summary()
         if self.entity_description.key == "pointt_api_requests_total":
-            return cast(int, snapshot["requests_total"])
-        rolling = cast(dict[str, object], snapshot["rolling_60_minutes"])
+            return cast(int, summary["requests_total"])
+        rolling = cast(dict[str, object], summary["rolling_60_minutes"])
         if self.entity_description.key == "pointt_api_requests_last_hour":
             return cast(int, rolling["requests_total"])
         return cast(float | None, rolling["average_successful_response_time_ms"])
 
     @property
     def extra_state_attributes(self) -> dict[str, object]:
-        snapshot = self._metrics.snapshot()
+        summary = self._current_summary()
         if self.entity_description.key == "pointt_api_requests_total":
             total_keys = (
                 "observation_seconds",
@@ -532,8 +949,8 @@ class BoschBuderusRequestMetricSensor(SensorEntity):
                 "responses_by_status_class",
                 "outcomes",
             )
-            return {key: snapshot[key] for key in total_keys}
-        rolling = cast(dict[str, object], snapshot["rolling_60_minutes"])
+            return {key: summary[key] for key in total_keys}
+        rolling = cast(dict[str, object], summary["rolling_60_minutes"])
         if self.entity_description.key == "pointt_api_requests_last_hour":
             request_keys = (
                 "requests_successful",
@@ -568,7 +985,6 @@ class BoschBuderusNextHolidaySensor(
     _attr_has_entity_name = True
     _attr_translation_key = "next_holiday"
     _attr_device_class = SensorDeviceClass.TIMESTAMP
-    _attr_icon = "mdi:calendar-clock"
 
     def __init__(self, coordinator: BoschBuderusDataUpdateCoordinator) -> None:
         super().__init__(coordinator)
@@ -576,9 +992,9 @@ class BoschBuderusNextHolidaySensor(
 
     @property
     def available(self) -> bool:
-        return super().available and any(
-            path in self._available_resources for path in HOLIDAY_RESOURCE_PATHS
-        )
+        # Display only: the holiday readings within their validity limit, as
+        # for any other reading, also while a cloud cycle fails.
+        return any(is_holiday_resource_path(path) for path in self._available_resources)
 
     @property
     def native_value(self) -> datetime | None:
@@ -603,12 +1019,7 @@ class BoschBuderusNextHolidaySensor(
 
     @property
     def _available_resources(self) -> dict[str, Resource]:
-        snapshots = self.coordinator.data or {}
-        return {
-            path: snapshot.resource
-            for path in (*HOLIDAY_RESOURCE_PATHS, HOLIDAY_TIMEZONE_PATH)
-            if (snapshot := snapshots.get(path)) is not None and snapshot.available
-        }
+        return self.coordinator.displayed_holiday_resources()
 
     @property
     def _state(self) -> HolidayState:
@@ -632,14 +1043,19 @@ class _BoschBuderusFaultCountSensor(
     """Common behavior for bounded fault and notification counters."""
 
     _attr_has_entity_name = True
-    _attr_icon = "mdi:alert-circle-outline"
 
     def __init__(self, coordinator: BoschBuderusDataUpdateCoordinator) -> None:
         super().__init__(coordinator)
 
     @property
     def available(self) -> bool:
-        return super().available and self.coordinator.faults.has_known_state
+        faults = self.coordinator.faults
+        if faults.local_authority is True:
+            # Without a cloud (P49b) only a current local list gives a state.
+            return faults.local_list_current
+        # A failed cloud cycle keeps a held state (no answer, within its
+        # validity limit) shown, like the last good value of a reading.
+        return (super().available or faults.held) and faults.has_known_state
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -661,8 +1077,18 @@ class BoschBuderusActiveFaultsSensor(_BoschBuderusFaultCountSensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, object]:
-        faults = self.coordinator.faults.active_faults
-        return _fault_list_attributes(faults, self.coordinator.hass.config.language)
+        tracker = self.coordinator.faults
+        attributes = _fault_list_attributes(
+            tracker.active_faults, self.coordinator.hass.config.language
+        )
+        if device_errors := tracker.device_errors:
+            # B3: active entries of the room devices' own error lists, as
+            # extra information; they do not count as faults.
+            attributes["device_errors"] = [
+                {"device": item.device, "error_type": item.error_type}
+                for item in device_errors[:MAX_FAULT_ATTRIBUTES]
+            ]
+        return attributes
 
 
 class BoschBuderusActiveNotificationsSensor(_BoschBuderusFaultCountSensor):
@@ -708,6 +1134,11 @@ def _fault_list_attributes(
                 ),
                 "time_source": fault.time_source.value,
                 "summary": fault_summary(fault, language),
+                **(
+                    {"code_search_url": url}
+                    if (url := fault_code_search_url(fault)) is not None
+                    else {}
+                ),
             }
             for fault in visible
         ],
@@ -722,13 +1153,52 @@ def _fault_list_attributes(
 
 def build_sensor_descriptions(
     resources: Mapping[str, Resource],
+    *,
+    rrc_plant: bool = False,
 ) -> tuple[BoschBuderusSensorEntityDescription, ...]:
-    """Build stable scalar descriptions from the discovered resource shapes."""
+    """Build stable scalar descriptions from the discovered resource shapes.
+
+    ``rrc_plant``: the gateway is an RRC controller; its contracts may
+    promote, name, categorise or mirror generic sensors (S11).
+    """
     descriptions: list[BoschBuderusSensorEntityDescription] = []
+    unknown_descriptions: list[BoschBuderusSensorEntityDescription] = []
     for resource in resources.values():
-        if not supports_entity(resource) and not is_opt_in_diagnostic_resource(
-            resource.path
-        ):
+        if not supports_entity(
+            resource, **rrc_kwargs(rrc_plant)
+        ) and not is_opt_in_diagnostic_resource(resource.path):
+            if (
+                unknown := unknown_entity_kind(resource)
+            ) is not None and not _reserved_by_known(resource.path):
+                unknown_descriptions.append(_unknown_description(resource, unknown))
+            continue
+        if not rrc_plant and is_zone_radio_connection_lost(resource.path):
+            continue  # its own entity (zone_radio_devices), same unique id
+        if is_start_counter_path(resource.path):
+            assessment = assess_start_counter(resource)
+            descriptions.extend(
+                replace(description, entity_registry_enabled_default=False)
+                # C4 (revised): pool starts always exist, disabled by default.
+                # A part absent from the reading this entity is created from
+                # is created disabled as well; registered entities keep the
+                # user's choice.
+                if key == OPTIONAL_START_COUNTER_KEY
+                or not assessment.part_reported(key)
+                else description
+                for key, _ in assessment.readings
+                for description in (
+                    _description(resource, key, "value" if key is None else "nested"),
+                )
+            )
+            continue
+        if is_switch_program_path(resource.path):
+            descriptions.append(_switch_program_description(resource))
+            continue
+        if is_runtime_path(resource.path):
+            descriptions.extend(
+                _description(resource, key, "value" if key is None else "nested")
+                for key, _ in assess_runtime(resource).readings
+            )
             continue
         if resource.path == "/system/info":
             descriptions.append(_description(resource, None, "system_info"))
@@ -774,7 +1244,37 @@ def build_sensor_descriptions(
     ):
         descriptions.append(_pressure_status_description())
     descriptions.extend(_dew_point_descriptions(resources))
+    if duplicates := plant_duplicate_paths(resources):
+        # Totals of the only heat source and the burner status of a heat
+        # pump repeat other entities: new ones are created disabled.
+        descriptions = [
+            replace(item, entity_registry_enabled_default=False)
+            if item.resource_path in duplicates
+            else item
+            for item in descriptions
+        ]
+    # An unknown resource never takes the ID of a known entity.
+    taken_keys = {item.unique_key for item in descriptions}
+    for item in unknown_descriptions:
+        if item.unique_key in taken_keys:
+            _LOGGER.debug("An unknown resource shares a known entity's ID; skipped")
+            continue
+        taken_keys.add(item.unique_key)
+        descriptions.append(item)
+    if rrc_plant:
+        return tuple(
+            _rrc_presentation(item, resources.get(item.resource_path))
+            for item in descriptions
+        )
     return tuple(descriptions)
+
+
+def _rrc_presentation(
+    description: BoschBuderusSensorEntityDescription,
+    resource: Resource | None = None,
+) -> BoschBuderusSensorEntityDescription:
+    """Apply an RRC contract's choices to a generic sensor (W1 to W6)."""
+    return generic_presentation(description, Platform.SENSOR, resource)
 
 
 def _pressure_status_description() -> BoschBuderusSensorEntityDescription:
@@ -855,19 +1355,45 @@ def _energy_descriptions(
         descriptions.append(
             _description(resource, "total_electricity", "total_electricity")
         )
-    if resource.path == "/heatSources/emon/totalConsumption" and {
+    if has_environmental_energy(resource.path) and {
         "compressor",
         "eheater",
         "outputProduced",
     }.issubset(keys):
-        descriptions.append(
-            _description(
-                resource,
-                "environmental_energy",
-                "environmental_energy",
-            )
+        description = _description(
+            resource,
+            "environmental_energy",
+            "environmental_energy",
         )
+        if resource.path not in ENVIRONMENTAL_ENABLED_BY_DEFAULT:
+            description = replace(description, entity_registry_enabled_default=False)
+        descriptions.append(description)
     return descriptions
+
+
+def _switch_program_description(
+    resource: Resource,
+) -> BoschBuderusSensorEntityDescription:
+    """Describe one program: the level, or the temperature, it schedules now.
+
+    D9: enabled by default where the gateway reports the program writable
+    (the target of the action ``set_switch_points``).
+    """
+    kind = switch_program_sensor.sensor_kind(resource)
+    return replace(
+        _description(resource, None, "switch_program"),
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS if kind.numeric else None,
+        device_class=(
+            SensorDeviceClass.TEMPERATURE if kind.numeric else SensorDeviceClass.ENUM
+        ),
+        state_class=None,
+        options=switch_program_sensor.options(resource, kind.translation_key),
+        translation_key=kind.translation_key,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=switch_program_sensor.enabled_by_default(
+            resource
+        ),
+    )
 
 
 def _description(
@@ -880,9 +1406,13 @@ def _description(
     unit, device_class, state_class, scale = _measurement_attributes(
         resource, value_key
     )
-    if value_kind == "environmental_energy":
-        # This net total may fall when its input counters update at different times.
-        # A decrease is not evidence of a new meter cycle.
+    if value_kind == "environmental_energy" or (
+        value_key == "outputProduced" and is_energy_collection(resource)
+    ):
+        # Net totals: this one may fall when its input counters update at
+        # different times, and the produced heat falls while the heat pump
+        # defrosts, as it takes heat back from the heating water. A decrease
+        # is not evidence of a new meter cycle.
         state_class = SensorStateClass.TOTAL
     enum_translation_key = _enum_translation_key(resource, value_key)
     enum_options = (
@@ -890,10 +1420,25 @@ def _description(
         if enum_translation_key is not None
         else None
     )
+    if enum_translation_key == "softener_regeneration_phase":
+        enum_options = list(PHASES)
     if enum_options is not None:
         device_class = SensorDeviceClass.ENUM
         state_class = None
     category = _entity_category(resource)
+    if rrc.scalar_field(path):
+        category = None
+        if rrc.scalar_field(path) in rrc.TEMPERATURES:
+            unit, device_class, state_class, scale = (
+                UnitOfTemperature.CELSIUS,
+                SensorDeviceClass.TEMPERATURE,
+                SensorStateClass.MEASUREMENT,
+                1.0,
+            )
+    if is_additional_app_scalar(path) and not path.endswith("/dhwType"):
+        category = None
+    if softener_capability(path) is not None:
+        category = None
     display_subkey = None if value_key in {None, "values"} else value_key
     name = (
         _total_electricity_name(path)
@@ -923,7 +1468,141 @@ def _description(
     )
 
 
+def _reserved_by_known(path: str) -> bool:
+    """An unknown child whose ID is a part of a known multipart reading
+    (for example ``.../numberOfStarts/ch``): it never takes that ID."""
+    parent, _, leaf = path.rpartition("/")
+    return (
+        (is_start_counter_path(parent) and leaf in START_COUNTER_KEYS)
+        or is_runtime_path(parent)
+        or "/emon/" in path
+        or leaf in _known_value_keys(parent)
+    )
+
+
+_UNKNOWN_KINDS: dict[str, ValueKind] = {
+    UNKNOWN_NUMBER: "unknown_number",
+    UNKNOWN_ENUM: "unknown_enum",
+    "flag": "unknown_flag",
+}
+
+# The run time of a ventilation unit only grows: a growing total, as the same
+# reading from the local access, so that entity can continue as this one.
+_VENTILATION_RUN_TIME = re.compile(r"^/ventilation/zone[^/]+/applianceRunTime$")
+
+
+def _unknown_description(
+    resource: Resource, kind: str
+) -> BoschBuderusSensorEntityDescription:
+    """Create-all: a read-only, disabled diagnostic sensor of an unknown
+    resource, under the same unique ID a known one would get."""
+    description = _description(resource, None, "value")
+    unit = device_class = None
+    options: list[str] | None = None
+    translation_key: str | None = None
+    scale = 1.0
+    state_class: SensorStateClass | None = None
+    if kind == UNKNOWN_NUMBER:
+        # Only mapped units: an unknown one is not shown (the number is). A
+        # mapped unit comes with its conversion (for example kBtu to kWh),
+        # applied like for a known reading. Unit and kind are fixed when the
+        # entity is created: a later unit change shows after a restart.
+        unit, device_class, _, scale = _measurement_attributes(resource, None)
+        if (
+            device_class is SensorDeviceClass.DURATION
+            and _VENTILATION_RUN_TIME.fullmatch(resource.path)
+        ):
+            state_class = SensorStateClass.TOTAL_INCREASING
+    elif kind == UNKNOWN_ENUM:
+        options = list(
+            dict.fromkeys(
+                key
+                for item in resource.metadata.allowed_values
+                if (key := state_key(item)) is not None
+            )
+        )[:MAX_STATES]
+        device_class = SensorDeviceClass.ENUM
+    else:
+        options, device_class = ["on", "off"], SensorDeviceClass.ENUM
+        translation_key = "on_off_state"
+    return replace(
+        description,
+        value_kind=_UNKNOWN_KINDS[kind],
+        value_scale=scale,
+        native_unit_of_measurement=unit,
+        device_class=device_class,
+        state_class=state_class,
+        options=options,
+        translation_key=translation_key,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        suggested_display_precision=None,
+    )
+
+
+# Sensors that combine several readings keep following the last cloud cycle.
+_COMBINED_VALUE_KINDS = frozenset({"dew_point", "pressure_status"})
+
+# Optional per-source entities (P18): only single, paired readings.
+SOURCES = ("local", "cloud")
+_SOURCE_SUFFIX = {
+    "de": {"local": "lokal", "cloud": "Cloud"},
+    "en": {"local": "local", "cloud": "cloud"},
+}
+
+
+def sensor_unique_suffix(description: BoschBuderusSensorEntityDescription) -> str:
+    """The unique ID of a resource sensor after ``<gateway>:``."""
+    legacy = _LEGACY_KEYS.get((description.resource_path, description.value_key))
+    return f"gateway:{legacy}" if legacy is not None else description.unique_key
+
+
+def source_entity_eligible(description: object) -> bool:
+    """A single paired reading that is not a counter and not combined."""
+    from .local_selection import eligible_path
+
+    path = getattr(description, "resource_path", None)
+    return (
+        isinstance(path, str)
+        and eligible_path(path)
+        and getattr(description, "value_kind", "value") in ("value", None)
+        and getattr(description, "value_key", None) is None
+    )
+
+
+def shown_source(
+    coordinator: BoschBuderusDataUpdateCoordinator,
+    description: object,
+    snapshot: ResourceSnapshot | None,
+) -> str | None:
+    """``local`` or ``cloud`` for a paired reading with a local access (P18)."""
+    from .coordinator import SnapshotSource
+    from .observations import pair_for_path
+
+    selection = coordinator.local_selection
+    path = getattr(description, "resource_path", None)
+    if (
+        selection is None
+        or snapshot is None
+        or not snapshot.available
+        or not isinstance(path, str)
+        or getattr(description, "value_kind", "value") in _COMBINED_VALUE_KINDS
+        or pair_for_path(path) is None
+        or not selection.has_local_access
+    ):
+        return None
+    return "local" if snapshot.source is SnapshotSource.LOCAL else "cloud"
+
+
+def source_suffix(hass: object, source: str) -> str:
+    language = str(getattr(getattr(hass, "config", None), "language", "en"))
+    return localize(
+        language, _SOURCE_SUFFIX["de"][source], _SOURCE_SUFFIX["en"][source]
+    )
+
+
 class BoschBuderusSensor(
+    HeldCapabilities,
     CoordinatorEntity[BoschBuderusDataUpdateCoordinator],
     SensorEntity,
 ):
@@ -931,6 +1610,26 @@ class BoschBuderusSensor(
 
     _attr_has_entity_name = True
     entity_description: BoschBuderusSensorEntityDescription
+    # O32: inputs and constants of the dew-point calculation are shown, but
+    # not recorded with every state change.
+    _unrecorded_attributes = frozenset(
+        {
+            "source_room_temperature_c",
+            "source_relative_humidity_percent",
+            "calculation_method",
+            "magnus_a",
+            "magnus_b_c",
+        }
+    )
+    # O22: rarely used helpers; an instance sets its own value when needed.
+    _unknown_enum_values: set[str] | None = None
+    _unknown_enum_warning_logged = False
+    _contract_changes: set[str] | None = None
+    _switch_timer: CALLBACK_TYPE | None = None
+    _last_switch_level: str | float | None = None
+    _exchange_guard: ExchangeCounterGuard | None = None
+    # O30: the unit of the last reading, kept while there is none.
+    _held_unit: str | None = None
 
     def __init__(
         self,
@@ -939,8 +1638,6 @@ class BoschBuderusSensor(
     ) -> None:
         super().__init__(coordinator)
         self.entity_description = description
-        self._unknown_enum_values: set[str] = set()
-        self._unknown_enum_warning_logged = False
         language = coordinator.hass.config.language
         display_subkey = (
             None if description.value_key in {None, "values"} else description.value_key
@@ -956,36 +1653,76 @@ class BoschBuderusSensor(
                 language=language,
             )
         elif description.value_kind == "dew_point":
-            display_name = (
-                "Taupunkt (berechnet)"
-                if language.casefold().startswith("de")
-                else "Dew point (calculated)"
+            display_name = localize(
+                language, "Taupunkt (berechnet)", "Dew point (calculated)"
             )
         elif description.value_kind == "pressure_status":
-            display_name = (
-                "Systemdruckstatus (berechnet)"
-                if language.casefold().startswith("de")
-                else "System pressure status (calculated)"
+            display_name = localize(
+                language,
+                "Systemdruckstatus (berechnet)",
+                "System pressure status (calculated)",
             )
         else:
             display_name = resource_name(
-                description.resource_path, display_subkey, language=language
+                description.resource_path,
+                display_subkey,
+                language=language,
+                **rrc_kwargs(context_of(coordinator).rrc_plant),
             )
         self._attr_name = grouped_entity_name(
             coordinator, description.resource_path, display_name
         )
-        legacy = _LEGACY_KEYS.get((description.resource_path, description.value_key))
         self._attr_unique_id = (
-            f"{coordinator.gateway.gateway_id}:gateway:{legacy}"
-            if legacy is not None
-            else f"{coordinator.gateway.gateway_id}:{description.unique_key}"
+            f"{coordinator.gateway.gateway_id}:{sensor_unique_suffix(description)}"
+        )
+        if description.translation_key is None and _VOLUME_FLOW.search(
+            description.resource_path
+        ):
+            # A4: translates the measuring range attribute; the name stays.
+            self._attr_translation_key = FLOW_TRANSLATION_KEY
+
+    @property
+    def options(self) -> list[str] | None:
+        """Keep program enum options in sync with validated polling data."""
+        if self.entity_description.value_kind != "switch_program":
+            return super().options
+        snapshot = self._snapshot
+        if (
+            snapshot is None
+            or not snapshot.available
+            or assess_switch_program(snapshot.resource).value_type != "level"
+            or self.entity_description.translation_key is None
+        ):
+            return self.entity_description.options
+        return switch_program_sensor.options(
+            snapshot.resource, self.entity_description.translation_key
         )
 
     @property
     def available(self) -> bool:
         snapshot = self._snapshot
-        if not (super().available and snapshot is not None and snapshot.available):
+        # The displayed reading decides, not the last cloud cycle: a current
+        # local reading or a cloud reading within its validity limit stays
+        # available while the cloud fails or pauses.
+        if snapshot is None or not snapshot.available:
             return False
+        if self.entity_description.value_kind == "dew_point" and not (
+            super().available
+        ):
+            # The dew point keeps the strict rule; the pressure status shows
+            # its cloud inputs within their validity limit (``_reading``).
+            return False
+        if rrc.scalar_field(snapshot.resource.path):
+            return (
+                snapshot.freshness is Freshness.FRESH
+                and rrc.scalar_value(snapshot.resource) is not None
+            )
+        if (
+            softener_capability(snapshot.resource.path) is not None
+            or is_additional_app_scalar(snapshot.resource.path)
+            or is_runtime_path(snapshot.resource.path)
+        ):
+            return snapshot.freshness is Freshness.FRESH
         if self.entity_description.value_kind == "dew_point":
             secondary = self._secondary_snapshot
             return secondary is not None and secondary.available
@@ -1000,11 +1737,59 @@ class BoschBuderusSensor(
 
     @property
     def native_value(self) -> str | int | float | None:
+        value = self._native_reading()
+        guard = self._exchange_guard
+        if (
+            guard is None
+            or isinstance(value, bool)
+            or not isinstance(value, int | float)
+        ):
+            return value
+        return guard.value(value)
+
+    @property
+    def last_reset(self) -> datetime | None:
+        guard = self._exchange_guard
+        return guard.last_reset if guard is not None else None
+
+    def _native_reading(self) -> str | int | float | None:
         snapshot = self._snapshot
         if snapshot is None:
             return None
         resource = snapshot.resource
         description = self.entity_description
+        if description.value_kind == "switch_program":
+            return self._switch_program_level()
+        if rrc.scalar_field(resource.path):
+            return rrc.display_value(resource) if self.available else None
+        if is_monitor_collection(resource.path):
+            return None
+        if is_runtime_path(resource.path):
+            if not snapshot.available or snapshot.freshness is not Freshness.FRESH:
+                return None
+            return assess_runtime(resource).reading(description.value_key).value
+        if is_additional_app_scalar(resource.path):
+            additional_value = (
+                additional_app_value(resource)
+                if snapshot.available and snapshot.freshness is Freshness.FRESH
+                else None
+            )
+            if isinstance(additional_value, str) and description.translation_key:
+                return self._validated_enum_state(
+                    _enum_state(description.translation_key, additional_value)
+                )
+            return additional_value
+        if softener_capability(resource.path) is not None:
+            softener_state = (
+                softener_value(resource)
+                if snapshot.available and snapshot.freshness is Freshness.FRESH
+                else None
+            )
+            return None if isinstance(softener_state, bool) else softener_state
+        if is_start_counter_path(resource.path):
+            if not snapshot.available:
+                return None
+            return assess_start_counter(resource).reading(description.value_key).value
         if description.value_kind == "dew_point":
             calculation = self._dew_point_calculation
             return calculation.dew_point_celsius if calculation is not None else None
@@ -1030,23 +1815,30 @@ class BoschBuderusSensor(
                 return None
             return fsum((compressor, auxiliary))
         if description.value_kind == "environmental_energy":
-            values = _energy_values(resource)
-            produced = values.get("outputProduced")
-            compressor = values.get("compressor")
-            auxiliary = values.get("eheater")
-            if produced is None or compressor is None or auxiliary is None:
+            return environmental_energy(_energy_values(resource))
+        if description.value_kind == "unknown_number":
+            value = resource.value
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int | float)
+                or not isfinite(value)
+                or value in resource.metadata.numeric_error_values
+            ):
                 return None
-            environmental = fsum((produced, -compressor, -auxiliary))
-            if environmental < -_ENERGY_BALANCE_EPSILON:
-                return None
-            return max(0.0, environmental)
+            scale = description.value_scale
+            return value * scale if scale != 1.0 else value
+        if description.value_kind == "unknown_enum":
+            key = state_key(resource.value)
+            return key if key in (description.options or ()) else None
+        if description.value_kind == "unknown_flag":
+            return flag_state(resource.value)
         if description.value_kind == "heat_demand":
             return self._validated_enum_state(_heat_demand_state(resource))
         if description.value_kind == "enum_values":
             for item in resource.values:
                 if isinstance(item, str) and item:
                     return self._validated_enum_state(
-                        enum_value_to_ha(description.translation_key or "", item)
+                        _enum_state(description.translation_key or "", item)
                     )
             return None
         if description.value_kind == "values":
@@ -1065,21 +1857,60 @@ class BoschBuderusSensor(
         else:
             value = resource.value
         scalar = _native_scalar(value)
+        if isinstance(scalar, str) and (
+            description.native_unit_of_measurement is not None
+            or description.state_class is not None
+        ):
+            # A measurement now reported as text: never shown as a number,
+            # even when the text looks like one (P22).
+            self._contract_changed("value_type")
+            return None
+        if (
+            isinstance(scalar, int | float)
+            and not isinstance(scalar, bool)
+            and scalar in resource.metadata.numeric_error_values
+        ):
+            return None  # the device's declared error marker, not a reading
         if isinstance(scalar, str) and description.translation_key is not None:
-            scalar = enum_value_to_ha(description.translation_key, scalar)
+            scalar = _enum_state(description.translation_key, scalar)
             return self._validated_enum_state(scalar)
         if isinstance(scalar, str) and _is_name_resource(resource.path):
             return configured_device_name(scalar)
-        if isinstance(scalar, (int, float)) and description.value_scale != 1.0:
-            return scalar * description.value_scale
+        if isinstance(scalar, (int, float)):
+            unit, device_class, _, scale = _measurement_attributes(
+                resource, description.value_key
+            )
+            if description.native_unit_of_measurement is not None and (
+                unit is None
+                or _quantity(device_class) != _quantity(description.device_class)
+            ):
+                return None
+            return scalar * scale if scale != 1.0 else scalar
         return scalar
 
+    def _contract_changed(self, kind: str) -> None:
+        """Count and log once that a known reading changed its shape (P22)."""
+        if self._contract_changes is None:
+            self._contract_changes = set()
+        elif kind in self._contract_changes:
+            return
+        self._contract_changes.add(kind)
+        self.coordinator.record_contract_change(self.entity_description.resource_path)
+        _LOGGER.warning(
+            "PointT resource %s changed its %s; the entity shows no value while "
+            "this lasts. The value is omitted from logs",
+            resource_path_template(self.entity_description.resource_path),
+            kind.replace("_", " "),
+        )
+
     def _validated_enum_state(self, value: str) -> str | None:
-        """Return only enum states declared when this entity was created."""
-        options = self.entity_description.options
+        """Return only enum states declared by the sensor's current schema."""
+        options = self.options
         if options is None or value in options:
             return value
 
+        if self._unknown_enum_values is None:
+            self._unknown_enum_values = set()
         if (
             value not in self._unknown_enum_values
             and len(self._unknown_enum_values) < _MAX_TRACKED_UNKNOWN_ENUM_VALUES
@@ -1091,7 +1922,7 @@ class BoschBuderusSensor(
         if not self._unknown_enum_warning_logged:
             self._unknown_enum_warning_logged = True
             _LOGGER.warning(
-                "PointT resource %s returned an undeclared enum value; "
+                "Reading %s reported an undeclared enum value; "
                 "reporting the entity as unknown. The value is omitted from logs "
                 "and counted in diagnostics",
                 resource_path_template(self.entity_description.resource_path),
@@ -1099,8 +1930,24 @@ class BoschBuderusSensor(
         return None
 
     @property
-    def extra_state_attributes(self) -> dict[str, str | float] | None:
+    def native_unit_of_measurement(self) -> str | None:
+        if self.entity_description.value_kind not in {"value", "nested"}:
+            return self.entity_description.native_unit_of_measurement
+        snapshot = self._snapshot
+        if snapshot is not None:
+            unit = _measurement_attributes(
+                snapshot.resource, self.entity_description.value_key
+            )[0]
+            self._held_unit = unit
+            return unit
+        if self._held_unit is not None:
+            return self._held_unit
+        return self.entity_description.native_unit_of_measurement
+
+    def _base_attributes(self) -> Mapping[str, object] | None:
         description = self.entity_description
+        if description.value_kind == "switch_program":
+            return self._switch_program_attributes()
         if description.value_kind == "dew_point":
             calculation = self._dew_point_calculation
             if calculation is None:
@@ -1144,7 +1991,7 @@ class BoschBuderusSensor(
         snapshot = self._snapshot
         if snapshot is None:
             return None
-        attributes: dict[str, str | float] = {}
+        attributes: dict[str, object] = {}
         module_number = 0
         for item in snapshot.resource.values:
             if not isinstance(item, dict):
@@ -1157,6 +2004,160 @@ class BoschBuderusSensor(
         return attributes or None
 
     @property
+    def extra_state_attributes(self) -> Mapping[str, object] | None:
+        attributes = self._base_attributes()
+        if self._below_measuring_range():
+            attributes = {**(attributes or {}), **below_range_attributes()}
+        source = shown_source(self.coordinator, self.entity_description, self._snapshot)
+        if source is None:
+            return attributes
+        return {**(attributes or {}), "source": source}
+
+    def _below_measuring_range(self) -> bool:
+        """A4/#73: the cloud reports the declared low-flow value; the reading
+        is unknown, and the attribute tells it apart from a missing one."""
+        snapshot = self._snapshot
+        if snapshot is None or not snapshot.available:
+            return False
+        value = snapshot.resource.value
+        return (
+            isinstance(value, int | float)
+            and not isinstance(value, bool)
+            and value in snapshot.resource.metadata.below_range_values
+        )
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        await self._async_start_exchange_guard()
+        if self.entity_description.value_kind == "switch_program":
+            self.async_on_remove(self._cancel_switch_timer)
+            self._update_switch_timer()
+
+    async def _async_start_exchange_guard(self) -> None:
+        """P50 (4B): guard a managed counter after a recorded gateway exchange."""
+        state_class = self.entity_description.state_class
+        source = getattr(self.coordinator, "source", None)
+        target_id = getattr(getattr(source, "binding", None), "target_id", None)
+        entry = self.coordinator.config_entry
+        if (
+            state_class not in COUNTER_STATE_CLASSES
+            or not isinstance(target_id, str)
+            or self.unique_id is None
+            or entry is None
+        ):
+            return
+        guard = await async_counter_guard(
+            self.hass,
+            entry.entry_id,
+            target_id,
+            self.unique_id,
+            state_class,
+        )
+        self._exchange_guard = guard
+        if (exchanged := guard.start()) is None:
+            return
+        task = self.hass.async_create_background_task(
+            self._async_read_recorded_counter(guard, exchanged),
+            f"{self.entity_id} recorded counter value",
+        )
+
+        def cancel() -> None:
+            task.cancel()
+
+        self.async_on_remove(cancel)
+
+    async def _async_read_recorded_counter(
+        self, guard: ExchangeCounterGuard, exchanged: datetime
+    ) -> None:
+        recorded = await exchange_counters.async_last_recorded_value(
+            self.hass, self.entity_id, exchanged
+        )
+        guard.recorded(recorded, self.native_unit_of_measurement, self.device_class)
+        self.async_write_ha_state()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        if self.entity_description.value_kind == "switch_program":
+            self._update_switch_timer()
+        super()._handle_coordinator_update()
+
+    @callback
+    def _update_switch_timer(self) -> None:
+        """Observe UTC minute boundaries while a valid program is available."""
+        snapshot = self._snapshot
+        if (
+            snapshot is None
+            or not self.available
+            or not assess_switch_program(snapshot.resource).supported
+        ):
+            self._cancel_switch_timer()
+            return
+        self._last_switch_level = self._switch_program_level()
+        if self._switch_timer is None:
+            # Wall-clock minutes are not elapsed minutes across a DST change.
+            # UTC ticks also catch the jump over a missing hour or back into a
+            # repeated hour. Only a changed level writes state; no API call runs.
+            self._switch_timer = async_track_utc_time_change(
+                self.hass, self._handle_switch_minute, second=0
+            )
+
+    @callback
+    def _handle_switch_minute(self, _now: datetime) -> None:
+        if not self.available:
+            self._cancel_switch_timer()
+            return
+        level = self._switch_program_level()
+        if level != self._last_switch_level:
+            self._last_switch_level = level
+            self.async_write_ha_state()
+
+    @callback
+    def _cancel_switch_timer(self) -> None:
+        if self._switch_timer is not None:
+            self._switch_timer()
+            self._switch_timer = None
+        self._last_switch_level = None
+
+    def _switch_program_level(self) -> str | float | None:
+        """Calculate the scheduled level using the gateway's local clock."""
+        snapshot = self._snapshot
+        if snapshot is None or not snapshot.available:
+            return None
+        now = self._program_clock()
+        level = switch_program_sensor.state(
+            assess_switch_program(snapshot.resource),
+            self.entity_description.device_class is not SensorDeviceClass.ENUM,
+            now.weekday(),
+            now.hour * 60 + now.minute,
+        )
+        if level is None or isinstance(level, float):
+            return level
+        return self._validated_enum_state(level)
+
+    def _program_clock(self) -> datetime:
+        """Now, by the gateway's clock (its time zone when reported)."""
+        zone = holiday_timezone(
+            self.coordinator.resources,
+            dt_util.get_default_time_zone(),
+            timezones=self.coordinator.holiday_timezones,
+        )
+        return dt_util.utcnow().astimezone(zone)
+
+    def _switch_program_attributes(self) -> dict[str, object] | None:
+        """Expose the weekly switch points and reported limits, never a URI."""
+        snapshot = self._snapshot
+        if snapshot is None or not snapshot.available:
+            return None
+        now = self._program_clock()
+        return switch_program_sensor.attributes(
+            snapshot.resource,
+            self.coordinator.switch_program_readings(),
+            self.entity_description.device_class is not SensorDeviceClass.ENUM,
+            now.weekday(),
+            now.hour * 60 + now.minute,
+        )
+
+    @property
     def device_info(self) -> DeviceInfo:
         return device_info_for_resource(
             self.coordinator, self.entity_description.resource_path
@@ -1164,15 +2165,29 @@ class BoschBuderusSensor(
 
     @property
     def _snapshot(self) -> ResourceSnapshot | None:
-        data = self.coordinator.data or {}
-        return data.get(self.entity_description.resource_path)
+        return self._reading(self.entity_description.resource_path)
+
+    def _reading(self, path: str) -> ResourceSnapshot | None:
+        """Combined sensors never mix in local readings.
+
+        The dew point keeps the stored readings and the strict rule: no input
+        whose last request failed. The pressure status is a display value of
+        two cloud readings: like any single reading, each keeps its last good
+        value within its validity limit when a request gets no answer.
+        """
+        kind = self.entity_description.value_kind
+        if kind == "pressure_status":
+            return self.coordinator.displayed_cloud_snapshot(path)
+        if kind in _COMBINED_VALUE_KINDS:
+            return (self.coordinator.data or {}).get(path)
+        return self.coordinator.display_snapshot(path)
 
     @property
     def _secondary_snapshot(self) -> ResourceSnapshot | None:
         path = self.entity_description.secondary_resource_path
         if path is None:
             return None
-        return (self.coordinator.data or {}).get(path)
+        return self._reading(path)
 
     @property
     def _dew_point_calculation(self) -> DewPointCalculation | None:
@@ -1185,12 +2200,28 @@ class BoschBuderusSensor(
             or not secondary.available
         ):
             return None
-        return calculate_dew_point(primary.resource.value, secondary.resource.value)
+        temperature_unit = TEMPERATURE_UNITS.get(primary.resource.metadata.unit or "")
+        temperature = _native_scalar(primary.resource.value)
+        if (
+            temperature_unit is None
+            or secondary.resource.metadata.unit != "%"
+            or not isinstance(temperature, int | float)
+        ):
+            return None
+        return calculate_dew_point(
+            TemperatureConverter.convert(
+                temperature, temperature_unit, UnitOfTemperature.CELSIUS
+            ),
+            secondary.resource.value,
+        )
 
     @property
     def _pressure_range_snapshot(self) -> ResourceSnapshot | None:
-        data = self.coordinator.data or {}
-        return data.get(_SYSTEM_PRESSURE_RANGE_PATH)
+        # Limits are a second reading: the status shows them like its pressure
+        # reading, the attributes of the pressure use stored data.
+        if self.entity_description.value_kind == "pressure_status":
+            return self._reading(_SYSTEM_PRESSURE_RANGE_PATH)
+        return (self.coordinator.data or {}).get(_SYSTEM_PRESSURE_RANGE_PATH)
 
 
 def _nested_scalar_keys(
@@ -1357,6 +2388,10 @@ def _first_nonempty_string(
 
 
 def _is_boolean_resource(resource: Resource) -> bool:
+    if is_dhw_safety_path(resource.path):
+        return True
+    if (softener := softener_capability(resource.path)) is not None:
+        return softener.kind == "binary"
     return (
         isinstance(resource.value, bool)
         or resource.metadata.resource_type == "booleanValue"
@@ -1364,31 +2399,23 @@ def _is_boolean_resource(resource: Resource) -> bool:
 
 
 def _energy_values(resource: Resource) -> dict[str, float]:
-    values: dict[str, float] = {}
-    candidates: tuple[JsonValue, ...] = resource.values
-    if isinstance(resource.value, dict):
-        candidates = (resource.value, *candidates)
-    for item in candidates:
-        if not isinstance(item, dict):
-            continue
-        typed_key = item.get("type")
-        typed_value = item.get("value")
-        if isinstance(typed_key, str) and _valid_energy_number(typed_value):
-            values[typed_key] = float(typed_value)
-            continue
-        for key, raw_value in item.items():
-            if _valid_energy_number(raw_value):
-                values[key] = float(raw_value)
-    return values
+    return {
+        key: reading.value
+        for key, reading in assess_energy(resource).readings
+        if reading.value is not None
+    }
 
 
-def _valid_energy_number(value: JsonValue) -> TypeIs[int | float]:
-    return (
-        not isinstance(value, bool)
-        and isinstance(value, (int, float))
-        and isfinite(value)
-        and value >= 0
-    )
+def _quantity(device_class: SensorDeviceClass | None) -> SensorDeviceClass | None:
+    """The quantity a later reading must keep; both temperature classes are one.
+
+    A temperature or a temperature difference is decided when the entity is
+    created (HAQ-4: kelvin means a difference); a later reading in another
+    temperature unit keeps that meaning and is shown in its reported unit.
+    """
+    if device_class is SensorDeviceClass.TEMPERATURE_DELTA:
+        return SensorDeviceClass.TEMPERATURE
+    return device_class
 
 
 def _measurement_attributes(
@@ -1396,27 +2423,46 @@ def _measurement_attributes(
 ) -> tuple[str | None, SensorDeviceClass | None, SensorStateClass | None, float]:
     path = resource.path
     unit = resource.metadata.unit
-    if resource.metadata.resource_type == "emonValue" and "/emon/" in path:
+    if (softener := softener_capability(path)) is not None:
+        unit = softener_unit(resource)
+        if softener.suffix == "sensor/availableWater":
+            return (
+                UnitOfVolume.CUBIC_METERS
+                if unit in {"m3", "m³"}
+                else UnitOfVolume.LITERS,
+                SensorDeviceClass.VOLUME_STORAGE,
+                SensorStateClass.MEASUREMENT,
+                1.0,
+            )
+    if is_energy_collection(resource):
         return (
             UnitOfEnergy.KILO_WATT_HOUR,
             SensorDeviceClass.ENERGY,
             SensorStateClass.TOTAL_INCREASING,
             1.0,
         )
-    if path.endswith(("/workingTime", "/operationHours", "/totalSystem")):
-        scale = 1.0 if unit in {"h", "hours"} else 1 / 3600
+    if is_runtime_path(path):
         return (
             UnitOfTime.HOURS,
             SensorDeviceClass.DURATION,
             SensorStateClass.TOTAL_INCREASING,
-            scale,
+            assess_runtime(resource).scale or 1.0,
         )
     if path.endswith("/numberOfStarts"):
         return None, None, SensorStateClass.TOTAL_INCREASING, 1.0
-    if unit == "C":
+    if (temperature_unit := TEMPERATURE_UNITS.get(unit or "")) is not None:
         return (
-            UnitOfTemperature.CELSIUS,
-            SensorDeviceClass.TEMPERATURE,
+            temperature_unit,
+            # HAQ-4: a kelvin value is a difference (a hysteresis or spread),
+            # as on the local side; as a temperature Home Assistant would
+            # convert 5 K to -268.15 °C.
+            SensorDeviceClass.TEMPERATURE_DELTA
+            if temperature_unit == "K"
+            or re.fullmatch(
+                r"/system/variableTariff/(?:ch|dhw)/(?:highPriceDelta|lowPriceDelta)",
+                path,
+            )
+            else SensorDeviceClass.TEMPERATURE,
             SensorStateClass.MEASUREMENT,
             1.0,
         )
@@ -1454,27 +2500,16 @@ def _measurement_attributes(
             SensorStateClass.MEASUREMENT,
             1.0,
         )
-    if unit == "kWh":
+    if (energy_unit := ENERGY_UNITS.get(unit or "")) is not None:
         return (
-            UnitOfEnergy.KILO_WATT_HOUR,
+            energy_unit[0],
             SensorDeviceClass.ENERGY,
             (
                 SensorStateClass.TOTAL_INCREASING
                 if path.endswith(("Consumption", "/solarYield"))
                 else SensorStateClass.MEASUREMENT
             ),
-            1.0,
-        )
-    if unit == "Wh":
-        return (
-            UnitOfEnergy.WATT_HOUR,
-            SensorDeviceClass.ENERGY,
-            (
-                SensorStateClass.TOTAL_INCREASING
-                if path.endswith(("Consumption", "/solarYield"))
-                else SensorStateClass.MEASUREMENT
-            ),
-            1.0,
+            energy_unit[1],
         )
     if unit in {"l", "L"}:
         return (
@@ -1506,30 +2541,9 @@ def _measurement_attributes(
             SensorStateClass.MEASUREMENT,
             1.0,
         )
-    if unit in {"min", "mins"}:
+    if (duration_unit := DURATION_UNITS.get(unit or "")) is not None:
         return (
-            UnitOfTime.MINUTES,
-            SensorDeviceClass.DURATION,
-            SensorStateClass.MEASUREMENT,
-            1.0,
-        )
-    if unit in {"h", "hours"}:
-        return (
-            UnitOfTime.HOURS,
-            SensorDeviceClass.DURATION,
-            SensorStateClass.MEASUREMENT,
-            1.0,
-        )
-    if unit in {"s", "seconds"}:
-        return (
-            UnitOfTime.SECONDS,
-            SensorDeviceClass.DURATION,
-            SensorStateClass.MEASUREMENT,
-            1.0,
-        )
-    if unit in {"d", "days"}:
-        return (
-            UnitOfTime.DAYS,
+            duration_unit,
             SensorDeviceClass.DURATION,
             SensorStateClass.MEASUREMENT,
             1.0,
@@ -1558,6 +2572,16 @@ def _measurement_attributes(
 
 def _enum_translation_key(resource: Resource, value_key: str | None) -> str | None:
     """Return the state-translation group for a known textual PointT value."""
+    if rrc.scalar_field(resource.path) == "userMode":
+        return "rrc_user_mode"
+    if is_additional_app_scalar(resource.path) and resource.path.endswith(
+        "/operationMode"
+    ):
+        return "heating_circuit_operation_mode"
+    if (
+        softener := softener_capability(resource.path)
+    ) is not None and softener.kind == "phase":
+        return "softener_regeneration_phase"
     if resource.path == "/gateway/update/status" and value_key == "status.value":
         return "update_status"
     if (
@@ -1610,6 +2634,9 @@ def _enum_translation_key(resource: Resource, value_key: str | None) -> str | No
         "/system/awayMode/enabled": "on_off_state",
         "/system/globalSeasonOptimizer/currentMode": "season_optimizer_mode",
         "/system/iSRC/supportStatus": "isrc_support_status",
+        "/system/iSRC/installationStatus": "isrc_installation_status",
+        # The read-only form of the season switching (system mode).
+        "/system/seasonOptimizer/mode": "season_optimizer_mode",
         "/heatSources/chStatus": "on_off_state",
         "/heatSources/compressor/status": "compressor_status",
         "/heatSources/Source/eHeater/status": "electric_auxiliary_heater_status",
@@ -1622,6 +2649,7 @@ def _enum_translation_key(resource: Resource, value_key: str | None) -> str | No
         "/heatSources/currentEmergencyMode": "on_off_state",
         "/heatSources/emStatus": "energy_management_status",
         "/heatSources/flameStatus": "on_off_state",
+        hybrid_controls.STRATEGY_PATH: hybrid_controls.TRANSLATION_KEY,
         "/heatSources/pvContactState": "pv_contact_state",
         "/heatSources/smartFunction/active": "on_off_state",
         "/heatSources/smartFunction/enabled": "on_off_state",
@@ -1637,7 +2665,9 @@ def _known_value_keys(path: str) -> tuple[str, ...]:
     """Return stable subkeys for resources whose startup payload may be partial."""
     if path == _SYSTEM_PRESSURE_RANGE_PATH:
         return _SYSTEM_PRESSURE_RANGE_KEYS
-    if re.fullmatch(r"/heatSources/[^/]+/(?:numberOfStarts|workingTime)", path):
+    if re.fullmatch(r"/heatSources/[^/]+/numberOfStarts", path):
+        return (*_KNOWN_MULTIPART_KEYS, "pool")
+    if re.fullmatch(r"/heatSources/[^/]+/workingTime", path):
         return _KNOWN_MULTIPART_KEYS
     return ()
 
@@ -1663,6 +2693,8 @@ def _heat_demand_state(resource: Resource) -> str:
 
 def _enum_options(resource: Resource, translation_key: str) -> list[str]:
     """Combine known, advertised, and current values into valid enum options."""
+    if translation_key == "softener_regeneration_phase":
+        return list(PHASES)
     options = list(_ENUM_OPTIONS[translation_key])
     for candidate in (
         *resource.metadata.allowed_values,
@@ -1670,10 +2702,27 @@ def _enum_options(resource: Resource, translation_key: str) -> list[str]:
         resource.value,
     ):
         if isinstance(candidate, str):
-            normalized = enum_value_to_ha(translation_key, candidate)
+            normalized = _enum_state(translation_key, candidate)
             if normalized not in options:
                 options.append(normalized)
     return options
+
+
+def _enum_state(translation_key: str, value: str) -> str:
+    """O107: a device spelling as the known option it denotes, if any.
+
+    Only for the decided readings (iSRC installation and support status,
+    season switching): ``TIMEOUT``, ``SUPPORTED`` or ``forcedHeat`` show
+    their translated state. Every other enum keeps its earlier states.
+    """
+    translated = enum_value_to_ha(translation_key, value)
+    if translation_key not in _NORMALIZED_ENUM_KEYS:
+        return translated
+    known = _ENUM_OPTIONS.get(translation_key, ())
+    if translated in known:
+        return translated
+    normalized = _CAMEL_BOUNDARY.sub("_", translated).casefold()
+    return normalized if normalized in known else translated
 
 
 def _semantic_key(path: str, subkey: str | None) -> str:
@@ -1727,3 +2776,45 @@ def _safe_subkey(key: str) -> bool:
 
 def _total_electricity_name(path: str) -> str:
     return resource_name(path, "electricity")
+
+
+class BoschBuderusSourceSensor(BoschBuderusSensor):
+    """One source of a paired reading alone, for troubleshooting (P18).
+
+    Disabled by default and without long-term statistics, so it never adds a
+    second statistic or energy series next to the regular sensor.
+    """
+
+    def __init__(
+        self,
+        coordinator: BoschBuderusDataUpdateCoordinator,
+        description: BoschBuderusSensorEntityDescription,
+        source: str,
+    ) -> None:
+        super().__init__(
+            coordinator,
+            replace(
+                description,
+                state_class=None,
+                entity_category=EntityCategory.DIAGNOSTIC,
+                entity_registry_enabled_default=False,
+            ),
+        )
+        self.source = source
+        self._attr_unique_id = f"{self._attr_unique_id}:source_{source}"
+        self._attr_name = (
+            f"{self._attr_name} ({source_suffix(coordinator.hass, source)})"
+        )
+
+    @property
+    def extra_state_attributes(self) -> Mapping[str, object] | None:
+        return self._base_attributes()
+
+    def _reading(self, path: str) -> ResourceSnapshot | None:
+        return self.coordinator.source_snapshot(path, self.source)
+
+    def _validated_enum_state(self, value: str) -> str | None:
+        # A local state outside the cloud's declared options is unknown here,
+        # without counting it as an undeclared PointT value.
+        options = self.options
+        return value if options is None or value in options else None

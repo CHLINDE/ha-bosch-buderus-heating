@@ -1,0 +1,151 @@
+{
+  "provenance": {
+    "kind": "synthetic",
+    "basis": "compatibility_mapping",
+    "physical_device_verified": false,
+    "firmware": null,
+    "capture_date": null,
+    "contract": "ICOM inclusive dates in reported slots; WDDW2 on/off without dates."
+  },
+  "resources": [
+    {
+      "id": "/system/holidayModes/hm2/startStop",
+      "type": "stringValue",
+      "value": "2030-10-26/2030-10-28",
+      "writeable": true
+    },
+    {
+      "id": "/system/holidayModes/hm2/hcMode",
+      "type": "stringValue",
+      "value": "FIX_TEMPERATURE",
+      "writeable": true,
+      "allowedValues": [
+        "OFF",
+        "FIX_TEMPERATURE",
+        "ECO"
+      ]
+    },
+    {
+      "id": "/system/holidayModes/hm2/dhwMode",
+      "type": "stringValue",
+      "value": "OFF",
+      "writeable": true,
+      "allowedValues": [
+        "OFF",
+        "LOW"
+      ]
+    },
+    {
+      "id": "/system/holidayModes/hm2/fixTemperature",
+      "type": "floatValue",
+      "value": 17,
+      "writeable": true,
+      "unitOfMeasure": "C",
+      "minValue": 10,
+      "maxValue": 25,
+      "stepSize": 0.5
+    },
+    {
+      "id": "/system/holidayModes/hm2/delete",
+      "type": "stringValue",
+      "value": "FALSE",
+      "writeable": true,
+      "allowedValues": [
+        "TRUE",
+        "FALSE"
+      ]
+    },
+    {
+      "id": "/system/holidayModes/hm2/assignedTo",
+      "type": "arrayData",
+      "values": [
+        "hc2",
+        "dhw1"
+      ],
+      "allowedValues": [
+        "hc2",
+        "dhw1"
+      ],
+      "writeable": true
+    },
+    {
+      "id": "/system/holidayModes/hm4/startStop",
+      "type": "stringValue",
+      "value": "2017-01-01/2017-01-01",
+      "writeable": true
+    },
+    {
+      "id": "/system/holidayModes/hm4/hcMode",
+      "type": "stringValue",
+      "value": "FIX_TEMPERATURE",
+      "writeable": true,
+      "allowedValues": [
+        "OFF",
+        "FIX_TEMPERATURE",
+        "ECO"
+      ]
+    },
+    {
+      "id": "/system/holidayModes/hm4/dhwMode",
+      "type": "stringValue",
+      "value": "OFF",
+      "writeable": true,
+      "allowedValues": [
+        "OFF",
+        "LOW"
+      ]
+    },
+    {
+      "id": "/system/holidayModes/hm4/fixTemperature",
+      "type": "floatValue",
+      "value": 17,
+      "writeable": true,
+      "unitOfMeasure": "C",
+      "minValue": 10,
+      "maxValue": 25,
+      "stepSize": 0.5
+    },
+    {
+      "id": "/system/holidayModes/hm4/delete",
+      "type": "stringValue",
+      "value": "FALSE",
+      "writeable": true,
+      "allowedValues": [
+        "TRUE",
+        "FALSE"
+      ]
+    },
+    {
+      "id": "/system/holidayModes/hm4/assignedTo",
+      "type": "arrayData",
+      "values": [],
+      "allowedValues": [
+        "hc2",
+        "dhw1"
+      ],
+      "writeable": true
+    },
+    {
+      "id": "/system/holidayModes",
+      "type": "refEnum",
+      "references": [
+        {
+          "id": "/system/holidayModes/hm2"
+        },
+        {
+          "id": "/system/holidayModes/hm4"
+        }
+      ]
+    },
+    {
+      "id": "/system/holidayMode",
+      "type": "stringValue",
+      "value": "off",
+      "allowedValues": [
+        "on",
+        "off"
+      ],
+      "writeable": true
+    }
+  ]
+}

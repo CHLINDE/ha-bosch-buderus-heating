@@ -7,7 +7,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 from homeassistant.core import HomeAssistant
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.bosch_buderus_heating.const import DOMAIN
 from custom_components.bosch_buderus_heating.coordinator import (
@@ -18,6 +17,7 @@ from custom_components.bosch_buderus_heating.event import (
     async_setup_entry,
 )
 from custom_components.bosch_buderus_heating.pointt import Gateway, Resource
+from tests.ha_test_helpers import MockConfigEntry
 
 
 def _coordinator(hass: HomeAssistant) -> BoschBuderusDataUpdateCoordinator:
@@ -34,7 +34,12 @@ async def test_event_platform_adds_one_stream_per_gateway(
     hass: HomeAssistant,
 ) -> None:
     coordinator = _coordinator(hass)
-    entry = SimpleNamespace(runtime_data=SimpleNamespace(coordinators=(coordinator,)))
+    unload: list = []
+    entry = SimpleNamespace(
+        runtime_data=SimpleNamespace(coordinators=(coordinator,)),
+        # The defrost event follows the coordinator for the entry's lifetime.
+        async_on_unload=unload.append,
+    )
     added: list[BoschBuderusNotificationEvent] = []
 
     await async_setup_entry(hass, entry, added.extend)
@@ -43,6 +48,8 @@ async def test_event_platform_adds_one_stream_per_gateway(
     assert added[0].unique_id == "gateway-one:system_notifications"
     assert added[0].event_types == ["appeared", "resolved"]
     assert not added[0].available
+    for callback in unload:
+        callback()
 
 
 def test_event_contains_bounded_localized_attributes(hass: HomeAssistant) -> None:

@@ -6,24 +6,23 @@ import base64
 import hashlib
 import json
 import math
+import re
 import secrets
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import UTC
-from email.utils import parsedate_to_datetime
 from time import monotonic, time
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import ParseResult, parse_qs, urlencode, urlparse
 
 import aiohttp
 
 from .const import (
     DEFAULT_CONNECT_TIMEOUT,
-    DEFAULT_TOTAL_TIMEOUT,
     DEFAULT_USER_AGENT,
     OAUTH_AUTHORIZE_URL,
     OAUTH_CLIENT_ID,
     OAUTH_SCOPES,
     OAUTH_TOKEN_URL,
+    TOKEN_TOTAL_TIMEOUT,
 )
 from .exceptions import (
     AuthenticationError,
@@ -33,12 +32,15 @@ from .exceptions import (
     OAuthRedirectError,
     OAuthStateMismatch,
     RateLimited,
+    RefreshRefused,
     RefreshTokenRejected,
     RequestTimeout,
     ServiceUnavailable,
+    TokenEndpointRejection,
     UnexpectedHttpStatus,
 )
 from .models import AuthTokens, Brand
+from .retry_after import parse_retry_after
 
 
 def _base64url(value: bytes) -> str:
@@ -96,9 +98,16 @@ def build_authorization_url(brand: Brand, context: PKCEContext) -> str:
     return f"{OAUTH_AUTHORIZE_URL}?{query}"
 
 
-def parse_redirect_url(brand: Brand, redirect_url: str, *, expected_state: str) -> str:
-    """Validate a full application redirect URL and return its code."""
-    parsed = urlparse(redirect_url.strip())
+def _split_redirect(redirect_url: str) -> ParseResult:
+    try:
+        return urlparse(redirect_url.strip())
+    except ValueError as err:
+        # For example an unpaired "[" in the host part ("Invalid IPv6 URL").
+        raise OAuthRedirectError("OAuth redirect URI could not be parsed") from err
+
+
+def _redirect_parameters(brand: Brand, redirect_url: str) -> dict[str, list[str]]:
+    parsed = _split_redirect(redirect_url)
     expected = urlparse(brand.redirect_uri)
     if (
         parsed.scheme != expected.scheme
@@ -106,8 +115,12 @@ def parse_redirect_url(brand: Brand, redirect_url: str, *, expected_state: str) 
         or parsed.path != expected.path
     ):
         raise OAuthRedirectError("OAuth redirect URI did not match the selected brand")
+    return parse_qs(parsed.query or parsed.fragment, keep_blank_values=True)
 
-    parameters = parse_qs(parsed.query or parsed.fragment, keep_blank_values=True)
+
+def parse_redirect_url(brand: Brand, redirect_url: str, *, expected_state: str) -> str:
+    """Validate a full application redirect URL and return its code."""
+    parameters = _redirect_parameters(brand, redirect_url)
     if "error" in parameters:
         raise OAuthRedirectError("Authorization server returned an OAuth error")
     received_state = parameters.get("state", [None])[0]
@@ -174,7 +187,7 @@ class OAuthClient:
         self._clock = clock
         self._user_agent = user_agent
         self._timeout = aiohttp.ClientTimeout(
-            connect=DEFAULT_CONNECT_TIMEOUT, total=DEFAULT_TOTAL_TIMEOUT
+            connect=DEFAULT_CONNECT_TIMEOUT, total=TOKEN_TOTAL_TIMEOUT
         )
 
     async def exchange_code(
@@ -222,28 +235,38 @@ class OAuthClient:
                 data=data,
                 headers=headers,
                 timeout=self._timeout,
+                # A redirect would resend the refresh token or the code
+                # verifier to the redirect target, possibly another host.
+                allow_redirects=False,
             ) as response:
                 if response.status in {400, 401, 403}:
                     if refresh_request:
-                        raise RefreshTokenRejected("Refresh token was rejected")
+                        rejection = await _read_rejection(response)
+                        if rejection.oauth_error in _DEFINITE_REFRESH_REJECTIONS:
+                            raise RefreshTokenRejected(rejection=rejection)
+                        raise RefreshRefused(response.status, rejection=rejection)
                     raise AuthenticationError("Authorization code was rejected")
                 if response.status == 429:
                     raise RateLimited(
-                        _parse_retry_after(
+                        parse_retry_after(
                             response.headers.get("Retry-After"), now=self._clock()
                         )
                     )
                 if response.status >= 500:
                     raise ServiceUnavailable(response.status)
-                if response.status >= 400:
+                if not 200 <= response.status < 300:
                     raise UnexpectedHttpStatus(response.status)
-                payload = await response.json(content_type=None)
+                raw = await _read_bounded(response, _MAX_TOKEN_RESPONSE)
         except TimeoutError as err:
             raise RequestTimeout("OAuth token request timed out") from err
-        except (json.JSONDecodeError, UnicodeDecodeError) as err:
-            raise InvalidPayload("OAuth token response was not valid JSON") from err
         except aiohttp.ClientError as err:
             raise ServiceUnavailable() from err
+        if raw is None:
+            raise InvalidPayload("OAuth token response exceeded the size limit")
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError, RecursionError) as err:
+            raise InvalidPayload("OAuth token response was not valid JSON") from err
 
         if not isinstance(payload, Mapping):
             raise InvalidPayload("OAuth token response must be an object")
@@ -260,6 +283,11 @@ class OAuthClient:
             raise InvalidPayload("OAuth token response did not contain expires_in")
         if not math.isfinite(float(expires_in)):
             raise InvalidPayload("OAuth token expiry must be finite")
+        # D15: a lifetime of 0 or less is kept as an access token that is
+        # expired on arrival. The answer may still rotate the refresh token,
+        # so it is not rejected; the token manager refreshes again within its
+        # retry limits.
+        lifetime = max(0.0, float(expires_in))
         token_type = payload.get("token_type", "Bearer")
         if not isinstance(token_type, str):
             raise InvalidPayload("OAuth token type must be a string")
@@ -272,27 +300,105 @@ class OAuthClient:
             scope = tuple(scope_value)
         else:
             raise InvalidPayload("OAuth scope must be a string or string array")
+        issued_at = self._clock()
         return AuthTokens(
             access_token=access_token,
             refresh_token=refresh_token,
-            expires_at=self._clock() + float(expires_in),
+            expires_at=issued_at + lifetime,
             token_type=token_type,
             scope=scope,
+            issued_at=issued_at,
+            refresh_expires_in=_optional_duration(payload.get("refresh_expires_in")),
+            refresh_token_returned="refresh_token" in payload,
         )
 
 
-def _parse_retry_after(value: str | None, *, now: float) -> float | None:
-    """Read a delay or HTTP date without retaining response headers or bodies."""
-    if value is None:
-        return None
+_MAX_REJECTION_BODY = 4096
+_MAX_TOKEN_RESPONSE = 64 * 1024
+# Only these OAuth answers say that the refresh token itself is unusable. Any
+# other refusal (an HTML page, an empty body, another code) is retried later.
+_DEFINITE_REFRESH_REJECTIONS = frozenset(
+    {"invalid_grant", "invalid_client", "unauthorized_client", "unsupported_grant_type"}
+)
+_OAUTH_ERROR = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+_CONTENT_TYPE = re.compile(r"[a-z0-9.+-]{1,32}/[a-z0-9.+-]{1,64}")
+# Long opaque runs could be tokens, codes or identifiers; never keep them.
+_OPAQUE_RUN = re.compile(r"[A-Za-z0-9_\-+/=.]{24,}")
+_DESCRIPTION_DISALLOWED = re.compile(r"[^A-Za-z0-9 .,:;()'\[\]_-]")
+
+
+async def _read_rejection(response: aiohttp.ClientResponse) -> TokenEndpointRejection:
+    """Summarize a rejected token response without retaining its body."""
+    content_type = response.headers.get("Content-Type", "").split(";", 1)[0]
+    content_type = content_type.strip().lower()
+    safe_type = content_type if _CONTENT_TYPE.fullmatch(content_type) else None
+    if content_type and safe_type is None:
+        safe_type = "other"
     try:
-        delay = float(value)
-    except ValueError:
-        try:
-            retry_at = parsedate_to_datetime(value)
-            if retry_at.tzinfo is None:
-                retry_at = retry_at.replace(tzinfo=UTC)
-            delay = retry_at.timestamp() - now
-        except TypeError, ValueError, OverflowError:
-            return None
-    return max(0.0, delay) if math.isfinite(delay) else None
+        raw = await _read_bounded(response, _MAX_REJECTION_BODY, truncate=True)
+    except aiohttp.ClientError, TimeoutError:
+        return TokenEndpointRejection(
+            response.status, body_format="unreadable", content_type=safe_type
+        )
+    if raw is None or not raw.strip():
+        return TokenEndpointRejection(
+            response.status, body_format="empty", content_type=safe_type
+        )
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except UnicodeDecodeError, ValueError:
+        return TokenEndpointRejection(
+            response.status, body_format="non_json", content_type=safe_type
+        )
+    if not isinstance(payload, Mapping):
+        return TokenEndpointRejection(
+            response.status, body_format="json_non_object", content_type=safe_type
+        )
+    error = payload.get("error")
+    safe_error = None
+    if isinstance(error, str):
+        safe_error = error if _OAUTH_ERROR.fullmatch(error) else "other"
+    return TokenEndpointRejection(
+        response.status,
+        oauth_error=safe_error,
+        oauth_error_description=_safe_description(payload.get("error_description")),
+        body_format="json",
+        content_type=safe_type,
+    )
+
+
+async def _read_bounded(
+    response: aiohttp.ClientResponse, limit: int, *, truncate: bool = False
+) -> bytes | None:
+    """Read until the end of the body, also across chunks, up to ``limit``.
+
+    A single ``read(n)`` only returns what is buffered, so a body sent in
+    several chunks would be cut short. Returns None when the body is longer
+    than ``limit``, unless ``truncate`` keeps its first ``limit`` bytes.
+    """
+    body = bytearray()
+    while chunk := await response.content.read(limit + 1 - len(body)):
+        body.extend(chunk)
+        if len(body) > limit:
+            return bytes(body[:limit]) if truncate else None
+    return bytes(body)
+
+
+def _safe_description(value: object) -> str | None:
+    """Keep a short human-readable reason; drop anything resembling a secret."""
+    if not isinstance(value, str):
+        return None
+    text = _OPAQUE_RUN.sub("[redacted]", value)
+    if "@" in text:
+        # E-mail addresses or account names are not needed to classify the reason.
+        text = re.sub(r"\S*@\S*", "[redacted]", text)
+    text = _DESCRIPTION_DISALLOWED.sub(" ", text)
+    text = " ".join(text.split())[:120].strip()
+    return text or None
+
+
+def _optional_duration(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    duration = float(value)
+    return duration if math.isfinite(duration) and duration >= 0 else None

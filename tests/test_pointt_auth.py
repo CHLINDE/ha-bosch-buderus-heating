@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import json
 from base64 import urlsafe_b64encode
 from urllib.parse import parse_qs, urlparse
 
@@ -20,13 +22,17 @@ from custom_components.bosch_buderus_heating.pointt import (
     OAuthRedirectError,
     OAuthStateMismatch,
     RateLimited,
+    RefreshRefused,
     RefreshTokenRejected,
     ServiceUnavailable,
+    SignInUnavailable,
     TokenManager,
     UnexpectedHttpStatus,
     create_pkce_context,
     parse_redirect_url,
 )
+from custom_components.bosch_buderus_heating.pointt import const as pointt_const
+from custom_components.bosch_buderus_heating.pointt.const import OAUTH_SCOPES
 
 pytestmark = pytest.mark.usefixtures("socket_enabled")
 
@@ -160,7 +166,8 @@ async def test_oauth_client_exchanges_and_refreshes_tokens() -> None:
     ("status", "refresh", "exception"),
     [
         (400, False, AuthenticationError),
-        (401, True, RefreshTokenRejected),
+        # AUTH-4: a refusal without a definite OAuth error is retried later.
+        (401, True, RefreshRefused),
         (500, False, ServiceUnavailable),
         (418, False, UnexpectedHttpStatus),
     ],
@@ -213,6 +220,35 @@ async def test_oauth_client_rejects_invalid_token_payloads(payload: object) -> N
         await runner.cleanup()
 
 
+@pytest.mark.parametrize("expires_in", [0, -60, -0.5])
+async def test_a_token_without_lifetime_keeps_the_rotated_refresh_token(
+    expires_in: float,
+) -> None:
+    """D15: the answer is kept as an access token expired on arrival."""
+
+    async def handler(_request: web.Request) -> web.Response:
+        return web.json_response(
+            {
+                "access_token": "new-access",
+                "refresh_token": "rotated-refresh",
+                "expires_in": expires_in,
+            }
+        )
+
+    runner, url = await _serve(handler)
+    try:
+        async with aiohttp.ClientSession() as session:
+            client = OAuthClient(session, token_url=url, clock=lambda: 1000.0)
+            refreshed = await client.refresh("old-refresh")
+    finally:
+        await runner.cleanup()
+
+    assert refreshed.refresh_token == "rotated-refresh"
+    assert refreshed.issued_at == 1000.0
+    assert refreshed.expires_at == 1000.0
+    assert refreshed.is_expired(now=1000.0, margin=0.0)
+
+
 async def test_oauth_client_rejects_malformed_json() -> None:
     async def handler(_request: web.Request) -> web.Response:
         return web.Response(text="not json", content_type="application/json")
@@ -245,8 +281,9 @@ async def test_invalid_refresh_token_does_not_replace_or_persist_tokens(replacem
             manager = TokenManager(
                 OAuthClient(session, token_url=url), original, persisted.append
             )
-            with pytest.raises(InvalidPayload):
+            with pytest.raises(SignInUnavailable) as caught:
                 await manager.get_access_token()
+            assert isinstance(caught.value.__cause__, InvalidPayload)
             assert manager.tokens is original
             assert not persisted
     finally:
@@ -306,3 +343,484 @@ async def test_oauth_rate_limit_preserves_retry_after(refresh, header, expected)
             assert calls == 1
     finally:
         await runner.cleanup()
+
+
+async def _rejected_refresh(
+    handler,
+    expected: type[RefreshTokenRejected | RefreshRefused] = RefreshTokenRejected,
+) -> RefreshTokenRejected | RefreshRefused:
+    runner, url = await _serve(handler)
+    try:
+        async with aiohttp.ClientSession() as session:
+            client = OAuthClient(session, token_url=url)
+            with pytest.raises(expected) as caught:
+                await client.refresh("secret-refresh-token-value")
+    finally:
+        await runner.cleanup()
+    return caught.value
+
+
+async def test_rejected_refresh_reports_sanitized_oauth_reason() -> None:
+    async def handler(_request: web.Request) -> web.Response:
+        return web.json_response(
+            {"error": "invalid_grant", "error_description": "Token is not active"},
+            status=400,
+        )
+
+    error = await _rejected_refresh(handler)
+    assert error.rejection is not None
+    assert error.rejection.http_status == 400
+    assert error.rejection.oauth_error == "invalid_grant"
+    assert error.rejection.oauth_error_description == "Token is not active"
+    assert error.rejection.body_format == "json"
+    assert error.rejection.content_type == "application/json"
+    assert str(error) == (
+        "Refresh token was rejected (HTTP 400, invalid_grant: Token is not active)"
+    )
+    assert "secret-refresh-token-value" not in str(error)
+
+
+async def test_rejected_refresh_description_drops_secrets_and_accounts() -> None:
+    opaque = "eyJhbGciOiJSUzI1NiJ9abcdefghijklmnop"
+
+    async def handler(_request: web.Request) -> web.Response:
+        return web.json_response(
+            {
+                "error": "invalid grant <script>",
+                "error_description": (
+                    f"Session of user person@example.com ended; token {opaque} "
+                    "<b>revoked</b>" + " padding" * 40
+                ),
+            },
+            status=401,
+        )
+
+    error = await _rejected_refresh(handler, RefreshRefused)
+    assert error.rejection is not None
+    description = error.rejection.oauth_error_description
+    assert error.rejection.oauth_error == "other"
+    assert description is not None
+    assert len(description) <= 120
+    assert "person" not in description
+    assert "example.com" not in description
+    assert opaque not in description
+    assert "<" not in description
+    assert "[redacted]" in description
+
+
+@pytest.mark.parametrize(
+    ("body", "content_type", "body_format"),
+    [
+        ("<html>Access denied by firewall</html>", "text/html", "non_json"),
+        ("", None, "empty"),
+        ('["unexpected"]', "application/json", "json_non_object"),
+    ],
+)
+async def test_rejected_refresh_classifies_non_oauth_bodies(
+    body: str, content_type: str | None, body_format: str
+) -> None:
+    async def handler(_request: web.Request) -> web.Response:
+        if content_type is None:
+            return web.Response(status=403)
+        return web.Response(status=403, text=body, content_type=content_type)
+
+    error = await _rejected_refresh(handler, RefreshRefused)
+    assert error.rejection is not None
+    assert error.rejection.http_status == 403
+    assert error.rejection.oauth_error is None
+    assert error.rejection.body_format == body_format
+    if content_type is not None:
+        assert error.rejection.content_type == content_type
+    assert "firewall" not in str(error)
+    assert f"no OAuth error code, {body_format} body" in str(error)
+
+
+async def test_refresh_records_response_metadata_without_changing_equality() -> None:
+    async def handler(_request: web.Request) -> web.Response:
+        return web.json_response(
+            {
+                "access_token": "new-access",
+                "expires_in": 300,
+                "refresh_expires_in": 2592000,
+            }
+        )
+
+    runner, url = await _serve(handler)
+    try:
+        async with aiohttp.ClientSession() as session:
+            client = OAuthClient(session, token_url=url, clock=lambda: 1000.0)
+            refreshed = await client.refresh("kept-refresh")
+    finally:
+        await runner.cleanup()
+
+    assert refreshed.issued_at == 1000.0
+    assert refreshed.refresh_expires_in == 2592000.0
+    assert refreshed.refresh_token_returned is False
+    assert refreshed.refresh_token == "kept-refresh"
+    assert refreshed == AuthTokens("new-access", "kept-refresh", 1300.0)
+
+
+async def test_rejected_refresh_ignores_unusual_content_and_descriptions() -> None:
+    async def handler(_request: web.Request) -> web.Response:
+        return web.Response(
+            status=400,
+            body=b'{"error": "invalid_grant", "error_description": 7}',
+            headers={"Content-Type": "Application/JSON Weird; charset=utf-8"},
+        )
+
+    error = await _rejected_refresh(handler)
+    assert error.rejection is not None
+    assert error.rejection.content_type == "other"
+    assert error.rejection.oauth_error == "invalid_grant"
+    assert error.rejection.oauth_error_description is None
+    assert str(error) == "Refresh token was rejected (HTTP 400, invalid_grant)"
+
+
+@pytest.mark.parametrize("value", [-1, True, "3600", float("nan")])
+async def test_invalid_refresh_lifetime_is_ignored(value: object) -> None:
+    async def handler(_request: web.Request) -> web.Response:
+        return web.Response(
+            text=json.dumps(
+                {"access_token": "a", "expires_in": 60, "refresh_expires_in": value}
+            ),
+            content_type="application/json",
+        )
+
+    runner, url = await _serve(handler)
+    try:
+        async with aiohttp.ClientSession() as session:
+            refreshed = await OAuthClient(session, token_url=url).refresh("r")
+    finally:
+        await runner.cleanup()
+    assert refreshed.refresh_expires_in is None
+
+
+# --- Issue #127: every sign-in asks for the full scope set ---
+
+# The set of 0.8.x. SingleKey ID shows its "misconfigured application" page
+# for this client when ``email`` is missing (checked against the live
+# authorize page for both brands); written out so that a change of the
+# constant cannot pass unnoticed.
+SIGN_IN_SCOPES = [
+    "openid",
+    "email",
+    "profile",
+    "offline_access",
+    "pointt.gateway.claiming",
+    "pointt.gateway.removal",
+    "pointt.gateway.list",
+    "pointt.gateway.users",
+    "pointt.gateway.resource.dashapp",
+    "pointt.castt.flow.token-exchange",
+    "bacon",
+    "hcc.tariff.read",
+]
+
+
+def _scopes(flow: OAuthFlow) -> list[str]:
+    return parse_qs(urlparse(flow.authorization_url).query)["scope"][0].split()
+
+
+@pytest.mark.parametrize("brand", list(Brand))
+def test_sign_in_link_asks_for_the_full_scope_set(brand: Brand) -> None:
+    flow = OAuthFlow.create(brand, now=100.0)
+    assert {"openid", "email"} <= set(_scopes(flow))
+    assert _scopes(flow) == SIGN_IN_SCOPES == list(OAUTH_SCOPES)
+    query = parse_qs(urlparse(flow.authorization_url).query)
+    assert query["scope"] == [" ".join(SIGN_IN_SCOPES)]
+
+
+def test_no_reduced_scope_set_or_fallback_is_left() -> None:
+    from custom_components.bosch_buderus_heating import pointt
+    from custom_components.bosch_buderus_heating.pointt import auth
+
+    assert [name for name in dir(pointt_const) if name.startswith("OAUTH_SCOPES")] == [
+        "OAUTH_SCOPES"
+    ]
+    for name in ("_ScopeFallback", "initial_scopes", "OAuthScopeRejected"):
+        assert not hasattr(auth, name)
+        assert not hasattr(pointt, name)
+    assert not hasattr(OAuthFlow, "scopes")
+
+
+def test_a_scope_error_is_an_ordinary_oauth_error() -> None:
+    """No second link: the attempt and its link stay as they are."""
+    flow = OAuthFlow.create(Brand.BOSCH, now=100.0)
+    link = flow.authorization_url
+    with pytest.raises(OAuthRedirectError, match="OAuth error"):
+        flow.consume_redirect(
+            f"{Brand.BOSCH.redirect_uri}?error=invalid_scope"
+            f"&state={flow.context.state}",
+            now=101.0,
+        )
+    assert flow.authorization_url == link
+    grant = flow.consume_redirect(
+        f"{Brand.BOSCH.redirect_uri}?code=c&state={flow.context.state}", now=102.0
+    )
+    assert grant.code == "c"
+
+
+# --- C74/SEC-3: a malformed redirect is an invalid redirect, not a crash ---
+
+
+@pytest.mark.parametrize(
+    "redirect",
+    [
+        "com.bosch.tt.dashtt.pointt://[app/login?code=c&state=s",
+        "com.bosch.tt.dashtt.pointt://app]/login?code=c&state=s",
+    ],
+)
+def test_malformed_redirect_is_reported_as_invalid_redirect(redirect: str) -> None:
+    with pytest.raises(OAuthRedirectError, match="parsed"):
+        parse_redirect_url(Brand.BOSCH, redirect, expected_state="s")
+    flow = OAuthFlow.create(Brand.BOSCH, now=100.0)
+    with pytest.raises(OAuthRedirectError, match="parsed"):
+        flow.consume_redirect(redirect, now=101.0)
+    # Not consumed: the user can paste the correct address afterwards.
+    valid = f"{Brand.BOSCH.redirect_uri}?code=c&state={flow.context.state}"
+    assert flow.consume_redirect(valid, now=102.0).code == "c"
+
+
+# --- C18/AUTH-5, SEC-5: no redirects, bounded token answers ---
+
+
+@pytest.mark.parametrize("status", [302, 307, 308])
+@pytest.mark.parametrize("refresh", [True, False])
+async def test_token_request_never_follows_a_redirect(
+    status: int, refresh: bool
+) -> None:
+    received: list[str] = []
+
+    async def target(request: web.Request) -> web.Response:
+        received.append(await request.text())
+        return web.json_response({"access_token": "foreign", "expires_in": 3600})
+
+    target_runner, target_url = await _serve(target)
+
+    async def redirecting(_request: web.Request) -> web.Response:
+        return web.Response(status=status, headers={"Location": target_url})
+
+    runner, url = await _serve(redirecting)
+    try:
+        async with aiohttp.ClientSession() as session:
+            client = OAuthClient(session, token_url=url)
+            with pytest.raises(UnexpectedHttpStatus) as caught:
+                if refresh:
+                    await client.refresh("secret-refresh")
+                else:
+                    await client.exchange_code(
+                        Brand.BOSCH, AuthorizationGrant("code", "secret-verifier")
+                    )
+    finally:
+        await runner.cleanup()
+        await target_runner.cleanup()
+    assert caught.value.status == status
+    assert received == []
+
+
+async def test_oversized_token_answer_is_rejected() -> None:
+    async def handler(_request: web.Request) -> web.Response:
+        body = json.dumps(
+            {"access_token": "a", "expires_in": 60, "padding": "x" * 70_000}
+        )
+        return web.Response(text=body, content_type="application/json")
+
+    runner, url = await _serve(handler)
+    try:
+        async with aiohttp.ClientSession() as session:
+            with pytest.raises(InvalidPayload, match="size limit"):
+                await OAuthClient(session, token_url=url).refresh("r")
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.parametrize(
+    "body", [b"[" * 60_000, b'{"access_token": "a", "expires_in": 1' + b"0" * 5000]
+)
+async def test_pathological_token_json_is_an_invalid_answer(body: bytes) -> None:
+    async def handler(_request: web.Request) -> web.Response:
+        return web.Response(body=body, content_type="application/json")
+
+    runner, url = await _serve(handler)
+    try:
+        async with aiohttp.ClientSession() as session:
+            with pytest.raises(InvalidPayload):
+                await OAuthClient(session, token_url=url).refresh("r")
+    finally:
+        await runner.cleanup()
+
+
+# --- C19/AUTH-6: a rejection sent in several chunks keeps its OAuth code ---
+
+
+async def test_chunked_rejection_keeps_the_oauth_error() -> None:
+    async def handler(request: web.Request) -> web.StreamResponse:
+        response = web.StreamResponse(
+            status=400, headers={"Content-Type": "application/json"}
+        )
+        response.enable_chunked_encoding()
+        await response.prepare(request)
+        await response.write(b'{"error":')
+        await asyncio.sleep(0.05)
+        await response.write(b'"invalid_grant"}')
+        await response.write_eof()
+        return response
+
+    error = await _rejected_refresh(handler)
+    assert error.rejection is not None
+    assert error.rejection.body_format == "json"
+    assert error.rejection.oauth_error == "invalid_grant"
+
+
+async def test_long_rejection_body_is_cut_at_the_limit() -> None:
+    async def handler(_request: web.Request) -> web.Response:
+        return web.Response(status=403, text="<html>" + "x" * 10_000)
+
+    error = await _rejected_refresh(handler, RefreshRefused)
+    assert error.rejection is not None
+    assert error.rejection.body_format == "non_json"
+
+
+# --- C17/AUTH-4: only a definite OAuth error ends the sign-in ---
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "invalid_grant",
+        "invalid_client",
+        "unauthorized_client",
+        "unsupported_grant_type",
+    ],
+)
+async def test_definite_oauth_errors_reject_the_refresh_token(code: str) -> None:
+    async def handler(_request: web.Request) -> web.Response:
+        return web.json_response({"error": code}, status=400)
+
+    error = await _rejected_refresh(handler)
+    assert isinstance(error, RefreshTokenRejected)
+    assert error.rejection is not None
+    assert error.rejection.oauth_error == code
+
+
+@pytest.mark.parametrize(
+    ("status", "body", "content_type"),
+    [
+        (403, "<html>Blocked by a firewall</html>", "text/html"),
+        (401, "", "text/plain"),
+        (400, '{"error": "invalid_request"}', "application/json"),
+        (400, '{"error": "temporarily_unavailable"}', "application/json"),
+    ],
+)
+async def test_refusal_without_definite_error_keeps_the_sign_in(
+    status: int, body: str, content_type: str
+) -> None:
+    calls = 0
+
+    async def handler(_request: web.Request) -> web.Response:
+        nonlocal calls
+        calls += 1
+        return web.Response(status=status, text=body, content_type=content_type)
+
+    runner, url = await _serve(handler)
+    clock = [0.0]
+    try:
+        async with aiohttp.ClientSession() as session:
+            manager = TokenManager(
+                OAuthClient(session, token_url=url),
+                AuthTokens("old", "refresh", 0.0),
+                lambda tokens: None,
+                retry_clock=lambda: clock[0],
+            )
+            with pytest.raises(SignInUnavailable) as caught:
+                await manager.get_access_token()
+            assert isinstance(caught.value.__cause__, RefreshRefused)
+            assert caught.value.rejection is not None
+            assert caught.value.rejection.http_status == status
+            assert manager.refresh_rejected is False
+            # Retried after the wait instead of asking for a new sign-in.
+            clock[0] = 31.0
+            with pytest.raises(SignInUnavailable):
+                await manager.get_access_token()
+    finally:
+        await runner.cleanup()
+    assert calls == 2
+
+
+async def test_slow_token_endpoint_answers_within_the_token_timeout() -> None:
+    """A refresh that takes longer than the old 30 s total still succeeds."""
+    posts = 0
+
+    async def handler(_request: web.Request) -> web.Response:
+        nonlocal posts
+        posts += 1
+        await asyncio.sleep(0.5)
+        return web.json_response(
+            {"access_token": "a", "refresh_token": "r2", "expires_in": 3600}
+        )
+
+    runner, url = await _serve(handler)
+    try:
+        async with aiohttp.ClientSession() as session:
+            client = OAuthClient(session, token_url=url)
+            # The token endpoint may take 40 to 80 s; its total covers that.
+            assert client._timeout.total == pointt_const.TOKEN_TOTAL_TIMEOUT == 90.0
+            assert client._timeout.total > pointt_const.DEFAULT_TOTAL_TIMEOUT
+            assert client._timeout.connect == pointt_const.DEFAULT_CONNECT_TIMEOUT
+            assert client._timeout.connect == 10.0
+            tokens = await client.refresh("old")
+    finally:
+        await runner.cleanup()
+    assert tokens.refresh_token == "r2"
+    assert posts == 1
+
+
+async def test_slow_token_answer_is_waited_for_not_retried(monkeypatch) -> None:
+    """An answer later than the old total succeeds with one request."""
+    from custom_components.bosch_buderus_heating.pointt import RequestTimeout
+
+    posts = 0
+
+    async def handler(_request: web.Request) -> web.Response:
+        nonlocal posts
+        posts += 1
+        await asyncio.sleep(1.5)
+        return web.json_response(
+            {"access_token": "a", "refresh_token": "r2", "expires_in": 3600}
+        )
+
+    runner, url = await _serve(handler)
+    try:
+        async with aiohttp.ClientSession() as session:
+            # Scale: the old timeout (total 1 s) fails, the token timeout
+            # (total 3 s) waits for the answer; both keep one request each.
+            monkeypatch.setattr(pointt_const, "TOKEN_TOTAL_TIMEOUT", 3.0)
+            monkeypatch.setattr(
+                "custom_components.bosch_buderus_heating.pointt.auth.TOKEN_TOTAL_TIMEOUT",
+                3.0,
+            )
+            slow = OAuthClient(session, token_url=url)
+            assert (await slow.refresh("old")).refresh_token == "r2"
+            assert posts == 1
+            monkeypatch.setattr(
+                "custom_components.bosch_buderus_heating.pointt.auth.TOKEN_TOTAL_TIMEOUT",
+                1.0,
+            )
+            fast = OAuthClient(session, token_url=url)
+            with pytest.raises(RequestTimeout):
+                await fast.refresh("old")
+            await asyncio.sleep(0.1)
+            assert posts == 2  # the timed-out refresh was not sent again
+    finally:
+        await runner.cleanup()
+
+
+async def test_connect_timeout_stays_fast() -> None:
+    """Only the total is longer; an unreachable endpoint fails by connect."""
+    from custom_components.bosch_buderus_heating.pointt import ServiceUnavailable
+
+    async with aiohttp.ClientSession() as session:
+        client = OAuthClient(session, token_url="http://127.0.0.1:9/token")
+        assert client._timeout.connect == 10.0
+        with pytest.raises(ServiceUnavailable):
+            await asyncio.wait_for(client.refresh("old"), 10)

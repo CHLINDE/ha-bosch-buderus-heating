@@ -5,10 +5,13 @@ installations without sharing access to a heating account or system. The tool
 works exclusively from an already redacted Home Assistant diagnostics report
 and does not make a cloud request.
 
+Diagnostics schema 18 is supported. Duration and collection decisions remain
+in the full diagnostics; the smaller inventory retains only its field allowlist.
+
 ## 1. Download diagnostics
 
 1. Open **Settings → Devices & services**.
-2. Open **Bosch/Buderus Heating**.
+2. Open **Bosch/Buderus Home Comfort**.
 3. Open the three-dot menu.
 4. Select **Download diagnostics**.
 5. Review the file yourself before sharing it.

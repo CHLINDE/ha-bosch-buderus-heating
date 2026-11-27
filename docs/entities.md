@@ -1,20 +1,104 @@
 # Entities and polling
 
-This list documents the state observed on the reference system on August 16,
+<a id="new-pointt-controls-in-the-development-version"></a>
+
+<a id="new-pointt-controls-in-beta7"></a>
+
+## PointT controls in 0.8.2
+
+The following combined entities are included in stable **0.8.2**. I introduced
+them in **0.8.2-beta.7**.
+They are not included in the published 0.8.2-beta.6 or 0.8.1 packages.
+These PointT entities are separate from the additional-cloud device families
+described below.
+
+| Entity | Sources in the same discovered circuit | Supported commands |
+| --- | --- | --- |
+| Heating-circuit climate | `operationMode`, `manualRoomSetpoint`, `currentRoomSetpoint`, `temporaryRoomSetpoint`, valid `roomtemperature` and known heating context | Offered Off, Heat/manual and Auto modes; manual target in manual mode; in Auto mode a temporary target where the circuit offers a writable temporary setpoint |
+| Clear temporary setpoint (button) | `temporaryRoomSetpoint`, `operationMode` | Writes -1 to end an active temporary setpoint in Auto mode; only where the reported limits include -1 |
+| PointT hot water | `actualTemp`, `currentSetpoint`, `operationMode` | Offered, understood operating modes; the active target is read-only |
+
+The combined entities use existing polling data and remain on the same appliance
+device. They can appear during polling when their required capabilities become
+usable. Existing number and select entities keep their IDs and user settings;
+the heating mode, manual target and hot-water mode controls move to
+**Configuration**. Numeric controls use input fields instead of sliders.
+
+Since 0.9.2 every number entity that holds a temperature (setpoints, levels,
+supply limits, outdoor thresholds, the boost temperature) has the device class
+*temperature*; the temperature offset of a room controller's radio device is a
+*temperature difference*. Home Assistant shows these settings in the
+temperature unit of your installation. The integration converts the step with
+them (0.5 °C becomes 0.9 °F) and sends a value set in °F as the nearest step
+in the gateway's unit, as the thermostats do. On installations with °F,
+automations and scripts that set these numbers now use °F values; please
+check them after the update. Entity IDs, unique IDs and enablement stay as
+they were.
+
+The [controls dialog](heating-controls.md) groups settings and keeps edits as
+a draft until Apply. Individual device-page controls write immediately.
+The [PointT hot-water guide](pointt-hot-water.md) distinguishes the read-only
+active target from the separate Eco, Eco+ and Comfort start temperatures.
+
+On a real installation, a manual target change from 19.0 to
+18.5 °C and back through the controls dialog and native climate, and Auto to Off
+and back through the native hot-water entity were confirmed. Both directions were checked in
+MyBuderus. Other modes, circuits and appliances are not confirmed by those tests.
+
+## Published device families and reference inventory
+
+The Beta.6 [Midea Climate Series package](bacon-air-conditioners.md) adds one
+native climate entity per identified device, with its offered mode, target,
+fan and swing controls. Physical-device confirmation is outstanding.
+Two timer numbers and six lifetime energy sensors per unit (all disabled by
+default) are added in 0.9.2-beta.3; they are expected to work but untested on a
+real unit.
+
+Air conditioners that are their own PointT gateway (device type `rac`)
+get one enabled climate entity named after the device and, disabled by
+default, switches for full power, sleep mode, frost-protection heating
+and air purification, the select spot air direction, switch-on and
+switch-off timers, the schedule switch, the active schedule select, the
+button to end a temporary override, the diagnostic binary sensor
+solar operation and one schedule sensor per program (the target of the
+action `set_switch_points`). Unique IDs follow `<gateway>:airConditioning:<path>`
+(`<gateway>:airConditioning:climate` for the climate entity,
+`<gateway>:pv:enable` for the solar state). Expected, untested on a real
+installation; see [air conditioners on a PointT gateway](pointt-air-conditioners.md).
+
+The Beta.6 [Midea/RWH water-heater package](bacon-water-heaters.md) adds one
+native water heater per identified device and optional read-only status
+indicators. Physical-device checks and additional actions remain open.
+
+The Beta.6 [Bacon foundation](bacon-connection.md) adds a separate
+diagnostic connection entity for each explicitly selected additional cloud
+device. Measurements and controls depend on the implemented family adapter.
+Beta.6 also includes the [Air-family fans](bacon-air-purifiers.md) and
+[Dry-family dehumidifiers](bacon-dehumidifiers.md); physical checks remain open.
+
+This list documents the state observed on a real installation on August 16,
 2026. The integration creates entities dynamically, so other systems may expose
 more, fewer, or different entities.
 
 `{hc}`, `{dhw}`, and `{hs}` represent the heating circuits, domestic-hot-water
 circuits, and heat sources that were actually discovered. The corresponding
-name group is created for every additional circuit. All entities remain
-assigned to one shared gateway device and use their group as a display-name
-prefix.
+name group is created for every additional circuit. The entities of each
+PointT heating gateway remain on one shared appliance device and use their
+group as a display-name prefix. Separate cloud appliances and wallboxes keep
+their own device identities.
 
 Generated group and entity names follow the **system language** configured in
 Home Assistant. For example, the same entity appears as **System – System
 type** in English and with its translated name in other supported languages.
 User-defined names such as **Upper floor** are not translated. Names that were
 manually changed in Home Assistant also remain unchanged.
+
+All entity and device names follow the system language, including the
+readings only the local access provides. State texts (for example "Heating"
+or "Off") follow the language of your user profile instead, so a profile in
+another language than the system shows names and states in two languages. To
+change the system language, open **Settings → System → General → Language**;
+the names change after a restart of Home Assistant, the entity IDs stay.
 
 The live comparison on August 16, 2026 processed all 94 reference-advertised
 readable resources without parser errors. The final entity count is dynamic
@@ -30,14 +114,26 @@ paths; the cloud does not expose their content, so they cannot be offered as
 entities.
 
 Cumulative energy entities use the Home Assistant state class
-`total_increasing`, except calculated environmental energy, which uses `total`.
-Its net value may decrease when the source counters update at different times;
-such a decrease must not start a new meter cycle. If a raw counter drops to a
-lower non-negative value after a
-reset or device replacement, Home Assistant treats this as a new meter cycle,
-not negative consumption. The integration does not alter the measurement, but
-records detected drops anonymously as `energy_counter_resets_detected` in
-diagnostics.
+`total_increasing`, except calculated environmental energy and the produced
+heat or cooling, which use `total`. The environmental energy may decrease when
+the source counters update at different times. The produced heat falls briefly
+while the heat pump defrosts, because defrosting takes heat back from the
+heating water; I observed drops of up to about 1 kWh within a few minutes on a real
+installation, through the cloud and the local access alike. Such a decrease
+must not start a new meter cycle, and Home Assistant records it as a small
+negative amount: the energy dashboard can show small negative hourly values of
+the produced heat during defrosting. If a `total_increasing` counter drops to a lower
+non-negative value after a reset or device replacement, Home Assistant treats
+this as a new meter cycle, not negative consumption. For the `total` entities,
+such a reset appears as one large negative amount in the long-term statistics
+and has to be corrected there. For paired counters shown from either access, a
+drop of more than 10 % within one source is shown only when the next reading
+of that source confirms it, so a single low or zero reading never counts as a
+new meter cycle (see [source selection](source-selection.md#counters)). The
+integration does not alter the measurement otherwise, but records detected
+drops anonymously as `energy_counter_resets_detected` in diagnostics;
+decreases of the produced heat during defrosting appear apart as
+`produced_heat_decreases_detected`.
 
 ## Meaning of writeability columns
 
@@ -47,7 +143,7 @@ diagnostics.
   user setting is exposed as a control only when path, data type, write flag,
   and advertised enum options or numeric limits form a valid contract.
   Different devices and circuits can expose different subsets and new codes.
-- The reference system reports 24 writable resources. Twenty are represented
+- The confirmed installation reports 24 writable resources. Twenty are represented
   as readable entities. Sixteen settings have an explicitly validated Home
   Assistant control; administrative values remain locked.
 
@@ -55,29 +151,54 @@ diagnostics.
 
 | Maturity | Meaning | Home Assistant representation |
 |---|---|---|
-| `observed` | Seen in the resource tree, but its meaning is not sufficiently established | No entity; redacted diagnostics only |
+| `observed` | Seen in the resource tree, but its meaning is not sufficiently established | A single number, a text with declared values or a true/false value: read-only diagnostic sensor, disabled by default; anything else: no entity, redacted diagnostics only |
 | `understood` | Type and functional meaning established | Entity possible; default activation follows the user relevance described below |
 | `verified` | Sufficiently confirmed for normal display | Read-only entity, enabled by default |
 | `write_verified` | Write and read-back confirmed on real equipment | Control entity; default activation follows user relevance |
 
 Heating-circuit operation mode, Silent Mode, auxiliary-heater operation mode,
-and maximum supply temperature have been write-confirmed on the reference
-system. Other released controls use the same tested write/read-back service and
+and maximum supply temperature have been write-confirmed on a real
+installation. Other released controls use the same tested write/read-back service and
 are additionally constrained by current gateway metadata. Their individual
 effects have not all been tested on physical equipment.
+
+Before any change of a control, the integration reads that setting from the
+gateway once more and checks value, limits, options and the in-use, available
+and writable flags on that fresh reading, not on the last poll. If the reading
+fails or no longer allows the change, nothing is sent. Otherwise exactly one
+request is sent, followed by the read-back, without an automatic retry.
 
 Default activation is defined explicitly:
 
 - **Enabled:** temperatures and operating states, all available energy
   counters, starts, operating hours, TC3, system pressure, the derived pressure
   status, and released everyday switches, number controls, and selects.
-- **Disabled:** serial number, gateway UUID, country, detailed system
+- **Disabled:** serial number, gateway ID, country, detailed system
   information, individual raw software-update fields, technical device and
   configuration values, the installer-level maximum-supply-temperature
   control, and read-only sensors whose value is already represented by a
   control.
-- **No entity:** unknown manufacturer extensions, Wi-Fi and network data,
-  license text, credentials, and other private or purely internal resources.
+- **Disabled from 0.9.0, depending on the system:** entities that only
+  repeat another one on this system. With exactly one heat source, the
+  total starts (`/heatSources/numberOfStarts`) and the total system run time
+  (`/heatSources/workingTime/totalSystem`) are the counters of that heat
+  source, which stay enabled. On a heat pump (it reports a heat pump type)
+  without a second heat source or a hybrid manager, the burner status
+  (`/heatSources/flameStatus`) follows the compressor. With a second heat
+  source or on a boiler they stay enabled. This applies only when an entity
+  is first created: an existing entity keeps its setting, enabled or
+  disabled.
+- **Disabled, diagnostic:** resources the integration does not know yet. Every
+  one with a single readable value becomes a sensor named after its path: a
+  number with its unit (an unknown unit is not shown), a text with declared
+  values as a state, true/false as on/off. Such a sensor is never a control,
+  also when the resource is writable, and needs no additional request. It
+  keeps its unique ID when a later version knows the resource. A known
+  resource in a shape its rules do not expect still shows no value, so its
+  entity keeps its unit and statistics.
+- **No entity:** Wi-Fi and network data, identifiers, license text,
+  credentials, names, free text without declared values, lists, structures and
+  configuration that feed other features.
 
 Example of an avoided duplicate: **Heating circuit 1 – Manual setpoint** is
 available as an active number control. The additional read-only sensor for the
@@ -89,7 +210,7 @@ an integration update.
 
 ## Polling rules
 
-| Group | Frequency | Content on the reference system |
+| Group | Frequency | Content on the confirmed installation |
 |---|---:|---:|
 | Live values | 60 seconds | Dynamic operating states and measurements |
 | Notifications | 5 minutes normally; 60 seconds while active | 4 aggregate entities when supported |
@@ -119,14 +240,29 @@ because their values cover every gateway selected for that account.
 
 | Entity | HA type | Value | Default | Additional cloud requests |
 |---|---|---|:---:|:---:|
-| PointT API requests total | Diagnostic sensor | Actual HTTP attempts since the integration started | Disabled | None |
-| PointT API requests – last hour | Diagnostic sensor | Actual HTTP attempts in rolling minute buckets | Disabled | None |
-| PointT API response time – last hour | Duration diagnostic sensor | Average successful response time; p95, maximum, latest, and sample count as attributes | Disabled | None |
+| Cloud requests total | Diagnostic sensor, state class `total` | Actual HTTP attempts since the integration started | Disabled | None |
+| Cloud requests – last hour | Diagnostic sensor | Actual HTTP attempts in rolling minute buckets | Disabled | None |
+| Cloud response time – last hour | Duration diagnostic sensor | Average successful response time; p95, maximum, latest, and sample count as attributes | Disabled | None |
+
+Up to 0.9.0-alpha.6 these sensors were named "PointT API requests total",
+"PointT API requests – last hour" and "PointT API response time – last
+hour". Existing sensors keep their entity IDs (for example
+`sensor.pointt_api_requests_total`) and a name you set yourself; only new
+installations get entity IDs from the new names.
 
 Bulk calls, single reads, fallback reads, writes, and retries are counted by
 the HTTP transport. A retry therefore adds another request. The full sanitized
 recent-attempt list is available in downloaded Home Assistant diagnostics, not
 as entity attributes. See [Diagnostics and request metrics](diagnostics.md).
+
+Since 0.9.0-alpha.2 these sensors check their values once a minute and write a
+new state only when a shown value changed, at most once per minute; the last
+counts are written when Home Assistant stops. The observation time and the
+per-category counters (by category, method, type, status and outcome) are
+still shown as attributes but no longer recorded, which keeps the database
+much smaller. The total request sensor starts again at zero with each start
+of the integration; its `last_reset` is that start, so its statistics do not
+treat the new start as a drop.
 
 ## Faults and notifications
 
@@ -145,7 +281,9 @@ Warnings and maintenance messages contribute to **Active notifications** but
 do not by themselves activate **System fault**. Unknown classifications are
 treated conservatively as faults. A missing entry is considered resolved only
 after two complete successful reads; a timeout, rate limit, malformed entry,
-or partial batch response never clears an existing fault.
+or partial batch response never clears an existing fault. During a short
+cloud outage the entities keep the last confirmed state for a limited time
+(see [faults](faults.md#timing-and-reliability)).
 
 The integration persists only the normalized active baseline needed to avoid
 duplicate events after a Home Assistant restart. No raw cloud response is
@@ -168,7 +306,7 @@ The calendar supports multiple periods. PointT timestamps retain their offset;
 naive timestamps use the gateway time zone where available and otherwise the
 Home Assistant time zone. Invalid or incomplete periods are ignored
 individually, so one malformed entry cannot hide the valid entries. Date-only
-end dates are treated as inclusive, matching the app wording.
+end dates are treated as inclusive.
 The **Next holiday** sensor shows the start of the current or next period on
 the device page. Its attributes contain the end, whether the period is
 currently active, and whether it is an all-day period.
@@ -195,17 +333,21 @@ counters—not holiday dates, names, or raw configuration data.
 |---|---|---|:---:|:---:|---:|
 | Brand | Diagnostic sensor | `/gateway/brand` | No | No | startup only |
 | Serial number (disabled) | Diagnostic sensor | `/gateway/serialId` | No | No | startup only |
-| Gateway UUID (disabled) | Diagnostic sensor | `/gateway/uuid` | No | No | startup only |
+| Gateway ID (disabled; before 0.9.1 *Gateway UUID*, the value is the gateway number) | Diagnostic sensor | `/gateway/uuid` | No | No | startup only |
 | Date and time | Diagnostic sensor | `/gateway/dateTime` | No | No | 15 min |
-| Software prefix | Diagnostic sensor | `/gateway/swPrefix` | No | No | startup only |
+| Software family (before 0.9.1 *Sw Prefix*) | Diagnostic sensor | `/gateway/swPrefix` | No | No | startup only |
 | Data processing status (disabled) | Diagnostic sensor | `/gateway/dataProcessing/status` | No | No | startup only |
 | Time zone | Diagnostic sensor | `/gateway/tzInfo/timeZone` | Yes | No | 5 min |
-| Software update – current progress | Diagnostic sensor | `/gateway/update/status` → `progress.cur_percent` | No | No | 60 s |
-| Software update – current step | Diagnostic sensor | `/gateway/update/status` → `progress.cur_step` | No | No | 60 s |
-| Software update – total steps | Diagnostic sensor | `/gateway/update/status` → `progress.nsteps` | No | No | 60 s |
-| Software update – progress | Diagnostic sensor | `/gateway/update/status` → `progress.percent` | No | No | 60 s |
-| Software update – status | Diagnostic sensor | `/gateway/update/status` → `status.value` | No | No | 60 s |
+| Automatic updates, Last update check, Last update (disabled; from 0.9.2-beta.3) | Diagnostic sensors | `/gateway/update/enabled`, `lastCheck`, `lastUpdate` | No | No | 15 min |
+| LED switch-off time (disabled; from 0.9.2-beta.3, only on gateways that report it) | Diagnostic sensor | `/gateway/leds/inactivityTimeout` | No | No | 15 min |
+| Gateway clock deviation (calculated; disabled; from 0.9.2-beta.3) | Diagnostic sensor, seconds | `/gateway/DateTime` against the time of Home Assistant | No | No | 15 min |
+| Software update – current progress | Diagnostic sensor | `/gateway/update/status` → `progress.cur_percent` | No | No | 15 min |
+| Software update – current step | Diagnostic sensor | `/gateway/update/status` → `progress.cur_step` | No | No | 15 min |
+| Software update – total steps | Diagnostic sensor | `/gateway/update/status` → `progress.nsteps` | No | No | 15 min |
+| Software update – progress | Diagnostic sensor | `/gateway/update/status` → `progress.percent` | No | No | 15 min |
+| Software update – status | Diagnostic sensor | `/gateway/update/status` → `status.value` | No | No | 15 min |
 | Firmware version | Diagnostic sensor | `/gateway/versionFirmware` | No | No | startup only |
+| Firmware | Update entity | firmware update list (`firmwareUpdates`, no resource path) | No | No | 10 min after start, then 6 h |
 | Hardware version | Diagnostic sensor | `/gateway/versionHardware` | No | No | startup only |
 | Current heat demand | Sensor | `/heatSources/actualHeatDemand` | No | No | 60 s |
 | Current modulation | Sensor | `/heatSources/actualModulation` | No | No | 60 s |
@@ -216,9 +358,9 @@ counters—not holiday dates, names, or raw configuration data.
 | Auxiliary-heater operation mode | Diagnostic sensor (disabled) and select | `/heatSources/additionalHeater/operationMode` | Yes | Yes | 5 min; staggered read-back after change |
 | Primary auxiliary-heater type (disabled) | Diagnostic sensor | `/heatSources/additionalHeater/primary/type` | No | No | startup only |
 | Emergency mode | Sensor | `/heatSources/currentEmergencyMode` | No | No | 60 s |
-| Supply temperature | Sensor | `/heatSources/actualSupplyTemperature` | No | No | 60 s |
+| System supply temperature (before 0.9.1 *Supply temperature*) | Sensor | `/heatSources/actualSupplyTemperature` | No | No | 60 s |
 | Energy management status | Sensor | `/heatSources/emStatus` | No | No | 60 s |
-| Flame status | Sensor | `/heatSources/flameStatus` | No | No | 60 s |
+| Heat source active (before 0.9.1 *Burner status*; also exists on boilers) | Sensor; on a heat pump created disabled from 0.9.0 (see [default activation](#maturity-and-default-activation)) | `/heatSources/flameStatus` | No | No | 60 s |
 | Return temperature | Sensor | `/heatSources/returnTemperature` | No | No | 60 s |
 | Passive-cooling inlet temperature | Sensor | `/heatSources/passiveCooling/inflowTemp` | No | No | 60 s |
 | PV contact status | Sensor | `/heatSources/pvContactState` | No | No | 60 s |
@@ -237,14 +379,19 @@ counters—not holiday dates, names, or raw configuration data.
 | Brand | Diagnostic sensor | `/system/brand` | No | No | startup only |
 | Country (disabled) | Diagnostic sensor | `/system/country` | No | No | startup only |
 | System information (disabled) | Text diagnostic sensor with module names, versions, and sanitized attributes | `/system/info` | No | No | startup only |
+| Heat generator | Diagnostic sensor, enabled (see [heat generator models](#heat-generator-models)) | module list of `/system/info` (cloud) or `/system/basicInfo` (local access) | No | No | with these reads, no own request |
 | System bus | Diagnostic sensor | `/system/bus` | No | No | 15 min |
 | Season switching | Select | `/system/seasonOptimizer/mode` | Capability-dependent | Yes, with advertised options and write permission | 5 min; read back after change |
+| Stop heating at outdoor temperature (central, number since 0.9.2-beta.3) | Number control (disabled), only with limits | `/system/seasonOptimizer/heatingThreshold` | Yes where reported | Yes (expected, untested) | 5 min; read back after change |
+| Start cooling at outdoor temperature (central, number since 0.9.2-beta.3) | Number control (disabled), only when the path is found | `/system/seasonOptimizer/coolingThreshold` | Yes where reported | Yes (expected, untested) | 5 min; read back after change |
 | Current heating/cooling status (disabled) | Diagnostic sensor | `/system/globalSeasonOptimizer/currentMode` | No | No | 60 s |
 | iSRC support (disabled) | Diagnostic sensor | `/system/iSRC/supportStatus` | No | No | startup only |
-| Outdoor temperature source | Diagnostic sensor | `/system/sensors/temperatures/outdoorTemperatureSource` | No | No | 60 s |
+| Outdoor temperature source | Diagnostic sensor | `/system/sensors/temperatures/outdoorTemperatureSource` | No | No | 15 min |
 | Outdoor temperature | Sensor | `/system/sensors/temperatures/outdoor_t1` | No | No | 15 min |
 | System type | Diagnostic sensor | `/system/type` | No | No | startup only |
-| Support status | Diagnostic sensor | `/system/variableTariff/supportStatus` | No | No | 60 s |
+| Variable tariff – support (before 0.9.1 *Support status*) | Diagnostic sensor | `/system/variableTariff/supportStatus` | No | No | startup only |
+| Variable tariff active (iCom, disabled, since 0.9.2) | Diagnostic binary sensor | `/application/tbso/enable` | Yes | No | startup only |
+| Tariff ID (iCom, disabled, since 0.9.2) | Diagnostic sensor, attribute `tariff_selected` | `/application/tbso/electricity/tariffID` | Yes | No | startup only |
 
 The system-pressure sensor also receives the six validated limits as numeric
 attributes with the unit in each attribute name:
@@ -256,6 +403,182 @@ states. Attributes and status are created only when all six values are numeric,
 finite, non-negative, and plausibly ordered. Systems without complete pressure
 range information therefore receive no invented limits.
 
+The iSRC installation status, the iSRC support status and the season
+switching shown as a read-only sensor show translated states. Device spellings such as `TIMEOUT`, `SUPPORTED` or
+`forcedHeat` become the states `timeout`, `supported` and `forced_heat`; an
+unknown value stays as reported. Since 0.9.0-alpha.2 the state values of these
+entities are therefore different: automations and templates that check the
+raw values need the new ones.
+
+The **system supply temperature** (`/heatSources/actualSupplyTemperature`,
+"system supply flow temperature" in the API documentation) is the supply
+temperature of the heating system, not necessarily the heat pump's own
+flow. On a heat pump with a buffer cylinder it is the flow of the heating
+side behind the buffer: during a hot water charge it stayed at about 21 °C
+while the heat pump's flow (TC1, *Primary supply temperature (TC1)*) was at
+about 52 °C, and in heating it reads a few tenths of a kelvin below TC1. The
+controller's Info menu shows it as *Vorlauftemperatur*. Up to 0.9.0 the
+entity was called *Supply temperature* and, under the heat pump device, read
+like the heat pump's flow; since 0.9.1 it is *System supply temperature*
+(*Vorlauftemperatur Anlage*). Its entity ID, unique ID and history stay; a
+name you set yourself stays as well. The supply temperature of a heating
+circuit (`/heatingCircuits/{hc}/actualSupplyTemperature`) keeps its name.
+
+The software update status, the outdoor temperature source, the iSRC
+installation status and the variable-tariff support status rarely change.
+Since 0.9.0-alpha.2 the last two are read at startup only and the first two
+with the long-term values (15 minutes, 30 minutes with the cloud-friendly
+profile). Lists and containers
+that only reveal new devices, zones, solar circuits or ventilation zones and
+give no entity (for example `/devices/list` or `/zones/list`) are read hourly.
+On a room controller the zone list is read every five minutes, because it
+shows the open window and the standby of each zone.
+
+### Heat generator models
+
+Since 0.9.1 every gateway with a module list has one diagnostic sensor
+**Heat generator** (translation key `heat_generator`). It tells cards and
+automations which heat generators the gateway reports: indoor unit, outdoor
+unit, boiler, hybrid manager and further cascade stages. The hydraulic card,
+for example, can pick a matching drawing from it. The sensor is enabled by
+default and belongs to the system device.
+
+The sensor sends no request of its own. It reads the module list that the
+cloud (`/system/info`) and the local access (`/system/basicInfo`) already
+read, and it writes its state only when what it shows changes. Of each
+module only the product name and the hardware type are read; serial
+numbers, tokens, versions and type numbers are never shown, stored or
+logged. Rows without a product name (the gateway, the user interface) do
+not count.
+
+The unique ID is `<gateway>:heat_generator`. It does not depend on the
+position of a module, on the source or on the language, so the entity stays
+the same with only the cloud, only the local access, both of them, after a
+change between them and after a device exchange. The attribute keys below
+are fixed English keys; their values are never translated.
+
+| Attribute | Content |
+|---|---|
+| state | Product name of the main heat generator: the first module with the role `heat_source`, otherwise `boiler`, otherwise the first module of the list; at most 255 characters without control characters; `unknown` before the first module list |
+| `heat_generators` | One entry per module with `role`, `product_name`, `hardware_type`, `family`, `construction` and `power_kw`, sorted by role and then by product name (at most 16 entries). Cascades and hybrid systems give several entries. |
+| `primary` | `family`, `construction`, `power_kw` and `brand_family` of the main heat generator, and `outdoor_power_kw`: the `power_kw` of its outdoor unit (with several outdoor units, for example in a cascade, the first one in the order of `heat_generators`), otherwise `null`; for simple card queries |
+| `outdoor_unit` | Product name of the (first) outdoor unit, otherwise `null` |
+| `source` | `cloud` or `local`: which access supplied the shown list |
+| `table_version` | Version of the model table that interpreted the list |
+| `known` | `true` when the model table describes the product of every module |
+| `heat_source_type` | `air`, `brine` or `water` from evidence readings, not from the module list (see [Calculated values](calculated-values.md#heat-source-type)); `null` without evidence |
+
+The roles are `heat_source`, `boiler`, `outdoor_unit`, `hybrid_manager` and
+`other`; `construction` is `monobloc`, `split` or `compact`. The product
+name and the hardware type are always reported as the gateway sends them.
+Role, family, construction, power and brand family come only from the model
+table `heat_generator_models.json` and stay `null` without a matching entry;
+nothing is derived from parts of a name or from the position of a module in
+the list. The role comes from the hardware type. Every table entry names its
+evidence: `observed` (seen in the module list of a real installation) or
+`documented` (stated in a datasheet or on a product page of the
+manufacturer; the entry keeps the address, and only the manufacturer sites
+listed in the table are accepted). In 0.9.1 the table holds:
+
+- observed: Logatherm WLW176i-12 TP70 with the monobloc outdoor unit
+  WLW-10 MB AR, as seen together in a real module list, and the hardware
+  types `XCU_THH` (indoor unit) and `XCU_SRH` (outdoor unit), which the
+  official local API documentation shows as well;
+- documented: the indoor units WLW176i-12 E/TP70 and WLW186i-12 E/TP70 and
+  the monobloc outdoor units WLW-5/7/10/12 MB AR with their power classes,
+  the indoor units CS5800i AW 12 and CS6800i AW 12 (E, M, MB), the outdoor
+  units AW 4/5/7 OR-S and AW 10/12 OR-T, and the outdoor units of the
+  CS3800i AW and CS8800i AW.
+
+Families are kept per product line (`wlw176i`, `wlw186i`, `wlw_mb_ar`,
+`cs5800i_aw`, `cs6800i_aw`, `aw_or`, `cs3800i_aw`, `cs8800i_aw`); lines of
+different brands are never equated. An outdoor unit that serves several
+indoor lines has its own family, and the indoor unit names the line.
+`construction` is set only where a manufacturer document names it; for the
+WLW176i and WLW186i indoor units it comes from the system documentation,
+which names the monobloc WLW MB AR as the only outdoor unit of these
+systems, not from a statement about the indoor unit itself. The
+power class belongs to the outdoor unit, not to the name of the indoor
+unit, and is set only where a document states it for that unit (for
+example 10 for WLW-10 MB AR and AW 10 OR-T); otherwise it stays `null`.
+Other spellings, sizes and lines stay without meaning until an entry
+covers them. A further model needs one table entry and a
+test; the entity, its keys and the structure stay as they are. Modules
+without a table entry for their product are listed in the diagnostics under
+`heat_generator.unmapped_modules`; such a report lets the table grow.
+
+Example: an installation with a Logatherm WLW176i-12 TP70 and a WLW-10 MB AR
+reports:
+
+```yaml
+state: Logatherm WLW176i-12 TP70
+heat_generators:
+  - role: heat_source
+    product_name: Logatherm WLW176i-12 TP70
+    hardware_type: XCU_THH
+    family: wlw176i
+    construction: monobloc
+    power_kw: null
+  - role: outdoor_unit
+    product_name: WLW-10 MB AR
+    hardware_type: XCU_SRH
+    family: wlw_mb_ar
+    construction: monobloc
+    power_kw: 10
+primary:
+  family: wlw176i
+  construction: monobloc
+  power_kw: null
+  brand_family: bosch_group
+  outdoor_power_kw: 10
+outdoor_unit: WLW-10 MB AR
+source: local
+table_version: 1
+known: true
+```
+
+With the cloud and the local access, a list that both agree on keeps the
+source it was shown with, so an answer of the other access alone writes no
+new state. When they disagree, the list shown last stays, and the diagnostics
+report the disagreement (`heat_generator.conflict`). Every gateway follows
+the same rules, iCom gateways included; a module whose hardware type has no
+table entry gets the role `other`. Without a module with a product name (an
+empty list, older firmware) there is no entity and no log message. Room
+controllers never get the entity; their module list names no heat
+generator. A start from the stored inventory, which keeps no module list,
+keeps the last state of an existing entity.
+
+### Firmware update
+
+Each cloud gateway gets an update entity **Firmware**, read-only. It shows the
+installed gateway firmware and, when the cloud offers an update, its version
+and a link to the release notes (`release_url`, in the language of Home
+Assistant, else English, else the first link). The integration never fetches
+the release notes and never installs: the entity has no install function, and
+no request confirms an update or changes the gateway's automatic update
+setting. The attributes are `auto_update_enabled` and
+`auto_update_changeable` (the gateway's own automatic update) and
+`update_state`, the state the cloud reports for the update (`waiting`,
+`denied`, `approved`, `none`, `unknown`, or another reported value as it
+is). `waiting` and `denied` count as an offered update and `approved` as an
+update being installed, each only with a version other than the installed
+one (expected, untested). `none`, `unknown` and any other state keep the
+entity current and are only shown in `update_state`. Without a version in the
+list, the entity shows the firmware version the gateway reports.
+
+The list is not a resource path. It is read once about ten minutes after the
+start (spread over three minutes per gateway), then every six hours, without
+a retry of its own; the pause after a rate limit applies as for every request,
+and a round while the cloud is paused or unreachable sends nothing and looks
+again after an hour. A gateway the list refuses (HTTP 403, 404 or 405) or does
+not name gets no entity, or an existing one becomes unavailable; it is then
+read once a day. An answer of an unexpected shape also makes the entity
+unavailable. The last answer is shown for 13 hours after it was read. After a
+restart of Home Assistant, the entity shows the answer it kept from before
+until the first new read, again only within these 13 hours; an older or
+missing answer leaves it unavailable until then. The function is tested with
+simulated answers only and is expected, untested on a real device.
+
 Some K40 gateways serve the status paths above without listing them in the
 PointT reference tree. The integration probes only this bounded, documented
 set during discovery. Unsupported paths are ignored and are not added to
@@ -265,13 +588,13 @@ the entire Home Assistant session.
 
 ## Heating circuits
 
-The reference system creates 14 core entities. Optional app capabilities add
+The confirmed installation creates 14 core entities. Optional app capabilities add
 entities only when the gateway returns them. An empty optional name produces
 no entity; a configured name is added dynamically.
 
 | Entity | HA type | PointT resource | PointT reports writable | Controllable in HA | Polling |
 |---|---|---|:---:|:---:|---:|
-| Active schedule | Sensor | `/heatingCircuits/{hc}/activeSwitchProgram` | Yes | No | 5 min |
+| Active schedule | Sensor; select only with two readable programs (since 0.9.0-alpha.6) | `/heatingCircuits/{hc}/activeSwitchProgram` | Yes | Yes, A/B | 5 min; read back after change |
 | Control type | Sensor | `/heatingCircuits/{hc}/controlType` | Yes | No | 5 min |
 | Desired temperature | Sensor | `/heatingCircuits/{hc}/currentRoomSetpoint` | No | No | 60 s |
 | Current heating/cooling status | Sensor | `/heatingCircuits/{hc}/currentSuWiMode` | No | No | 60 s |
@@ -286,8 +609,25 @@ no entity; a configured name is added dynamically.
 | Operating status | Sensor | `/heatingCircuits/{hc}/overallStatus` | No | No | 60 s |
 | Schedule type | Sensor | `/heatingCircuits/{hc}/switchProgramMode` | Yes | No | 5 min |
 | Schedule name A | Sensor | `/heatingCircuits/{hc}/switchPrograms/nameA` | Yes | No | 5 min |
-| Heating | Sensor and number control | `/heatingCircuits/{hc}/temperatureLevels/comfort2` | Yes | Yes | 5 min; read back after change |
-| Setback | Sensor and number control | `/heatingCircuits/{hc}/temperatureLevels/eco` | Yes | Yes | 5 min; read back after change |
+| Time program A (B) | Diagnostic enum sensor; a program with temperatures (`absolute`) is a temperature sensor | `/heatingCircuits/{hc}/switchPrograms/A` | Yes; since 0.9.2-beta.2 enabled when the gateway reports it writable (first registration only) | Yes, under Configure (since 0.9.0-alpha.6) and with the action `set_switch_points` | 15/30 min; scheduled level recalculated locally each minute; read back after change |
+| Time program name A (B) | Text control (disabled) | `/heatingCircuits/{hc}/switchPrograms/nameA` | Only with a known `valueConfig` coding, not on iCom | Yes (expected, untested) | 5 min; read back after change |
+| Cooling time program | Diagnostic enum sensor (`on`/`off`) | `/heatingCircuits/{hc}/cooling/switchPrograms/A` | Yes when writable | Yes, when limits and the cooling level `on` are reported (expected, untested) | 15/30 min |
+| Heating temperature (sensor before 0.9.1 *Heating*) | Sensor and number control | `/heatingCircuits/{hc}/temperatureLevels/comfort2` | Yes | Yes | 5 min; read back after change |
+| Setback temperature (sensor before 0.9.1 *Reduced*) | Sensor and number control | `/heatingCircuits/{hc}/temperatureLevels/eco` | Yes | Yes | 5 min; read back after change |
+| Summer/winter switching (select since 0.9.2) | Sensor (disabled) and select | `/heatingCircuits/{hc}/suWiSwitchMode` | Yes | Yes, not on room controllers (expected, untested) | 5 min; read back after change |
+| Stop heating at outdoor temperature (number since 0.9.2) | Sensor (disabled) and number control | `/heatingCircuits/{hc}/suWiThreshold` | Yes | Yes (expected, untested) | 5 min; read back after change |
+| Cooling: room setpoint (number since 0.9.2) | Sensor and number control (disabled) | `/heatingCircuits/{hc}/cooling/roomTempSetpoint` | Yes | Yes (expected, untested) | 5 min; read back after change |
+| Start cooling at outdoor temperature (number since 0.9.2) | Sensor (disabled) and number control (disabled), only while cooling is offered | `/heatingCircuits/{hc}/cooling/outdoorThreshold` | Yes | Yes (expected, untested) | 5 min; read back after change |
+| Away temperature (number since 0.9.2) | Sensor (disabled) and number control | `/heatingCircuits/{hc}/awayTemperature` or `.../temperatureLevels/awayTemperature` | Yes | Yes (expected, untested) | 5 min; read back after change |
+| Cooling temperature (number since 0.9.2) | Sensor (disabled) and number control (disabled) | `/heatingCircuits/{hc}/cooling/temperatureLevels/on` | Yes | Yes (expected, untested) | 5 min; read back after change |
+| Boost (switch since 0.9.2-beta.3) | Sensor (disabled) and switch (disabled), only with exactly the values `on` and `off` advertised, not on room controllers | `/heatingCircuits/{hc}/boostMode` | Yes | Yes (expected, untested) | 5 min; read back after change |
+| Boost duration (number since 0.9.2-beta.3) | Sensor (disabled) and number control (disabled), only with limits | `/heatingCircuits/{hc}/boostDuration` | Yes | Yes (expected, untested) | 5 min; read back after change |
+| Boost temperature (number since 0.9.2-beta.3) | Sensor (disabled) and number control (disabled), only with limits | `/heatingCircuits/{hc}/boostTemperature` | Yes | Yes (expected, untested) | 5 min; read back after change |
+| Cooling: operation mode (select since 0.9.2-beta.3; before, the name read as a second operating mode) | Sensor and select (disabled), only with the advertised modes `off`, `manual`, `auto` | `/heatingCircuits/{hc}/cooling/operationMode` | Yes | Yes (expected, untested) | 5 min; read back after change |
+| Cooling: control type (renamed in 0.9.2-beta.3) | Sensor (disabled) | `/heatingCircuits/{hc}/cooling/controlType` | Yes | No | 5 min |
+| Setpoint optimization (switch since 0.9.2-beta.3) | Sensor (disabled) and switch (disabled), not on room controllers | `/heatingCircuits/{hc}/setpointOptimization` | Yes | Yes (expected, untested) | 5 min; read back after change |
+| Open window detection (switch since 0.9.2-beta.3) | Switch (disabled), only when the path is found, not on room controllers | `/heatingCircuits/{hc}/openWindowDetection/enabled` | Yes | Yes (expected, untested) | 5 min; read back after change |
+| Cooling threshold of a circuit (number since 0.9.2-beta.3) | Number control (disabled), only when the path is found | `/heatingCircuits/{hc}/suWiCoolingThreshold` | Yes | Yes (expected, untested) | 5 min; read back after change |
 
 The select is created only when the heating circuit currently reports the
 `stringValue` type, writeability, and all three allowed raw values `off`,
@@ -297,15 +637,44 @@ reported rapid consecutive changes with a delay, the integration performs up
 to three staggered read-back checks. It never repeats the PUT. The sequence
 **Manual → Auto → Manual** was confirmed.
 
-The read-only schedule-type sensor recognizes all three modes defined by the
-official apps: `level` is shown as **Temperature level**, `levels` as
+The read-only schedule-type sensor recognizes all three known modes: `level`
+is shown as **Temperature level**, `levels` as
 **Temperature Levels**, and `absolute` as **Freely Adjustable Temperatures**.
 The latter means that each schedule period can use an independently chosen
-temperature. Schedule editing itself remains outside the current Home
-Assistant controls.
+temperature. The switch points of a program are changed under **Configure**
+(time programs) or with the action `set_switch_points` on its time-program
+sensor; see [heating controls](heating-controls.md). Changing hot water
+program A was confirmed on a real installation; the other programs are
+expected, untested.
 
-Other enum-like diagnostic values are normalized from the exact PointT
-spellings embedded in MyBuderus and HomeCom Easy. This includes heating and
+The time-program sensors show the level scheduled by program A (or B) for the
+current local time. Since 0.9.2-beta.2 a sensor is enabled when the gateway
+reports its program writable at its first registration, so the dialog and the
+action have a target; a read-only program's sensor is disabled by default, and
+an existing entry keeps its enablement. Their attributes list
+the switch points per weekday as local wall-clock times (`HH:MM level`), the
+total and per-day limits and the time raster reported by the device. These
+calculated values do not confirm which program is selected or whether manual
+operation, a holiday or another override is active. Use the separate operating
+status and current-setpoint entities for the controller's reported state.
+
+The calculation uses the gateway's time zone when it can be resolved, otherwise
+Home Assistant's configured zone. It runs locally each minute, writes state
+only when the level changes and makes no cloud request. At a clock change it
+reevaluates the schedule for the new local time, including a skipped or repeated
+hour. This calculation is covered by software tests; the controller's behavior
+during clock changes has not been physically confirmed.
+
+A program with an unexpected shape, no switch points or an unknown setpoint
+reference creates no sensor. An existing sensor becomes unknown until a valid
+program is read again, while its identity, custom name and activation settings
+are preserved, including across a restart. New valid level keys update the enum
+options during normal polling; keys without a translation are displayed as
+reported. On the reference WLW186i, heating allowed two and hot water six switch
+points per day in a 15-minute raster.
+
+Other enum-like diagnostic values are normalized from their exact PointT
+spellings. This includes heating and
 cooling control types, hot water following the heating schedule, heat-pump and
 heat-source variants, system layouts, energy-management activity, and the PV
 contact state. Unknown future values remain safely unavailable until their
@@ -339,22 +708,33 @@ reported.
 | Reduce temperature on alarm | Sensor and switch | `/dhwCircuits/{dhw}/reduceTempOnAlarm` | Yes | Yes | 5 min; read back after change |
 | Extra hot-water setpoint | Sensor and number control | `/dhwCircuits/{dhw}/singleChargeSetpoint` | Yes | Yes | 5 min; read back after change |
 | Thermal disinfection | Sensor | `/dhwCircuits/{dhw}/tdMode` | No | No | 60 s |
-| Eco+ start temperature | Sensor and number control | `/dhwCircuits/{dhw}/temperatureLevels/eco` | Yes | Yes | 5 min; read back after change |
-| Comfort start temperature | Sensor and number control | `/dhwCircuits/{dhw}/temperatureLevels/high` | Yes | Yes | 5 min; read back after change |
-| Eco start temperature | Sensor and number control | `/dhwCircuits/{dhw}/temperatureLevels/low` | Yes | Yes | 5 min; read back after change |
-| Off | Sensor | `/dhwCircuits/{dhw}/temperatureLevels/off` | No | No | 15 min |
+| Start threshold Eco+ | Sensor and number control | `/dhwCircuits/{dhw}/temperatureLevels/eco` | Yes | Yes | 5 min; read back after change |
+| Start threshold Comfort | Sensor and number control | `/dhwCircuits/{dhw}/temperatureLevels/high` | Yes | Yes | 5 min; read back after change |
+| Start threshold Eco | Sensor and number control | `/dhwCircuits/{dhw}/temperatureLevels/low` | Yes | Yes | 5 min; read back after change |
+| Setpoint level off | Sensor | `/dhwCircuits/{dhw}/temperatureLevels/off` | No | No | 15 min |
+| Time program A | Diagnostic enum sensor | `/dhwCircuits/{dhw}/switchPrograms/A` | Yes; since 0.9.2-beta.2 enabled when the gateway reports it writable (first registration only) | Yes, under Configure (since 0.9.0-alpha.6) and with the action `set_switch_points` | 15/30 min; scheduled level recalculated locally each minute; read back after change |
+| Hot water time program (WDDW2) | Diagnostic temperature sensor (`off` → no value, attribute `scheduled: off`) | `/dhwCircuits/dhw1/switchPrograms/program1` | Yes when writable | Yes, with limits and the `manualSetpoint` range (expected, untested) | 15/30 min |
+| Heating / cooling time program (zone) | Diagnostic temperature sensors | `/zones/{zone}/switchPrograms/heating`, `.../cooling` | Yes when writable | Yes, with limits, range and step (expected, untested) | 15/30 min |
+| Ventilation time program | Diagnostic enum sensor | `/ventilation/zone1/switchPrograms/cp` | Yes when writable | Yes, with the levels listed in `ventilationLevels` (expected, untested) | 15/30 min |
 
 Number controls use the minimum and maximum reported by the gateway. They are
-created only when both limits are complete and fall within additional safe
-temperature or duration ranges. Heating-circuit setpoints use the 0.5 °C step
-confirmed on the reference system. PointT reports no step for hot-water
+created only when both limits are complete and lie within a broad plausibility
+range: −30 to 100 °C (converted for °F and K) for temperatures and 0 to 2,880
+minutes for durations. The range only rejects corrupt metadata, such as a
+placeholder maximum of 6,553.5 °C; it prescribes no reference-device limits.
+Heating-circuit setpoints use the 0.5 °C step
+confirmed on a real installation. PointT reports no step for hot-water
 temperatures; a physical test with 0.5 °C was not confirmed initially and later
 appeared rounded to the next whole degree. All hot-water temperature controls
-therefore use a 1 °C step.
+therefore use a 1 °C step. Because the gateway rounds these Celsius setpoints,
+a value off this grid (for example 52.5 °C for hot water or 20.3 °C for a
+heating circuit) is rejected before anything is sent. A thermostat command in
+°F is set to the nearest grid value. Other controls keep accepting every value
+within the gateway's limits.
 
 The maximum-supply-temperature control adopts the minimum and maximum reported
 by each individual gateway instead of assuming the 30–60 °C range observed on
-the reference system. A broad 0–100 °C plausibility envelope only rejects
+a real installation. The broad plausibility range above only rejects
 obviously corrupt metadata. The control uses whole-degree steps and is disabled
 by default because it is an installer-level limit rather than an everyday
 setpoint.
@@ -364,6 +744,23 @@ The K40 also referenced stop temperatures (`highStop`, `lowStop`,
 `lowChargingDelta`, `ecoChargingDelta`), but PointT returned HTTP 403 for
 them. They cannot be exposed as Home Assistant entities even though they are
 visible in the local expert menu.
+
+The PointT levels and the app's names belong together as follows: `eco` is
+Eco+, `low` is Eco and `high` is Comfort, in the mode select, the hot water
+entity and the three start thresholds. A start threshold is the hot water
+temperature below which the heat pump starts a charge in that level; the
+controller calls it the start temperature, and its stop temperature is not
+available. Since 0.9.1 they are named *Start threshold Eco+*, *Start
+threshold Eco* and *Start threshold Comfort* (before *… start temperature*);
+the sensor of the `off` level is *Setpoint level off* (before *Off*), the
+value set for that level (0 °C on a WLW176i heat pump). On that heat pump the Eco+ start
+temperature is the lowest (40 °C), Eco and Comfort follow (51 °C and
+53 °C). Home Assistant drops the "+" when it builds an entity ID, so the
+Eco+ and the Eco start temperature get the same base ID: one ends in
+`…_eco_start_temperature`, the other in `…_eco_start_temperature_2`. On that
+installation the first one is Eco+ and the second one Eco. The names always
+show the right level; if in doubt, the unique ID ends in
+`temperatureLevels:eco` (Eco+) or `temperatureLevels:low` (Eco).
 
 ## Heat sources
 
@@ -383,17 +780,495 @@ or its live schema does not match the documented type and unit.
 | Heating starts | Diagnostic sensor | `/heatSources/{hs}/numberOfStarts` → `ch` | No | No | 15 min |
 | Cooling starts | Diagnostic sensor | `/heatSources/{hs}/numberOfStarts` → `cooling` | No | No | 15 min |
 | Hot-water starts | Diagnostic sensor | `/heatSources/{hs}/numberOfStarts` → `dhw` | No | No | 15 min |
+| Pool-heating starts | Diagnostic sensor | `/heatSources/{hs}/numberOfStarts` → `pool` | No | No | 15 min |
 | Condenser outlet temperature (TC3) | Diagnostic sensor | `/heatSources/{hs}/supplyFlowCondenserTemp` | No | No | 15 min |
-| System type | Diagnostic sensor | `/heatSources/{hs}/type` | No | No | startup only |
+| Heat source type (before 0.9.1 *System type*) | Diagnostic sensor | `/heatSources/{hs}/type` | No | No | startup only |
 | Total operating time | Diagnostic sensor | `/heatSources/{hs}/workingTime` → `total` | No | No | 15 min |
 | Heating operating time | Diagnostic sensor | `/heatSources/{hs}/workingTime` → `ch` | No | No | 15 min |
 | Cooling operating time | Diagnostic sensor | `/heatSources/{hs}/workingTime` → `cooling` | No | No | 15 min |
 | Hot-water operating time | Diagnostic sensor | `/heatSources/{hs}/workingTime` → `dhw` | No | No | 15 min |
 
+Start-counter entities are registered even when the discovered resource has an
+empty or partial startup payload. Pool-heating starts are always created, but
+disabled by default, because not every system heats a pool; enable them if
+yours does. From 0.9.0, other parts missing from the reading they are first
+created from, such as cooling starts on a gas boiler, are created disabled
+as well; existing entities keep their setting. They are named **Anzahl der Starts Poolheizung** in German and **Number of
+starts Pool heating** in English. Find them under **Settings → Devices &
+services → Entities**, filtered by this integration. The value stays unknown
+until the gateway supplies `pool`. It uses the existing 15-minute request,
+with no additional polling.
+
+The total starts and the total system run time of all heat sources
+(`/heatSources/numberOfStarts`, `/heatSources/workingTime/totalSystem`) are
+created disabled from 0.9.0 when the system reports exactly one heat source:
+they then show the same values as its total starts and total operating time.
+With a cascade or a hybrid system they stay enabled. Existing entities keep
+their setting.
+
 The brine names use the heating-system perspective: `collectorInflowTemp` is
 the fluid leaving the heat pump for the ground collector, while
 `collectorOutflowTemp` is the fluid returning to the heat pump. Per-source
 paths are probed only for IDs actually reported below `/heatSources`.
+
+## Readings only the local access provides
+
+Every reading the local access offers becomes an entity. Readings that are not
+needed in everyday operation are only disabled by default, never left out:
+other systems may report values where the confirmed installation shows none.
+Identifiers, addresses, network and privacy data are never entities, nor are
+structures without a single value that feed other features (for example the
+zone configuration or the device lists).
+
+With a local access, some readings exist only locally on many systems: the
+cloud does not offer them, but the local access reads them anyway with its
+polling plan, so they cause no additional requests. They become their own
+sensors, but only for paths the local access of this system could actually
+read and only when the cloud offers no resource for the same path. They stay
+unavailable without a current local reading; there is no cloud value to fall
+back to. Meanwhile they keep the unit and device class of their last reading
+(after a restart those stored with their entity), so stopping Home Assistant
+or a pause of the local access does not change their entity registry entries
+or display precision. After a start, a local sensor becomes available when its
+reading has been read once; the local access reads one resource after the
+other and, after a timeout, waits a minute before it reads on, so this can take
+a few minutes. A device state such as an open sensor or too little flow is shown as
+unknown, never as a number. A reading the local access reports as a number is
+offered for that reason, also while it reports an error marker; its value is
+then unknown. The same rules apply with and without the cloud. The setting **Use local values for existing
+entities** does not affect them. If the cloud offers the same path later (for
+example after a new discovery, or when the children of a refused directory are
+read directly), a sensor with a reviewed name and states (for example the
+compressor speed or the refrigerant circuit status) stays as it is: its unique
+ID, entity ID, name, states, statistics and settings do not change and no
+cloud sensor is added for that path. The cloud's value becomes its second
+source: for a reading both accesses report identically, the setting **Use local
+values for existing entities** decides as for every such reading (with it off
+the cloud value is shown, the local one while there is no current cloud value);
+any other reading shows its local value first and the cloud's only while there
+is none. The attribute `source` names the access shown. While a local access
+is set up, a reviewed reading ends up with its local-only entity, whichever was
+set up first: a reading new to the entry gets it while the local access is
+switched on. A cloud entity such a reading already has is never removed while
+it is in use (enabled, switched off by you, or with your name, icon, area or
+labels). At the next start it continues as the local-only entity with its
+entity ID (also one you changed), settings and statistics, so automations,
+scripts and dashboards keep working; its name, category and states become the
+reviewed ones, and a repair notice names it. This needs the same native unit,
+the same state class if it had one, and a local-only entity that can be added
+now (a current local reading, or a reading with a fixed form); otherwise the
+cloud entity stays as it is. A cloud entity the integration created disabled
+is removed instead, and the local-only entity is added. If an earlier version
+removed a local-only entity, it returns with its entity ID and settings,
+unless a cloud entity of the same reading is in use (that one continues, as
+above). One an earlier version handed over to the cloud's sensor keeps its
+entity ID and settings and gets its reviewed name and states again (with the
+same native unit and state class; otherwise it stays the cloud's). Next to a
+registered local-only entity, a cloud entity of the same reading that is in
+use is not removed either: it is no longer provided, and a repair notice names
+it together with the entity that shows the reading now. For other local-only
+sensors the cloud entity takes over. When the cloud's
+sensors are set up (at a start, a reload or when a system joins its cloud),
+before any of them is added, the local-only entity continues as the cloud's
+sensor, with its entity ID, name, area, recorded states and statistics, if
+exactly one cloud sensor exists for that path, it is not registered yet, the
+native unit of the last local reading equals the cloud's (a display unit chosen
+in Home Assistant does not matter), the state class stays the same or the
+local-only entity had none, and the local-only entity was not disabled by the
+integration. A local-only entity that never showed a reading is not continued.
+Otherwise, and for a path the cloud starts offering while Home Assistant runs,
+the local-only entity is removed as before. For this comparison a local-only
+sensor keeps the native unit of its last reading in its entity settings; the
+entry drops it when the cloud's sensor continues it. After the local access is removed, the entities are
+unavailable and are removed at the next reload or restart; adding the access
+again before that keeps their settings. They belong to the system's cloud
+access: while that access is stopped (for example waiting for a new sign-in),
+they are not provided either, except while the system's entities come from the
+stored inventory or from its local readings alone (see
+[when the cloud stops](source-selection.md#when-the-cloud-stops)).
+
+| Enabled | Readings |
+| --- | --- |
+| yes | current supply setpoint, primary flow rate (L/h), compressor and electric heater power (W), refrigerant circuit status, heating circuit pump, thermal disinfection running, silent mode, utility power block; since 0.9.0-alpha.6 also outdoor unit fan (PL3) and primary heating pump (PC0) speed (%), primary supply temperature (TC1), air intake temperature (TL2), hot gas (TR6), liquid line heating (TR3), high-pressure (JR1), low-pressure (JR0) and suction line (TR5) temperatures |
+| no | cylinder temperature (the same value as the hot water temperature), liquid line cooling (TR4) and compressor temperatures; compressor speed (%, practically the same value as the enabled compressor modulation); a second compressor power reading and a coarse electric heater power; ventilation readings: exhaust, extract, outdoor and supply air temperatures, indoor, outdoor and highest humidity (%), indoor, outdoor and highest air quality (ppm, no device class), exhaust and supply fan power, summer bypass flap and auxiliary heater power (%), exhaust fan speed (rpm), supply fan speed (no device class or statistics), run time (min, from 0.9.0 with long-term statistics) and filter remaining time (min, no statistics) and the exhaust fan level |
+| no, diagnostic | the controller's other internal signals (`/signals/…`) with numeric readings: unit taken from the reading, long-term statistics when that unit is one of a measurement (not for run and remaining times), meaning not documented in detail. Identifiers, addresses or keys (for example the energy-management link ID) and free text are never offered. |
+
+The readings enabled in 0.9.0-alpha.6 are what a hydraulic view of the
+heat pump shows: its flow (TC1) and return, the source air (TL2), the fan and
+pump speeds and the refrigerant circuit. On an existing installation they are
+enabled at the next start, unless you disabled them yourself. Their entity
+IDs stay as they were; TC1 and TL2 keep the IDs of their former names, for
+example `…_additional_heater_flow_temperature` and
+`…_evaporator_temperature`.
+
+The controller's signals are offered as follows. Signals reported as true or
+false, also as declared TRUE/FALSE states, are on/off states (`on`/`off`, not
+`true`/`false`, since 0.9.0-alpha.2); compressor, electric heater stages 1 to 3,
+drip pan and crankcase heaters, primary heating pump (PC0), cooling, silent
+mode (signal), low heating volume flow and an overheated inverter are enabled. The hot
+water 3-way valve (VW1) and the 4-way valve (VR4) are enabled too and show the
+position instead of on/off: VW1 *Heating* or *Hot water*, VR4 *Heating* or
+*Cooling/defrost*. On a real heat pump (it does not cool) this matched
+the recorded history of several days: VR4 was on during every defrost, also
+during a defrost within a hot water charge, and off otherwise; VW1 was on
+during every hot water charge and for the last one to three minutes of each
+defrost, when the heat pump takes heat from the hot water side as well. The
+on states of other outdoor units are not confirmed. A second compressor status, electric heater stage 4 and the
+heating circuit pump HC1 (PC1) are disabled. The hot water heat-up
+(`SRC.IntDHW.HeatUpActive`) is an on/off state from 0.9.0, disabled: the
+controller declares it as off, heat and post-heat, and both heat and
+post-heat show *On*. On a real heat pump it was on during every hot
+water charge and off while the heat pump defrosted; post-heat was not seen.
+Signals that declare named states without a unit are states; the current
+heating/cooling status (signal), the heating/cooling state and the smart grid
+mode are enabled, the holiday slots and other states disabled. A signal with
+a unit stays a number: its named marker states (for example an open sensor)
+show no value. Damped outdoor temperature, drip pan temperature (TA4), heat
+output (thermal), the opening of the expansion valve VR1 and of the receiver
+valve VR0 (%), the
+compressor run times for heating, hot water and cooling (shown in hours) and
+the flow rate HC1 (PC1) are enabled. From 0.9.0 the compressor run times have
+long-term statistics as a growing total, like the cloud's operating times;
+the statistics start with the update, earlier values stay in the history
+only. The compressor start delay is disabled. Eleven signals that are a
+second source of a reading another entity already shows are named after it
+with "(signal)", for example *Compressor speed (signal)*, *Return temperature
+(TC0, signal)* or, from 0.9.0, *Cylinder temperature (signal)* and *Outdoor
+temperature (signal)*; they are disabled diagnostic entities with long-term
+statistics where their unit is one of a measurement. The relay of the hot
+water 3-way valve shows the valve position like VW1 (*Heating* or *Hot
+water*). An
+**Installation date** sensor is derived from the three installation date
+signals (year counted from 2000); the parts stay available, disabled. From
+0.9.1 a date in the future or one that does not exist (the placeholder year
+60 of a controller that was never given a date is 2060) shows as unknown. External
+inputs and the room controller assignment are disabled states.
+
+From 0.9.1 a signal reported in a pressure unit (`mbar`, `hPa`, `kPa` or
+`Pa`, for example a pressure difference) shows its value with that unit as a
+pressure, like one in `bar`. The value is shown as reported and never
+converted; another spelling still shows the number without a unit. This is tested with synthetic
+answers only and not verified on a real
+system.
+
+From 0.9.1 three gateway states have texts in every language: the EEBus
+status (`GWEEBUS.Status`), the EEBus commissioning
+(`GWEEBUS.CommissioningStatus`) and the start-up check of the heat pump
+(`SRC.CUHP.StartUpCheck`), with the states the reference gateway declares
+(for example *Not commissioned*, *No EEBus connection (no trusted partner)*
+or *In progress*). Only the shown texts change: name, unique ID, entity ID,
+default activation and recorded states stay as they were. A state the
+gateway declares in addition is shown as the gateway reports it.
+
+On/off signals are enum sensors (`sensor.…` with the states `on` and `off`),
+not binary sensors. Automations, templates or cards written for a
+`binary_sensor.…` of such a signal need the sensor's entity ID and the states
+`on`/`off`. A signal that the gateway no longer lists keeps its entity: it
+becomes unavailable and the integration does not delete it, so its history and
+settings stay for the case that the gateway lists the signal again.
+
+A volume flow too low for its sensor to measure is reported by the device as
+its declared low-flow state (for example `lowflow` with the value 65535). The
+heat pump volume flow and the heating circuit 1 volume flow then show
+"unknown" with the attributes `measuring_range: below` (shown as "Below
+measuring range") and, since 0.9.2, `reported_state: low_flow` (the state
+the device reported instead of a value), so such a flow can be told apart
+from a missing reading; a measured flow has no such attribute, and a
+measured 0 stays 0. A volume flow read through the cloud access is treated
+the same way when its reading declares the low-flow state: "unknown"
+instead of 65535, with the same attributes.
+
+Since 0.9.2 two diagnostic binary sensors show the same as on/off, so the
+time below the measuring range can be recorded: **Primary flow below
+measuring range** follows the heat source's flow
+(`/heatSources/hs1/pumpVolumeFlow`, else the signal
+`SRC.SystemPumpVolumeFlow`), and **Heating circuit 1 flow below measuring
+range (PC1)** follows `SRC.HC1.FlowCtrl.PumpVolumeFlow`. They are on while
+the low-flow state is reported, off while a value is measured, and
+unavailable without a current reading or with another device state (for
+example an open sensor). They exist only where the flow reading exists on
+the plant (a brine-to-water heat pump without a primary flow reading gets
+no primary one), are disabled by default and send no request of their own.
+
+The two setpoints the controller keeps for an energy manager
+(`SRC.CUHP.EM.UsedLowerFlowTempSetp` and `SRC.CUHP.EM.UsedUpperFlowTempSetp`)
+show the value the controller reports, 0 included. Up to 0.9.1 they showed
+"unknown" while the energy management status reported "not connected";
+since 0.9.2 a reported 0 is shown as 0. On a real installation without an
+energy manager both report 0 all the time, which most likely means that no
+energy manager asks for a supply temperature.
+
+When an existing entity of a signal gets its reviewed form, it keeps its
+unique ID and entity ID; its device class, unit or state class may change. A
+run time that was shown in seconds keeps that unit (choose hours in the entity
+settings if you like); new ones start in hours.
+
+The signal formerly named "Compressor power" is called "Heat output
+(compressor)" since 0.9.0-alpha.2 and "Heat output (thermal)" since 0.9.1: its
+value matches the heat meter, so it is the thermal heat output, not the
+electric power. Its entity ID stays; a name you set yourself stays as well.
+
+From 0.9.0 the names follow the wording of the controller's Info menu (MX400)
+more closely. Entity IDs, unique IDs and names you set yourself stay; only an
+entity without a name of your own shows the new name:
+
+- German: *Kompressor* instead of *Verdichter* in every name, as on the
+  controller (for example *Kompressorlaufzeit Heizen*), and *HK1* for heating
+  circuit 1 in the names of signals (*Volumenstrom HK1 (PC1)*).
+- English: *Drip pan temperature (TA4)* (before *Drain pan temperature*),
+  like the *Drip pan heater*; *Flow rate HC1 (PC1)* and *Heating circuit pump
+  HC1 (PC1)* (before *Heating circuit 1 …*); the hybrid manager's *4-way
+  valve* (before *Four-way valve*).
+- *Primary flow rate* / *Volumenstrom primär* (before *Volume flow* /
+  *Volumenstrom*) for the flow of the heat source (`…/pumpVolumeFlow`), which
+  its second source *Primary flow rate (PC0, signal)* repeats.
+- The season signal `SC.SeasonOpt.Mode` is *Current heating/cooling status
+  (signal)* (before *Season mode*): it repeats the cloud's current
+  heating/cooling status.
+- The hot water heat-up, the cylinder temperature and the outdoor
+  temperature signals got names instead of *Signal SRC.…*.
+
+Since 0.9.1 two refrigerant circuit names say what the sensors measure,
+also where the controller's wording differs. The Info menu calls TR3 and
+TR4 *Verflüssigertemp. Heizung* and *Verflüssigertemp. Kühlung*; the API
+documentation calls them liquid pipe temperatures, and that is what they
+read. The condensing temperature is the high-pressure temperature (JR1), the
+evaporating temperature the low-pressure temperature (JR0).
+
+- *Liquid line temperature heating (TR3)* / *Temperatur Flüssigkeitsleitung
+  Heizen (TR3)* (before *Condenser temperature heating (TR3)* /
+  *Verflüssigertemperatur Heizen (TR3)*): the liquid refrigerant behind the
+  water-side heat exchanger while heating. On a real heat pump it reads a little
+  below JR1 and the condenser outlet water temperature (TC3).
+- *Liquid line temperature cooling (TR4)* / *Temperatur Flüssigkeitsleitung
+  Kühlen (TR4)* (before *Condenser temperature cooling (TR4)* /
+  *Verflüssigertemperatur Kühlen (TR4)*): the liquid line of the cooling
+  mode. While heating, the sensor sits at the evaporator inlet; on a heat
+  pump that does not cool, it then reads about the low-pressure
+  temperature (JR0), below the air intake temperature (TL2).
+- The system supply temperature, see [Gateway and system](#gateway-and-system).
+
+Entity IDs (`…_liquid_line_heating`, `…_liquid_line_cooling`), unique IDs,
+the default activation (TR3 enabled, TR4 disabled) and names you set yourself
+stay.
+
+Further names of 0.9.1, again only for entities without a name of your own;
+entity IDs, unique IDs and the activation of existing entities stay:
+
+- *Heat source active* / *Wärmeerzeuger aktiv* (before *Burner status*): the
+  reading (`flameStatus`) exists on boilers and heat pumps, so the name says
+  neither burner nor compressor.
+- *Heating temperature* and *Setback temperature* for the heating circuit
+  sensors, as the number controls are named.
+- *Heat output (thermal)* / *Heizleistung (thermisch)* (before *Heat output
+  (compressor)*), and *Receiver valve (VR0)* / *Sammlerventil (VR0)* (before
+  *Expansion valve VR0*; the reading is the signal `ReceiverValveActual`).
+- *Silent mode* / *Flüstermodus* is the one term for the setting, its state
+  and the signal (*Silent mode active (signal)*); *Season switching* /
+  *Saisonumschaltung* for the select and the sensor. The two copies of the
+  compressor state are *Compressor running (display signal)* and
+  *Compressor running (heat pump signal)*.
+- *Gateway ID* (before *Gateway UUID*), *Software family* (before *Sw
+  Prefix*), *Variable tariff – support* (before *Support status*), *iSRC
+  installation status* (before *Installation status*) and *Heat source type*
+  next to *System type*.
+- Controller signals whose meaning follows from their path and the recorded
+  values have names instead of *Signal SRC.…*: the EEBus status and
+  commissioning status, the external blocks of the auxiliary heater, heating,
+  hot water and compressor, the maximum compressor speed, the buzzer, the
+  controller operating time, the relays of the fan and the gas valves, the
+  brine temperature and collector pressure switch flags, the compressor
+  starts for cooling, the maximum supply temperature, the current room
+  setpoint and the holiday mode of heating circuit 1, the modulation of
+  the primary heating pump (PC0) and the eight holiday slots. They stay
+  generic, disabled diagnostic entities. Signals whose meaning was open, for
+  example the four *PermittedAirTemp/Temp* flags that report on/off for a
+  temperature name, kept the signal path (two of them are named since
+  0.9.2, see below).
+
+Since 0.9.2 more controller signals have names instead of *Signal …*, again
+only for entities without a name of your own. They stay generic, disabled
+diagnostic entities; entity IDs, unique IDs and the activation of existing
+entities stay. The names follow the manufacturer's manuals, the state names
+the gateway declares and the readings recorded on a real installation; where
+only the signal name speaks for a meaning, the name says no more than the
+signal name.
+
+- Hot water: *Hot water holiday mode* (states *None*, *Automatic
+  (AUTO_SAT)*, *Off*, *On – eco*, *On – low*, *On – high*, as the gateway
+  names them; which of them matches which holiday setting of the controller
+  is not established), *Hot water extra active (setpoint logic)* and *(generator)*,
+  *Hot water electric heater*, *Hot water circulation pump*, *Thermal
+  disinfection hold timer*.
+- Heat pump: *Compressor start-up sequence* (on for about a minute right
+  before the compressor starts after a standstill, as recorded on a real
+  installation; not before every start), *Compressor start temperature*, *Air purge mode active*,
+  *Heating cable*, *Electric auxiliary heater active (display)*, *Auxiliary
+  heater alarm input*, *Minimum cooling supply setpoint*, the four stops
+  *Heating/Cooling stopped: outdoor temperature too high/too low*.
+- Pumps and controller: *Pump PC0/PC1/PC2 connected to LIN bus*, *Heating
+  circuit 1 pump request (PC1)*, *Controller start-up check*, *Controller
+  relative time (minute counter)*.
+- *Energy management lower/upper supply setpoint*.
+- *Outdoor temperature above/below permitted range (heat pump)*: on/off
+  flags for the permitted outdoor air range of the heat pump. They and the
+  two other *Permitted* signals (`HighestPermittedTemp`,
+  `LowestPermittedFlowTemp`, whose meaning is open and which keep the signal
+  path) are on/off states in every form of the answer, never a temperature.
+- Signals seen on a brine-to-water heat pump: *High-pressure switch*,
+  *Summary alarm*, *Utility power block active (display)*, *Compressor
+  setpoint*, *Heating circuit pump speed HC1 (PC1)*, *Heating system flow
+  rate*, and the digital inputs *external cut-off*, *air pressure switch*
+  and *oil temperature high*. The same controller serves several kinds of
+  heat pump, so an input says nothing about the kind of the plant. The brine
+  pump speed (`brineCircuit/pumpSpeed`) is *Brine pump speed*.
+
+Signals whose meaning is open keep the signal path: `G3Relay`,
+`IntDHW.DHURunning`, `SC.HC1.FPD.Active`,
+`SC.HC1.RTSD.PreventionEcoModeActive`, `SC.DHW1.HolidayAutoTD`,
+`SC.RTC.RelativeTimer`, the two *Permitted* signals above,
+`SRC.AutoFillingActive` and the two `TimerStopHeatingSeason` signals.
+
+The current heat demand (`/heatSources/actualHeatDemand`) reports `frost`
+next to `ch`, `dhw` and none. Since 0.9.2 it is shown as *Frost range*
+instead of *Frost protection*: on a real installation the heat pump reported
+`frost` during normal heating whenever the outdoor temperature was below
+about 6.5 °C and `ch` above it, at room and supply temperatures far from any
+frost protection. In a longer recording (outdoor temperatures from about
+0 °C to 13 °C) the switch followed the air intake temperature (TL2) of the
+heat pump more closely: `frost` below about 5.5 °C and `ch` from about 6 °C
+upwards while the refrigerant circuit was heating. During a defrost the value
+is `ch` for about a minute, then empty, then `ch` again. What the
+manufacturer means by it is not documented.
+
+Checked against the recorded history of one heat pump (11 days with 14
+defrosts, 5 hot water charges and one controller restart): the *Electric
+auxiliary heater active (display)* signal was on exactly once, for one minute
+at the end of a defrost, at the same time as *Electric heater stage 3* and
+followed within two minutes by the electric auxiliary heater energy counter
+rising from 0 to 0.07 kWh; that confirms its name. The *Hot water electric heater* signal
+stayed off during that minute and during every hot water charge. The
+*Compressor start temperature* followed the outdoor temperature closely
+(about 8 °C at 1 °C outdoors, 18 °C at 13 °C outdoors) and dropped to 0 °C
+during the controller restart; it is a value that depends on the air
+temperature, not a measured temperature. *Minimum cooling supply setpoint*
+changed from 18 °C to 0 °C at the same restart and stayed at 0 °C. The
+signal `SC.RTC.RelativeTimer` does not count: it stayed constant between
+two controller restarts and jumped by 11,400 minutes at the restart. The
+remaining named signals did not change their state in that period, so their
+names rest on the signal names, the manuals and the declared states.
+
+The outdoor unit's software version is the diagnostic sensor **Outdoor unit
+software version** since 0.9.2. It reads the module lists the integration
+already reads (the cloud's system information, the local system
+information), takes only a module the heat generator model table names as
+an outdoor unit, and shows its version with its product name and hardware
+type as attributes; serial numbers are never read. It keeps its last
+version over a restart. On a real installation with a split air-to-water
+heat pump the version of the outdoor unit was found there; no controller
+signal reports it. A setpoint of the pressure of the heating circuit pump
+(PC1) is not available through the interface: neither the controller
+signals, nor the documented local or cloud resources of a real
+installation report one. Further settings that only the service menu
+offers are listed in
+[heating controls](heating-controls.md#values-only-available-in-the-service-menu).
+
+The names of the readings in the sections above that are created disabled
+for new installations (the total starts and total run time of a single heat
+source, the pool starts, the installation date parts, the gas valve relays,
+the software update details and the permitted pressure limits) were already
+disabled in 0.9.0; 0.9.1 only tests it.
+
+Hybrid systems with an HM200 hybrid manager report additional readings of the
+outdoor unit and the hybrid manager through the local access: temperatures of
+the outdoor unit, heat pump supply and return, compressor and pump speeds,
+valve position, compressor timers and run times, the smart grid mode (not
+used, blocked, normal, preferred, forced; without a state list the numbers 0
+to 4 in this order, as the controller declares them, not verified) and on/off
+states such as defrosting or the 4-way valve. They are disabled by default and have not been verified on a
+real system. The unit and states the gateway reports take precedence; a
+reading that is either a temperature or an on/off state becomes one entity,
+decided by its answer. From 0.9.0 their compressor run times have long-term
+statistics, like the other cumulative local run times; a lower count after a
+reset of the device starts a new cycle, never a negative run time. They are
+shown on the existing heating device.
+
+Whether a hybrid system reports its volume flows in the same steps as a heat
+pump alone is not established. The volume flows are therefore shown as the
+gateway reports them, never rescaled. From 0.9.1 the diagnostics tell when a
+system is detected as a hybrid system and mark its volume flows as
+unverified (see [diagnostics](diagnostics.md)). If you have a hybrid system,
+compare the volume flow shown in Home Assistant with the display of the
+device and report the result.
+
+The refrigerant circuit status also shows the states the gateway itself
+declares (for example off, hot water, pool and pool heating), so it no longer
+reads "unknown" while the heat pump is idle. Other local states also accept
+the values their gateway declares.
+
+Compare a few values with the heat pump display before relying on them; the
+meaning of the technical readings follows the official local API
+documentation.
+
+## Using the heat pump hydraulic card
+
+The [Heat Pump Hydraulic Card](https://github.com/Sturmi77/heatpump-hydraulic-card)
+for Home Assistant (`custom:heatpump-hydraulic-card`) has
+a preset `bosch_buderus_heating`. The preset finds the entities by their
+unique IDs in the entity registry and uses only enabled entities; entity
+names, entity IDs and the language do not matter. Since the card's release
+0.19.0 ([pull request #408](https://github.com/Sturmi77/heatpump-hydraulic-card/pull/408))
+the preset covers installations with only the cloud, with the cloud and a
+local access, and with only a local access; earlier releases of the card
+use only cloud entities. The
+updated preset was compared live on a real installation while the heat pump was
+heating, and with recorded states for defrost, hot water and standby. With
+only a local access it is untested on a real installation.
+
+- 0.9.1 only changed display names; the preset maps by unique ID, so
+  nothing changes for it.
+- Unique IDs, translation keys, states and units of the mapped entities are
+  unchanged in 0.9.0.
+- On a new installation with a single heat pump, the total starts
+  (`heatSources:numberOfStarts`) and the total system run time
+  (`heatSources:workingTime:totalSystem`) are created disabled, so the
+  preset no longer lists them under the additional values. The starts and
+  run time tiles use the heat source's own counters
+  (`heatSources:hs1:numberOfStarts:total`, `heatSources:hs1:workingTime:total`),
+  which stay enabled. Existing installations keep their entities.
+
+A manual configuration under `entities:` overrides the preset. These
+entities suit the card keys on a heat pump with a local access (the entity
+IDs depend on your installation):
+
+| Card key | Entity |
+| --- | --- |
+| `flow` | Primary supply temperature (TC1) |
+| `return` | Return temperature (the main entity, not its `… (cloud)` or `… (local)` copy) |
+| `hc_flow` | System supply temperature (behind a buffer cylinder, the heating circuit flow) |
+| `hc_setpoint` | Current supply setpoint |
+| `compressor` | Compressor running (display signal) |
+| `valve` | Hot water 3-way valve (VW1) |
+| `status` | Refrigerant circuit status (`defrost` shows the defrost) |
+| `power` | Compressor electric power and electric heater power |
+| `heat` | Heat output (thermal) |
+| `heater` | Electric heater power |
+| `volume` | Primary flow rate |
+| `hc_volume` | Flow rate HC1 (PC1) |
+| `hc_pump` | Heating circuit pump |
+| `fan_speed` | Outdoor unit fan speed (PL3) |
+| `source_in` | Air intake temperature (TL2) |
+| `hot_gas` | Hot gas temperature (TR6) |
+| `evap_temp` | Low-pressure temperature (JR0) |
+| `cond_temp` | High-pressure temperature (JR1) |
+| `suction_temp` | Suction line temperature (TR5) |
+| `liquid_temp` | Liquid line temperature heating (TR3) |
+| `eev` | Expansion valve VR1 |
+
+The refrigerant circuit temperatures for the details are enabled by default
+since 0.9.0-alpha.6, also on installations from before, unless you disabled
+them yourself. TC1 and TL2 keep the entity IDs of their former names
+(`…_additional_heater_flow_temperature`, `…_evaporator_temperature`).
 
 ## Energy counters
 
@@ -416,10 +1291,16 @@ All values are cumulative energy in kWh, not instantaneous power.
 | Total – Electric auxiliary-heater consumption | Sensor | `/heatSources/emon/totalConsumption` → `eheater` | No | No | 5 min |
 | Total – Electricity consumption | Sensor | `/heatSources/emon/totalConsumption` → `electricity`, otherwise `compressor + eheater` | No | No | 5 min |
 | Total – Environmental energy (calculated) | Sensor | `/heatSources/emon/totalConsumption` → `outputProduced - compressor - eheater` | No | No | 5 min |
+| Heating – Environmental energy (calculated) | Sensor | `/heatSources/emon/chConsumption` → `outputProduced - compressor - eheater` | No | No | 5 min |
+| Hot water – Environmental energy (calculated) | Sensor | `/heatSources/emon/dhwConsumption` → `outputProduced - compressor - eheater` | No | No | 5 min |
+| Pool – Environmental energy (calculated) | Sensor | `/heatSources/emon/poolConsumption` → `outputProduced - compressor - eheater` | No | No | 5 min |
 
 Calculated environmental energy is created only when all three required raw
-values are present and valid. A negative or incomplete result is not exposed
-as a measurement.
+values are present and valid, for the total, heating, hot water and pool (the
+same formula in each area, as in the manufacturer's app). The entities of
+heating, hot water and pool are disabled by default; cooling has no
+environmental energy. A negative or incomplete result is not exposed as a
+measurement and does not start a new meter cycle.
 
 The total-electricity entity reports `value_source: direct` when PointT
 provides `electricity`. When it falls back to the complete sum of `compressor`
@@ -427,10 +1308,54 @@ and `eheater`, it reports `value_source: calculated` and documents the formula
 in its `calculation` attribute. Its entity name remains stable because the
 source may change between responses.
 
-## Optional app capabilities
+### Energy estimated from current power
 
-The following read-only families are probed from the path catalog embedded in
-MyBuderus and HomeCom Easy. They are not assumed to exist. A missing path,
+Some appliances report a heat source's current power
+(`/heatSources/{hs}/actualPower`, kW) but no consumption or energy counter.
+For each such heat source, and only when neither the heat source nor the
+plant has a native counter (`…Consumption` or `emon/…`), the integration
+creates **Energy (estimated from current power)**. It adds up the reported
+power over time (a left Riemann sum: each reading counts until the next one)
+and reports kWh with the state class `total_increasing`. The attributes state
+that the value is an estimate, the method, the polling interval and the
+longest gap that is still counted.
+
+It is an estimate, not a meter reading:
+
+- Its accuracy depends on the polling interval; short changes between two
+  readings are not seen.
+- Two readings are only combined when they are at most three polling
+  intervals and at most 30 minutes apart. Across a longer gap, an unavailable
+  or expired reading, an error value, negative power, or a change between the
+  local and the cloud reading, nothing is counted; the total stays where it
+  was and counting starts again with the next reading.
+- It is not confirmed whether the reported power is the fuel input (for
+  example gas) or the delivered heat. The name therefore says neither.
+- The total never decreases and survives restarts; the first reading after a
+  restart only sets the new starting point.
+
+The entity is disabled by default and counts only from the moment it is
+enabled; earlier periods cannot be filled in. To use it in the energy
+dashboard, enable it, wait for the first statistics (up to one hour), and add
+it, for example, under gas consumption, which accepts kWh. I have not yet
+confirmed this entity on a real device.
+
+## Calculated values
+
+The activity of each heating circuit (also the `hvac_action` of the
+climates), the defrosts of a heat pump, net heat counters without the
+defrost dips, the average run time per start, the supply above its
+setpoint, the current COP, the performance factors per period and the
+primary circuit spread are worked out from readings the integration reads
+anyway. Each
+entity is named "(calculated)" and lists its inputs in `derived_from`. See
+[Calculated values](calculated-values.md) for the rules, the defaults and
+their limits.
+
+## Optional capabilities
+
+The following read-only families are probed from a bounded path catalog. They
+are not assumed to exist. A missing path,
 HTTP 403/404 response, or incompatible value type creates no entity and no
 recurring request. New fields remain diagnostic until their semantics have
 been confirmed on physical equipment.
@@ -445,17 +1370,19 @@ been confirmed on physical equipment.
 | Fresh-water station | `currentFriwaSupplyTemperature`, `friwaPrimaryPumpModulation`, `inletTemperature`, `outletTemperature`, `outTemp`, `volumeFlow`, `numberOfShowersAvailable` | Temperatures, pump output, flow, and available showers | 60 s |
 | Hot-water service sensors | `/dhwCircuits/{dhw}/sensor/{name}` | Air-box, flue-gas, tank, and heat-exchanger temperatures; pressure, fan, gas, and water flow | 60 s to 15 min |
 | Heat source | `/heatSources/{hs}/electricityTotalConsumption`, `operationHours`, `emon/totalConsumption` | Electricity, operating hours, and per-source energy counters | 5 to 15 min |
-| Hybrid system | `/heatSources/hybrid/*` | Active source, bivalence point, strategy, outdoor state, variant, and reminder state | 60 s to 15 min |
-| Pool via heat source | `/heatSources/poolTemperature`, `poolSetpointTemperature`, `poolStatus` | Pool temperature, target, and state | 60 s |
+| Hybrid system | `/heatSources/hybrid/*`, `/system/energyTariff/*` | Active source, bivalence point, strategy, outdoor state, variant, and reminder state, and the energy prices; from 0.9.2-beta.3 a strategy select and price numbers (electricity, gas or else oil, and the feed-in tariff, which is `energyTariff/pv`) when the cloud reports them writable with limits; created disabled, expected but untested on a real installation (see [heating controls](heating-controls.md#hybrid-systems-strategy-and-energy-prices)) | 60 s to 15 min; read-back after a change |
+| Pool via heat source | `/heatSources/poolTemperature`, `poolSetpointTemperature`, `poolStatus` | Pool temperature, target, and state; from 0.9.2-beta.3 the target as a number (disabled) when the gateway reports it writable with limits (see [heating controls](heating-controls.md#silent-mode-low-noise-operation-and-pool)) | 60 s |
 | System | `/system/healthStatus`, `appliance/*`, `iSRC/installationStatus`, `sensors/temperatures/*` | Health, equipment metadata, installation status, and temperatures | 60 s or startup only |
-| Noise and power | `/system/lowNoise/*`, `silentMode/*`, `powerGuard/active`, `powerLimitation/active` | Operating state, configured time/duration, power reduction, and a capability-gated Silent Mode select | 60 s to 15 min; read-back after a Silent Mode change |
+| Noise and power | `/system/lowNoise/*`, `silentMode/*`, `powerGuard/active`, `powerLimitation/active` | Operating state, configured time/duration, power reduction, and a capability-gated Silent Mode select; from 0.9.2-beta.3 numbers for the power reduction and the start and stop time of the silent mode window, a low-noise mode select and a low-noise duration number, all disabled and only when the gateway reports them writable with limits or a list (see [heating controls](heating-controls.md#silent-mode-low-noise-operation-and-pool)) | 60 s to 15 min; read-back after a change |
 | Variable tariff | `/system/variableTariff/ch/*`, `dhw/*`, `currentPriceCatagorization`, `priceInfo`, `tariffId` | Current category, optimization state, price-dependent setpoints, and status | 60 s to 15 min |
 | Solar | `/solarCircuits/{sc}/collectorTemperature`, `dhwTankBottomTemperature`, `maxCylinderTemperature`, `maxTemperatureReached`, `pumpModulation`, `solarYield` | Temperatures, pump output, limit state, and yield | 60 s; yield 5 min |
-| Pool | `/pool/currentTemp`, `setpointTemp`, `enabled`, `additionalHeater/poolMode` | Temperature, target, enabled state, and auxiliary-heater mode | 60 s to 15 min |
-| Ventilation | `/ventilation/operationModes/manual/fanSetpoint`, `/ventilation/{zone}/*` | Fan levels, filter time, air-quality/humidity limits, mode, and supply temperature | 60 s to 15 min |
-| Room zones | `/zones/{zone}/*` | Average temperature/humidity, target, child lock, heating/cooling mode and temporary setpoint | 60 s to 15 min |
-| Room devices | `/devices/{device}/*` | Room temperature/humidity, battery, connection state, errors, and static device information | 60 s to startup only |
+| Pool | `/pool/currentTemp`, `setpointTemp`, `enabled`, `additionalHeater/poolMode` | Temperature, target, enabled state, and auxiliary-heater mode; a target number (°C, reported limits and step) and an on/off switch when the cloud reports them writable (the switch only for exactly `on`/`off`); from 0.9.2-beta.3 also a select for the pool mode over the values the gateway lists (disabled) | 60 s to 15 min; read-back after a change |
+| Ventilation | `/ventilation/operationModes/manual/fanSetpoint`, `/ventilation/{zone}/*` | Fan levels, filter time, air-quality/humidity limits, mode, and supply temperature; since 0.9.2-beta.3 an operating mode select (enabled by default; only the modes the unit lists, see [ventilation](heating-controls.md#ventilation-operating-mode-and-filter-time)) and a maximum filter run time number (disabled), both when the cloud reports them writable; the exhaust fan level is a read-only sensor, and the read-only demand, air-quality, humidity and temperature readings are disabled diagnostic sensors | 60 s to 15 min; read-back after a change |
+| Room zones | `/zones/{zone}/*` | Average temperature/humidity, target, child lock, heating/cooling mode and temporary setpoint; since 0.9.2 a climate entity per zone and a "Clear temporary setpoint" button (see [zone controls](zone-controls.md#zone-climate)) | 60 s to 15 min; read-back after a change |
+| Room devices | `/devices/{device}/*` | Room temperature/humidity, battery, connection state, errors, and static device information; since 0.9.2 a **Battery low** binary sensor (diagnostic, enabled), a **Radio signal** sensor in dB (diagnostic, disabled) and, from 0.9.2-beta.3, **RF connection lost since** as a timestamp (unknown while the controller reports its placeholder); on a zone controller the entities are named after the device's zone (see [zone controls](zone-controls.md#radio-room-devices)) | 60 s to startup only |
 | Photovoltaics | `/pv/enable`, `/pv/surplusAvailable` | Enabled and surplus states | 60 s to 15 min |
+
+Summer bypass activation and the filter reset are not offered as controls.
 
 Known percentage resources receive a semantic Home Assistant device class only
 when both their exact PointT path and `%` unit match. This covers heating-circuit,
@@ -470,17 +1397,16 @@ a Home Assistant control. Controls require a separate allowlist, safe limits,
 an exact value mapping, and a successful write/read-back test.
 
 Three optional resources are released as controls after their live contracts
-were confirmed on the K40 reference system. Silent Mode requires the complete
+were confirmed on a real K40 installation. Silent Mode requires the complete
 `off`, `auto`, `on` value set. Auxiliary-heater operation mode requires
 `off`, `manual`, `auto`. Maximum supply temperature requires complete numeric
-PointT limits within a broad 0–100 °C plausibility envelope. Matching read-only sensors remain available as disabled
+PointT limits within the broad plausibility range of number controls. Matching read-only sensors remain available as disabled
 diagnostic entities; the maximum-supply-temperature number is also disabled by
 default because it changes an installer-level limit.
 
-Historical `/recordings/...` resources are deliberately not represented by
-ordinary state entities. Home Assistant already records the corresponding live
-states; importing vendor history requires a separate opt-in design with date
-ranges, deduplication, statistics semantics, and a strict request budget.
+The plant's own `/recordings/...` are shown as period entities (yesterday,
+previous and current month and year) and can be imported into the long-term
+statistics on request; see [Plant recordings](recordings.md).
 
 ## Sensitive diagnostic values
 

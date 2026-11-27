@@ -1,0 +1,93 @@
+{
+  "schema": 1,
+  "family": "bacon_purifier_air_1001i",
+  "provenance": {
+    "kind": "synthetic",
+    "basis": "compatibility_mapping",
+    "firmware": null,
+    "capture_date": null,
+    "created": "2026-10-24",
+    "redaction": "Constructed capability profiles; equipment differences are test inputs, not device observations.",
+    "physical_device_verified": false
+  },
+  "info": {
+    "timestamp": 2,
+    "online": true,
+    "appliance": {
+      "type": "Air 1001i synthetic profile"
+    }
+  },
+  "metadata": {
+    "shadows": {
+      "state": {
+        "powerEnabled": {
+          "ro": false
+        },
+        "opMode": {
+          "ro": false,
+          "enum": [
+            "auto",
+            "manual"
+          ]
+        },
+        "fanSpeed": {
+          "ro": false,
+          "min": 1,
+          "max": 3,
+          "step": 1
+        },
+        "childLockEnabled": {
+          "ro": false
+        },
+        "filterReset": {
+          "ro": false
+        }
+      }
+    },
+    "topics": {
+      "sensor": {
+        "airQuality": {
+          "min": 1,
+          "max": 4
+        },
+        "filterCapacity": {
+          "unit": "%",
+          "min": 0,
+          "max": 100
+        },
+        "pm2_5": {
+          "unit": "µg/m3",
+          "min": 0,
+          "max": 999
+        }
+      }
+    }
+  },
+  "sensor": {
+    "items": [
+      {
+        "timestamp": 2,
+        "airQuality": 2,
+        "filterCapacity": 50,
+        "pm2_5": 12
+      }
+    ]
+  },
+  "shadow": {
+    "version": 1,
+    "timestamp": 2,
+    "state": {
+      "reported": {
+        "powerEnabled": true,
+        "opMode": "auto",
+        "fanSpeed": 1,
+        "childLockEnabled": false,
+        "filterReset": false,
+        "onTimer": 0,
+        "offTimestamp": 1234,
+        "customTitle": "private synthetic title"
+      },
+      "desired": {}
+    }
+  }
+}

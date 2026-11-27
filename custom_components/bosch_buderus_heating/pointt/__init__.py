@@ -22,13 +22,17 @@ from .exceptions import (
     PointTError,
     ProtocolError,
     RateLimited,
+    RefreshRefused,
     RefreshTokenRejected,
     RequestTimeout,
     ResourceError,
     ResourceForbidden,
     ResourceNotAcceptable,
     ResourceNotFound,
+    ResourceOmitted,
     ServiceUnavailable,
+    SignInUnavailable,
+    TokenEndpointRejection,
     TransportError,
     UnexpectedHttpStatus,
     WriteError,
@@ -48,8 +52,13 @@ from .models import (
     WriteRequest,
     WriteResult,
 )
-from .redaction import anonymize_identifier, redact_mapping, redact_text
-from .token_manager import StaticTokenProvider, TokenManager
+from .redaction import anonymize_identifier
+from .token_manager import (
+    RefreshAttempt,
+    RefreshObserver,
+    StaticTokenProvider,
+    TokenManager,
+)
 from .transport import RetryPolicy
 
 __all__ = [
@@ -74,6 +83,9 @@ __all__ = [
     "PointTError",
     "ProtocolError",
     "RateLimited",
+    "RefreshAttempt",
+    "RefreshObserver",
+    "RefreshRefused",
     "RefreshTokenRejected",
     "RequestMetrics",
     "RequestTimeout",
@@ -83,10 +95,13 @@ __all__ = [
     "ResourceMetadata",
     "ResourceNotAcceptable",
     "ResourceNotFound",
+    "ResourceOmitted",
     "ResourceReference",
     "RetryPolicy",
     "ServiceUnavailable",
+    "SignInUnavailable",
     "StaticTokenProvider",
+    "TokenEndpointRejection",
     "TokenManager",
     "TransportError",
     "UnexpectedHttpStatus",
@@ -100,6 +115,4 @@ __all__ = [
     "build_authorization_url",
     "create_pkce_context",
     "parse_redirect_url",
-    "redact_mapping",
-    "redact_text",
 ]

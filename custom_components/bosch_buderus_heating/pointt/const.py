@@ -8,6 +8,10 @@ POINTT_BASE_URL: Final = (
 OAUTH_AUTHORIZE_URL: Final = "https://singlekey-id.com/auth/connect/authorize"
 OAUTH_TOKEN_URL: Final = "https://singlekey-id.com/auth/connect/token"
 OAUTH_CLIENT_ID: Final = "762162C0-FA2D-4540-AE66-6489F189FADC"
+# Every sign-in and every renewed sign-in asks for this set, for both brands.
+# SingleKey ID requires ``email`` for this client: without it, it shows its
+# "misconfigured application" page instead of the sign-in form and never
+# redirects back with an OAuth error (issue #127).
 OAUTH_SCOPES: Final = (
     "openid",
     "email",
@@ -27,6 +31,10 @@ MAX_BULK_PATHS: Final = 30
 DEFAULT_CONCURRENCY: Final = 3
 DEFAULT_CONNECT_TIMEOUT: Final = 10.0
 DEFAULT_TOTAL_TIMEOUT: Final = 30.0
+# The token endpoint rotates the refresh token on every request. A request that
+# reached it may answer slowly; giving up early would leave the old token
+# consumed. Only the token endpoint gets this longer total timeout.
+TOKEN_TOTAL_TIMEOUT: Final = 90.0
 # PointT expects requests to look like the official DashApp client. A generic
 # integration user agent is rejected by some API paths even after a successful
 # SingleKey ID token exchange.

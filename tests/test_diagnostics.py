@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from homeassistant.core import HomeAssistant
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.bosch_buderus_heating.const import (
     CONF_ACCESS_TOKEN,
@@ -43,6 +42,7 @@ from custom_components.bosch_buderus_heating.pointt import (
     ResourceReference,
 )
 from custom_components.bosch_buderus_heating.runtime import BoschBuderusRuntimeData
+from tests.ha_test_helpers import MockConfigEntry
 
 
 async def test_diagnostics_contains_schema_and_metrics_but_no_private_data(
@@ -170,7 +170,7 @@ async def test_diagnostics_contains_schema_and_metrics_but_no_private_data(
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
     rendered = repr(diagnostics)
 
-    assert diagnostics["diagnostics_schema"] == 14
+    assert diagnostics["diagnostics_schema"] == 54
 
     for private in (
         gateway_id,
@@ -198,6 +198,7 @@ async def test_diagnostics_contains_schema_and_metrics_but_no_private_data(
     assert gateway_report["device_class"] == "k40rf"
     assert gateway_report["discovery"]["completed"]
     assert gateway_report["discovery"]["advertised_references"] == 1
+    assert gateway_report["activity_inputs_missing"] == {}
     assert gateway_report["discovery"]["groups"] == {
         "/heatingCircuits/hc2": {
             "catalog_paths": 0,
@@ -233,9 +234,11 @@ async def test_diagnostics_contains_schema_and_metrics_but_no_private_data(
         "supported_resources": ("/holidayMode/list",),
         "valid_period_count": 1,
         "invalid_period_count": 0,
+        "icom_last_write": None,
         "active_status_available": True,
         "timezone_source": "home_assistant",
         "calendar_writes_available": False,
+        "formats": {"modern": True, "icom": False, "wddw2": False},
     }
     assert gateway_report["inventory"]["current_error_categories"] == {"http_404": 1}
     assert gateway_report["inventory"]["maturity_levels"] == {"understood": 5}

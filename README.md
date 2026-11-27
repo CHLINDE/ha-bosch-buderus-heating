@@ -1,425 +1,205 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/icon-dark.svg">
-    <img src="docs/assets/icon.svg" width="128" height="128" alt="Bosch/Buderus Heating icon">
-  </picture>
+  <img src="https://raw.githubusercontent.com/SoftwareSchmied/ha-bosch-buderus-heating/main/custom_components/bosch_buderus_heating/brand/icon.png" width="128" height="128" alt="Bosch/Buderus Home Comfort icon">
 </p>
 
-<h1 align="center">Bosch/Buderus Heating</h1>
+<h1 align="center">Bosch/Buderus Home Comfort</h1>
 
 <p align="center">
-  Connect compatible Bosch and Buderus heating systems to Home Assistant through the PointT Cloud API.
+  Connect compatible Bosch and Buderus heating, cooling, hot-water, air-treatment and water-softening devices to Home Assistant, including wallboxes.
 </p>
 
 <p align="center">
   <a href="https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/actions/workflows/ci.yml"><img src="https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/actions/workflows/codeql.yml"><img src="https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/actions/workflows/codeql.yml/badge.svg" alt="CodeQL"></a>
+  <a href="https://github.com/hacs/default/pull/10040"><img src="https://img.shields.io/badge/HACS-Default-41BDF5.svg" alt="Available in the default HACS catalog"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License"></a>
 </p>
 
+Bosch/Buderus Home Comfort (formerly Bosch/Buderus Heating) is an unofficial
+Home Assistant integration. Entities follow what each system reports, so only
+supported readings and controls appear.
+
+The cloud access (sign-in of the Bosch or Buderus app, PointT) works for all
+supported systems. With a K40/K40RF gateway (for example an MX400 internet
+module, firmware 15.00.01 or newer) you can add a local access in your home
+network or use it alone. Together, the local access supplies the readings it
+offers (more values, updated more often) and the cloud handles every change,
+because the integration uses the local interface for reading only. If the
+cloud is unavailable, readings and current faults continue from the local
+access; when it is back, the same entities carry on with their history.
+
+> [!IMPORTANT]
+> **0.9.2 is the current version** and needs Home Assistant 2026.5.0 or newer.
+> Updating from 0.8.x? Make a full backup first, see [Updating](#updating).
+
 > [!NOTE]
-> The illustrated [setup guide](docs/setup.md) explains installation and
-> sign-in step by step.
-
-I am releasing **0.8.1** as the current stable version. Holiday creation and
-editing now share one dialog with date and time beside each other, clocks
-without seconds, a specific end-before-start error and a red delete button
-with confirmation. I also included the timezone corrections from the HACS
-review, startup recovery improvements, central season switching and the
-compatible maintenance updates.
-
-Update through HACS, restart Home Assistant and reload the browser. See the
-[release notes](CHANGELOG.md#081---2026-10-20),
-[holiday guide](docs/holiday-periods.md),
-[request and recovery rules](docs/request-behavior.md) and
-[season-switching guide](docs/season-switching.md) for details and the remaining
-field checks.
-
-Bosch/Buderus Heating is an unofficial Home Assistant custom integration. It
-discovers the capabilities exposed by a heating system instead of assuming a
-fixed device layout. Heating circuits, hot-water circuits, heat generators,
-energy counters, and available controls are therefore created dynamically.
-
-## Built for real heating systems
-
-Heating installations rarely have identical layouts. This integration treats
-the PointT resource tree as the source of truth: it discovers the connected
-system, creates only entities that are actually supported, and keeps the
-original API path behind every value documented. One heating circuit works;
-additional circuits, heat generators, hot-water circuits, and gateways follow
-the same dynamic model without requiring model-specific entity lists.
-
-Reliability is designed into the complete data path:
-
-- **Capability based:** entities and controls follow the resources and metadata
-  reported by the installation, not assumptions based only on a product name.
-- **Transparent:** the entity catalog maps human-readable names to their exact
-  PointT paths and raw fields, including every calculated energy value.
-- **Conservative when writing:** limits and allowed values are validated again
-  immediately before a change; the request is never retried blindly and must
-  be confirmed by a separate read-back.
-- **Efficient in the cloud:** resources with similar update needs are fetched
-  together, while live values, settings, energy counters, and static data use
-  different polling intervals.
-- **Resilient:** partial responses are preserved, temporary failures retain the
-  last confirmed state, unknown enum values do not break an update, and rate
-  limits trigger bounded backoff.
-- **Supportable without exposing the home:** diagnostics show capability and
-  request results while excluding credentials, raw measurements, stable device
-  identifiers, and user-defined names.
-- **Understandable:** German and English terminology is based on the heating
-  apps and technical documentation, with dynamic names such as
-  `Heating circuit 1 – Operation mode` that remain clear on larger
-  installations.
-
-The result is an integration that aims to remain predictable not only during
-initial setup, but also when the cloud is slow, a resource is unavailable, or
-the installation exposes a combination of capabilities that has not been seen
-before.
+> **Coming next: local access for iCom gateways.** A coming beta will add a local access in your home network for iCom gateways such as KM200, IP inside or the IVT/Bosch IP module, first for gateways that are also connected to the Bosch or Buderus app. If you have one and would like to help test it, please install the beta versions when it is out (HACS → "Show beta versions") and leave a short note in [Share your installation](https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/discussions/81).
 
 ## Features
 
-- Automatic discovery of supported PointT resources
-- Support for multiple gateways and dynamically discovered circuits
-- Temperatures, system pressure, operating states, instantaneous heat-source
-  power, brine temperatures, starts, and operating hours
-- Capability-gated read-only monitoring for optional hybrid, low-noise,
-  power-limit, solar, pool, ventilation, room-zone, room-device, photovoltaic,
-  fresh-water-station, and variable-tariff resources
-- Active system faults, warnings, and maintenance notifications with lifecycle
-  events for Home Assistant automations
-- Home Assistant bell notifications for active faults, enabled by default and
-  configurable per installation under **Configure > Notifications**. Dismissed
-  incidents stay hidden across polls and restarts; no extra cloud requests are
-  needed. See [fault notifications](docs/faults.md) for the full behavior.
-- Optional holiday status and calendar with support for multiple periods,
-  gateway-aware time zones, and capability-gated create, edit, and delete
-  actions, kept separate from Away mode
-- Cumulative electricity, produced heat, cooling energy, and calculated
-  environmental energy
-- A clearly identified calculated dew point when a heating circuit reports
-  both room temperature and relative humidity
-- Heating-circuit and hot-water controls exposed only when PointT reports them
-  as writable
-- Silent Mode control with Off, Automatic, and On when the gateway advertises
-  the exact writable capability
-- Auxiliary-heater mode control with Off, On, and Auto, plus a guarded
-  maximum-supply-temperature control for supported heating circuits
-- Mandatory read-back after every write; writes are never retried blindly
-- Separate polling intervals for live, configuration, energy, long-term, and
-  static values
-- Last confirmed values remain available during temporary cloud failures
-- Reauthentication, gateway selection, resource rediscovery, and selectable
-  polling profiles
-- Privacy-preserving Home Assistant diagnostics with capability counters,
-  rolling 60-minute request and latency metrics, and a bounded sanitized log
-  of individual HTTP attempts
-- German and English entity names and state translations
+- Readings of heating circuits, hot water, heat sources, system pressure, starts and operating hours
+- Cumulative energy counters, including a calculated environmental energy
+- Calculated values: what a heating circuit is doing, defrosts, current COP and performance factors ([calculated values](docs/calculated-values.md))
+- The heat pump's own recordings per day, month and year, optionally as long-term statistics ([plant recordings](docs/recordings.md))
+- Controls for operating modes, setpoints, hot water, extra hot water, Silent Mode and away mode, where the system offers them
+- **Operate appliance** dialog with heating-circuit climates and a native hot-water entity
+- Heating, hot water, cooling, zone and ventilation schedules with a weekly view and the action `set_switch_points` (beyond hot water program A expected, untested), and holiday periods with calendar
+- Faults, warnings and maintenance messages with bell notifications and events for automations
+- Room controllers of the RRC 2.0 platform: zones, programs, absences, radio devices
+- A climate entity per zone of a zone controller such as an MX400 with radio room thermostats (expected, untested; [zone controls](docs/zone-controls.md#zone-climate))
+- Optional read-only **local access** that updates many readings more often and keeps them available without the cloud
+- Additional device families: water heaters, air conditioners, air purifiers, dehumidifiers, the WE800i water softener and wallboxes (controls expected, untested)
+- Redacted diagnostics and texts in 19 languages
 
-Normal measurements and everyday controls are enabled on a fresh installation.
-The installer-level maximum-supply-temperature control, identity data, detailed
-system information, raw software-update fields, and read-only copies of an
-existing control remain available only as opt-in diagnostics.
-Unknown or privacy-sensitive resources never become entities.
+What changed in each version is in the [changelog](CHANGELOG.md) and the
+[release notes](https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/releases).
 
-## Compatibility
+<a id="compatibility"></a>
+<a id="confirmed-installations"></a>
 
-The integration uses the cloud interface shared by the Bosch and Buderus
-heating apps. Compatibility depends on the resources exposed for the specific
-account, gateway, controller, and heating system.
+## Supported systems
 
-| Status | Systems |
-|---|---|
-| Tested | Buderus heat-pump installation with an MX400 controller connected through a gateway reported by PointT as K40/K40RF |
-| Designed for | Compatible Bosch/Buderus systems using MX300 or MX400 controllers and K30/K30RF or K40/K40RF gateways |
-| Optional when reported by PointT | Solar, pool, ventilation, room zones, room devices, PV status, hybrid and tariff resources |
-| Not covered | Air conditioners, wallboxes, Matter/MQTT devices, gateway network administration, and local LAN access |
+| System | Cloud | Local (home network) |
+|---|:---:|:---:|
+| K40/K40RF gateways (MX400 internet module, K40 RF Connect-Key) on heat pumps and boilers | ✓ | ✓ readings, firmware 15.00.01 or newer; alone or together with the cloud |
+| K30/K30RF gateways (MX300 internet module, K30 RF Connect-Key) | ✓ | – |
+| iCom gateways (KM200, KM100, KM50, IP inside, MB LAN 2/LANi, IVT/Bosch IP module) | ✓ when connected to the Bosch or Buderus app | planned for a coming beta |
+| RRC 2.0 room controllers (TC100.2, CT200) | ✓ | – |
+| Wallboxes | ✓ | – |
+| Air conditioners, dehumidifiers, water heaters, air purifiers, WE800i water softener | ✓ (controls disabled by default, can be enabled) | – |
 
-An unlisted model may still work because discovery is capability based. A
-listed gateway does not by itself guarantee that every entity or control is
-available. Missing capabilities are simply omitted without affecting the rest
-of the integration.
+Examples of heating systems (details in [confirmed installations](docs/confirmed-installations.md)):
 
-Home Assistant shows a uniquely identified MX300/MX400 controller as the
-system model. K30/K40 describes the PointT communication gateway, not the
-controller, and remains visible in diagnostics and the gateway hardware data.
+- **K40/K40RF:** air-to-water heat pumps Logatherm WLW176i, WLW186i and Bosch Compress 5800i AW and the brine-to-water heat pump Bosch Compress 7800i LW, confirmed.
+- **K30/K30RF:** split heat pump Logatherm WLW196i AR, gas boiler Logamax plus GBH192i.2 and hybrid system Logamax plus GB172i.2, confirmed (readings, partly holidays read-only).
+- **iCom:** gas boiler Logamax plus GB172 with KM200, confirmed (readings only).
+- **RRC 2.0:** gas boiler Logano plus GB212 with TC100.2, confirmed; CT200 expected, untested.
 
-> [!IMPORTANT]
-> The PointT Cloud API is not a publicly guaranteed API. Cloud-side changes may
-> affect the integration. Keep the original Bosch or Buderus app available for
-> commissioning and service work.
+Access and brands:
+
+- **Local** needs K40/K40RF firmware 15.00.01 or newer and only reads; with
+  **both**, the local access reads and the cloud handles every change. Local
+  access is confirmed on heat pumps, expected on boilers.
+- iCom gateways, room controllers and the other device families are cloud
+  only. The other device families still need checks on real devices.
+- **Brands:** sign-in with the Bosch or Buderus app; the confirmed
+  installations are Buderus systems and two Bosch heat pumps. IVT, Junkers, Nefit, Worcester and
+  Vulcano use the same cloud and are expected to work, not confirmed yet.
+- **Not covered:** Matter devices, arbitrary MQTT devices and gateway network
+  administration.
+
+Details: [supported systems](docs/compatibility.md#supported-systems-at-a-glance),
+[confirmed installations](docs/confirmed-installations.md),
+[device families](docs/device-support-plan.md),
+[room controllers](docs/room-controllers.md) and what is actually tested in the
+[project status](docs/specification-status.md).
 
 ## Installation
 
-### 1. Install HACS if necessary
+Requirements: Home Assistant 2026.5.0 or newer, [HACS](https://www.hacs.xyz/docs/use/download/download/)
+and a SingleKey ID account already connected to the Bosch or Buderus app (not
+needed for local access only).
 
-Follow the official [HACS installation guide](https://www.hacs.xyz/docs/use/download/download/),
-restart Home Assistant, and complete the HACS setup under
-**Settings → Devices & services**.
+<a id="2-install-boschbuderus-heating"></a>
 
-### 2. Install Bosch/Buderus Heating
+1. Open **HACS**, search for **Bosch/Buderus Home Comfort** and select **Download**.
+2. Restart Home Assistant.
 
-1. Open **HACS** in Home Assistant.
-2. Search for **Bosch/Buderus Heating**.
-3. Open the matching repository and select **Download**.
-4. Restart Home Assistant when prompted.
+Not found? See the [search troubleshooting](docs/setup.md#repository-does-not-appear-in-hacs-search).
 
-If the repository is not yet listed in the default HACS catalog, open the
-three-dot menu in HACS, select **Custom repositories**, add
-`https://github.com/SoftwareSchmied/ha-bosch-buderus-heating` as an
-**Integration**, and then repeat the search. The
-[illustrated setup guide](docs/setup.md#repository-does-not-appear-in-hacs-search)
-shows the complete route.
+## Add the integration
 
-### 3. Add the integration
+Open **Settings → Devices & services → Add integration**, search for
+**Bosch/Buderus** and choose the connection:
 
-1. Open **Settings → Devices & services**.
-2. Select **Add integration**.
-3. Search for **Bosch/Buderus Heating**.
-4. Select the brand of the app already connected to the heating system.
-5. Sign in with the same SingleKey ID used by that app.
-6. Select the gateway or gateways Home Assistant should use.
+- **Cloud access:** readings and all controls. Select the brand of your app and
+  sign in with its SingleKey ID; Home Assistant never asks for the password.
+- **Cloud and local access** (recommended when possible): the same, plus the
+  local gateway. Changes always go through the cloud.
+- **Local access only:** readings only, no controls.
 
-SingleKey ID returns the authorization result to a Bosch/Buderus app address
-rather than a normal web page. A desktop browser cannot open that address
-directly. The setup flow and the
-[illustrated setup guide](docs/setup.md#sign-in-with-singlekey-id)
-explain how to copy the complete return address safely from Chrome. Home
-Assistant never asks for the SingleKey ID password.
+The illustrated [setup guide](docs/setup.md) shows every step, including the
+[SingleKey ID sign-in](docs/setup.md#sign-in-with-singlekey-id) and the
+[local access](docs/setup.md#set-up-the-local-access). Never share the return
+address of the sign-in; it contains a one-time code.
 
-> [!CAUTION]
-> The return address contains a short-lived one-time authorization code. Never
-> post it in an issue, chat, screenshot, or log.
+To add, test, sign in again or remove a cloud or local access later, open the gear
+icon (**Configure**) of the entry and choose **Connections**.
 
-## Entities
+![Integration page with the gear icon (Configure) of the entry highlighted](docs/images/setup/configure-connections.png)
 
-Entities are created from the capabilities reported by PointT. Their names
-begin with the logical part of the heating system, which keeps related values
-together even when several circuits exist. Examples include:
+## Entities and dashboards
 
-- `Heating circuit 1 – Operation mode`
-- `Heating circuit 2 – Desired temperature`
-- `Hot water – Actual temperature`
-- `Heat pump – System pressure`
-- `Total – Electricity consumption`
+Entity names start with the part of the system, for example
+`Heating circuit 1 – Operation mode` or `Hot water – Actual temperature`.
+Everyday readings and controls are enabled; technical and identifying values
+stay disabled. The [entity catalog](docs/entities.md) lists every entity with
+its source, default state and polling interval.
 
-The [entity and polling catalog](docs/entities.md) documents every entity in
-the reference installation, its PointT resource, write status, default state,
-and polling interval.
+### Works with
 
-### System faults and notifications
+- [Heat Pump Hydraulic Card](https://github.com/Sturmi77/heatpump-hydraulic-card):
+  a dashboard card that draws the heat pump's hydraulics with live values;
+  it has a preset for this integration (`preset: bosch_buderus_heating`,
+  see [using the hydraulic card](docs/entities.md#using-the-heat-pump-hydraulic-card)).
+- [Wärmewacht](https://github.com/waermewacht/integration): a health check
+  of the heat pump built on this integration's energy counters, compressor
+  status and temperatures, with performance factors per mode, cycling and
+  defrosts. Its template finds the system during setup.
 
-When the installation exposes PointT notifications, the integration creates:
-
-- **System fault**, a problem binary sensor for faults, critical faults, and
-  conservatively classified unknown notifications;
-- **Active faults**, the number of currently active system problems;
-- **Active notifications**, the number of all current notifications, including
-  warnings and maintenance;
-- **System notifications**, an event entity that emits `appeared` and
-  `resolved` transitions.
-
-Fault details are kept as bounded attributes instead of creating a separate
-entity for every possible code. Known, independently worded summaries are
-shown when their meaning has been verified. Unknown codes remain visible and
-are never guessed. The integration observes when a fault first appears or
-disappears in PointT; these Home Assistant observation times are not presented
-as exact appliance timestamps.
-
-The appliance display and the official
-[Bosch error-code search](https://www.bosch-homecomfort.com/de/de/wohngebaeude/service-und-support/bosch-fehlercode-suche/)
-remain the authoritative sources for detailed service information. Home
-Assistant does not replace a qualified technician or manufacturer diagnosis.
-
-### Holiday periods
-
-When the gateway exposes PointT holiday resources, the integration creates a
-**Holiday mode active** binary sensor and a **Holiday periods** calendar.
-The **Next holiday** timestamp sensor makes the upcoming start visible on the
-device page. Multiple configured periods are shown individually. Date-only values,
-timestamps, gateway time zones, empty lists, and incomplete entries are handled
-without affecting the rest of the integration.
-
-Holiday mode is not the same as the existing **Away mode** switch. Holiday
-periods may contain separate behavior for heating, hot water, and ventilation;
-Away mode is a different PointT setting.
-
-If the gateway advertises a current and complete holiday schema, the standard
-Home Assistant calendar dialog also allows you to create, move, rename, and
-delete periods. Open **Calendar**, select **Holiday periods**, and add or edit
-an event. Use only a title plus start and end; recurrence, location, and
-description are not supported by PointT.
-
-When an existing period is edited, its heating, hot-water, ventilation,
-thermal-disinfection, constant-temperature, and circuit-assignment settings are
-preserved. A newly created period uses the defaults also used by MyBuderus and
-HomeCom Easy: all advertised circuits, 17 °C constant-temperature heating when
-supported, hot water off, ventilation off when supported, and thermal
-disinfection on when supported. These defaults are checked against the actual
-configuration. If a default is not offered, use **Configure → Manage holiday
-periods → New holiday** to
-choose dates and the modes provided by your installation before creating it.
-
-To manage a holiday, open the integration's **Configure → Manage holiday
-periods** dialog. Selecting a saved holiday opens its details directly.
-Change its prefilled name, start and end,
-assigned circuits, heating mode, hot-water mode, ventilation mode,
-thermal-disinfection setting, and constant temperature. Only settings
-supported by the connected system are shown.
-
-When creating a holiday here, start and end times default to **08:00** and
-remain editable. Both dates must be selected explicitly. Existing holidays
-retain their saved times when opened for editing. Creating and editing use
-the same form with supported settings together. Each date has its clock
-directly beside it. The clock fields omit seconds. An end before or equal to the start produces
-a clear message at the end field, while the entered values remain available.
-
-The form saves directly. For an existing holiday, the red **Delete holiday
-period completely** button at the bottom opens confirmation without saving
-the draft. Check the saved name and dates before confirming. Declining
-returns to editing with your unsaved inputs preserved. This also works when
-the unsaved dates are incomplete or invalid.
-The calendar remains an additional way to create, move, rename, or delete
-periods. Every change is read back from PointT before Home Assistant accepts
-it as successful. Notification settings remain accessible from the
-integration's configuration dialog.
-
-Midnight remains 00:00 on the selected date, without conversion to 24:00 or
-rounding. If the system returns different settings, the actual holiday appears
-immediately and the dialog shows the requested and returned periods. An
-unresolved creation is checked again without sending another creation request
-during the same loaded session.
-
-The step-by-step [holiday-period guide](docs/holiday-periods.md) shows how to
-create, configure, move, rename, and delete a period and explains every
-available heating-system setting.
-
-### Energy counters
-
-All energy entities are cumulative counters in kWh. They do not represent
-instantaneous power in kW.
-
-| Entity | PointT source |
-|---|---|
-| `Total – Electricity consumption` | `totalConsumption → electricity`, otherwise `compressor + eheater` |
-| `Total – Heat-pump electricity consumption` | `totalConsumption → compressor` |
-| `Total – Electric auxiliary-heater consumption` | `totalConsumption → eheater` |
-| `Total – Heat produced` | `totalConsumption → outputProduced` |
-| `Total – Environmental energy (calculated)` | `outputProduced - compressor - eheater` |
-| `Heating – …` | corresponding values from `chConsumption` |
-| `Hot water – …` | corresponding values from `dhwConsumption` |
-| `Cooling – …` | corresponding values from `coolingConsumption` |
-
-The calculated environmental-energy entity is only created when all required
-counters are present and valid. An incomplete or negative balance is not
-reported as a measurement.
+<a id="unreleased-development-work"></a>
+<a id="new-pointt-controls-in-beta7"></a>
 
 ## Controls and safety
 
-The integration can expose supported operating modes, temperature setpoints,
-extra hot water, and away mode. Availability is determined for each
-installation from the current PointT metadata.
+- Before a change, the integration checks again that the setting is writable and the value lies within the limits the system currently reports.
+- It sends one write request and never retries it blindly.
+- A separate read-back must confirm the result; otherwise Home Assistant reports the change as failed.
+- The integration changes nothing on its own; writes start only from you or your automations.
 
-Before a change is sent, the integration verifies that the resource is still
-writable and that the requested value is within the advertised limits. Every
-successful request is followed by a bounded read-back. If PointT does not
-confirm the result, Home Assistant reports the change as unsuccessful instead
-of assuming it worked.
+See [heating controls](docs/heating-controls.md) and
+[PointT hot water](docs/pointt-hot-water.md).
 
-Each resource provides its own options and numeric bounds. A circuit offering
-only `manual` and `auto` remains writable, and additional advertised enum codes
-are offered even when they have no translation yet. Options and limits update
-during polling. Newly eligible discovered resources gain controls without a
-restart; previously undiscovered paths still require rediscovery.
+## Updating
 
-Numeric increments are UI hints. The observed PointT metadata does not establish
-a write step, so a valid target inside the advertised bounds is not rejected
-because it differs from an increment used on a reference installation. Legacy
-switch IDs remain stable; variants with additional or fewer options also receive
-a separate selection control.
+HACS shows new versions; read the release notes, select **Update** and restart
+Home Assistant. From 0.8.x the configuration entry moves to storage format 4,
+which 0.8.x cannot load: make a full Home Assistant backup before you update,
+because going back is only possible by restoring it. 0.9 needs Home Assistant
+2026.5.0 or newer. See [updating](docs/setup.md#updating).
 
-## Polling and cloud load
+## Feedback, support and diagnostics
 
-The coordinator groups resources by how quickly they need to change:
+**Feedback on 0.9.x:** please share how the integration works on your system in the [0.9.x feedback discussion](https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/discussions/111). Let Home Assistant run for at least a few hours first (ideally half a day, so that slower readings, counters and the firmware check have values), then attach the diagnostics: **Settings → Devices & services → Bosch/Buderus Home Comfort → ⋮ → Download diagnostics**. The file is redacted (no serial numbers, tokens, e-mail or addresses), but please have a quick look before posting. It lets me check that everything on your system is read and shown correctly, and it adds your heat generator model to the model table.
 
-| Data | Default interval |
-|---|---:|
-| Live operating values | 60 seconds |
-| Notifications without an active notification | 5 minutes |
-| Notifications while at least one is active | 60 seconds |
-| Settings and energy counters | 5 minutes |
-| Starts and operating hours | 15 minutes |
-| Static device information | At startup |
+- **Questions and ideas:** [GitHub Discussions](https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/discussions)
+  (**Questions and help**, **Ideas and requests**, **Installations and examples**), please in English.
+- **Your system:** add it to [Share your installation](https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/discussions/81).
+- **Bugs:** open an [issue](https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/issues/new/choose).
+  Check the [troubleshooting](docs/setup.md#troubleshooting) first, download the
+  diagnostics before reloading, and note the time and exact message.
 
-Reviewed supplementary metadata now has a separate phase after functional
-discovery, with one shared 30-second entry budget. Valid read-only product
-names and installed refrigerant-circuit counts then stop repeating. Failed
-reads remain eligible for bounded recovery; existing sensor identities are
-preserved. The unused license document is not requested. See
-[Request behavior and recovery](docs/request-behavior.md) for the exact paths,
-retry delays, cache lifetime, limits and measured request savings.
-
-Group deadlines allow up to one second of timer-rounding tolerance so a slightly
-early Home Assistant callback does not skip the next read. Resource pauses and
-rate-limit deadlines retain their full duration.
-
-Reads are batched where possible. Rate-limit responses trigger bounded
-backoff, and temporary failures do not replace the last confirmed value with
-invented data. Polling profiles can be changed through **Reconfigure**; see
-[Reconfiguration and rediscovery](docs/reconfiguration.md).
-
-## Diagnostics and support
-
-Home Assistant can generate a redacted diagnostic report from the integration
-menu. It contains capability schemas, availability, polling results, and
-request counters and narrowly allowlisted technical metadata. It excludes
-credentials, current operating/settings values, stable identifiers and
-user-defined names. The [diagnostics guide](docs/diagnostics.md) explains the
-technical-value allowlist and the value-free inventory export.
-
-Before opening an
-[issue](https://github.com/SoftwareSchmied/ha-bosch-buderus-heating/issues):
-
-1. Check the [troubleshooting section](docs/setup.md#troubleshooting).
-2. Reload the integration and reproduce the problem once.
-3. Download the integration diagnostics as described in the
-   [diagnostics guide](docs/diagnostics.md).
-4. Remove anything you do not want to share and attach the report to the issue.
-
-Never publish access tokens, refresh tokens, complete redirect addresses,
-gateway IDs, serial numbers, network identifiers, or unredacted API responses.
+Never publish tokens, sign-in return addresses, gateway IDs, serial numbers or
+unredacted API responses. The [diagnostics guide](docs/diagnostics.md) explains
+what the report contains.
 
 ## Documentation
 
-| Document | Contents |
-|---|---|
-| [Setup guide](docs/setup.md) | Illustrated installation and SingleKey ID walkthrough |
-| [Entities and polling](docs/entities.md) | Entity names, API resources, write access, and intervals |
-| [Request behavior and recovery](docs/request-behavior.md) | Exact startup order, successful-once reads, retries, limits and cloud-load savings |
-| [Faults and notifications](docs/faults.md) | Fault entities, lifecycle behavior, and automation examples |
-| [Holiday periods](docs/holiday-periods.md) | Creating, editing, and deleting holidays with their heating settings |
-| [Resource catalog](docs/resource-catalog.md) | Observed PointT resources and terminology |
-| [Reconfiguration](docs/reconfiguration.md) | Gateway selection, rediscovery, and polling profiles |
-| [Diagnostics](docs/diagnostics.md) | Redacted diagnostics and request metrics |
-| [Anonymized inventory](docs/anonymized-inventory.md) | Value-free compatibility inventory for maintainers |
-| [Roadmap](docs/roadmap.md) | Remaining compatibility and release work |
+- **Getting started:** [setup guide](docs/setup.md), [reconfiguration](docs/reconfiguration.md), [settings dialog](docs/dialogs.md), [cloud and local access](docs/operation-without-cloud.md), [source selection](docs/source-selection.md)
+- **Operating:** [heating controls](docs/heating-controls.md), [PointT hot water](docs/pointt-hot-water.md), [holiday periods](docs/holiday-periods.md), [older holiday formats](docs/legacy-holidays.md), [season switching](docs/season-switching.md)
+- **Room controllers:** [overview](docs/room-controllers.md), [zones and schedules](docs/rrc-zones-and-schedules.md), [zone controls](docs/zone-controls.md), [zone and DHW additions](docs/zone-and-dhw-fields.md)
+- **Readings:** [entities and polling](docs/entities.md), [calculated values](docs/calculated-values.md), [plant recordings](docs/recordings.md), [faults and notifications](docs/faults.md), [validity of readings](docs/reading-validity.md), [device presentation](docs/device-presentation.md), [names and languages](docs/resource-names-and-languages.md), [translations](docs/translations.md)
+- **Other devices:** [device families](docs/device-support-plan.md), [water heaters](docs/bacon-water-heaters.md), [air conditioners](docs/bacon-air-conditioners.md), [air conditioners on a PointT gateway](docs/pointt-air-conditioners.md), [air purifiers](docs/bacon-air-purifiers.md), [dehumidifiers](docs/bacon-dehumidifiers.md), [connection](docs/bacon-connection.md), [wallboxes](docs/pointt-wallboxes.md), [water softener](docs/water-softener.md), [WE800i validation](docs/water-softener-validation.md), [WDDW2 types](docs/wddw2-types.md)
+- **Reliability:** [request behavior](docs/request-behavior.md), [connection recovery](docs/connection-recovery.md), [diagnostics](docs/diagnostics.md)
+- **Status:** [compatibility](docs/compatibility.md), [confirmed installations](docs/confirmed-installations.md), [project status](docs/specification-status.md), [roadmap](docs/roadmap.md)
+- **Maintainers:** [architecture](docs/architecture.md), [resource catalog](docs/resource-catalog.md), [resource inventory](docs/resource-inventory.md), [anonymized inventory](docs/anonymized-inventory.md), [privacy and test data](docs/privacy-and-fixtures.md), [release checks](docs/release.md)
 
 ## Development
 
-The development toolchain requires Python 3.14.2 or newer.
-
-```bash
-python -m venv .venv
-python -m pip install -e ".[test]"
-ruff format --check .
-ruff check .
-mypy
-pytest
-```
-
-Read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting code or real-device
-fixtures. Contributions for additional Bosch/Buderus installations are
-welcome when they follow the repository's privacy and fixture rules.
+Development setup, checks and contribution rules are in
+[CONTRIBUTING.md](CONTRIBUTING.md). Contributions for additional Bosch/Buderus
+installations are welcome when they follow the repository's privacy and
+fixture rules.
 
 ## License and trademarks
 

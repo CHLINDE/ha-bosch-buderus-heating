@@ -13,7 +13,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import UpdateFailed
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.bosch_buderus_heating.const import (
     DOMAIN,
@@ -31,7 +30,7 @@ from custom_components.bosch_buderus_heating.coordinator import (
     Freshness,
     ResourceSnapshot,
     SnapshotSource,
-    _energy_reset_count,
+    _energy_decreases,
     _error_category,
 )
 from custom_components.bosch_buderus_heating.holiday_writes import (
@@ -67,6 +66,7 @@ from custom_components.bosch_buderus_heating.writes import (
     HEATING_CIRCUIT_OPERATION_MODE_POLICY,
     number_policy_for_resource,
 )
+from tests.ha_test_helpers import MockConfigEntry
 
 
 def _coordinator(
@@ -108,7 +108,7 @@ async def test_first_refresh_discovers_and_classifies_resources(
         values=({"total": 3600},),
         metadata=ResourceMetadata(resource_type="emonValue"),
     )
-    static = _resource("/gateway/versionFirmware", 1.0)
+    static = _resource("/gateway/versionHardware", 1.0)
     with patch(
         "custom_components.bosch_buderus_heating.coordinator.async_discover_resources",
         AsyncMock(return_value={item.path: item for item in (fast, slow, static)}),
@@ -325,6 +325,7 @@ async def test_polling_preserves_last_good_values(hass: HomeAssistant) -> None:
         "total": 2,
         "successful": 1,
         "failed": 1,
+        "paths_failing": 1,
         "success_rate_percent": 50.0,
     }
 
@@ -335,24 +336,25 @@ def _snapshot(resource: Resource) -> ResourceSnapshot:
 
 def test_energy_reset_detection_uses_only_valid_counter_components() -> None:
     path = "/heatSources/emon/totalConsumption"
+    metadata = ResourceMetadata(resource_type="emonValue")
     previous = Resource(
         path=path,
         values=({"compressor": 120.0, "eheater": 4.0, "outputProduced": 350.0},),
+        metadata=metadata,
     )
     reset = Resource(
         path=path,
         values=({"compressor": 2.0, "eheater": 4.5, "outputProduced": 3.0},),
+        metadata=metadata,
     )
 
-    assert _energy_reset_count(previous, reset) == 2
-    assert _energy_reset_count(reset, reset) == 0
-    assert (
-        _energy_reset_count(
-            previous,
-            Resource(path="/other", values=reset.values),
-        )
-        == 0
-    )
+    # The compressor counter was reset; the produced heat is counted apart.
+    assert _energy_decreases(previous, reset) == (1, 1)
+    assert _energy_decreases(reset, reset) == (0, 0)
+    assert _energy_decreases(
+        previous,
+        Resource(path="/other", values=reset.values, metadata=metadata),
+    ) == (0, 0)
 
 
 async def test_poll_records_energy_resets_without_changing_values(
@@ -383,7 +385,9 @@ async def test_poll_records_energy_resets_without_changing_values(
     result = await coordinator._async_update_data()
 
     assert result[path].resource is current
-    assert coordinator.diagnostics_summary()["energy_counter_resets_detected"] == 2
+    summary = coordinator.diagnostics_summary()
+    assert summary["energy_counter_resets_detected"] == 1
+    assert summary["produced_heat_decreases_detected"] == 1
 
 
 async def test_confirmed_write_updates_coordinator_without_batch_refresh(
@@ -411,6 +415,8 @@ async def test_confirmed_write_updates_coordinator_without_batch_refresh(
     coordinator.data = {path: _snapshot(current)}
     coordinator.last_update_success = True
     coordinator._write_service = AsyncMock()
+    # D25: the deadline reads the (synchronous) read-back schedule.
+    coordinator._write_service.read_back_delays = Mock(return_value=())
     coordinator._write_service.async_write_enum.return_value = WriteResult(
         WriteRequest("gateway-one", path, "auto"), confirmed
     )
@@ -446,15 +452,20 @@ async def test_confirmed_number_write_updates_coordinator(
     coordinator.data = {path: _snapshot(current)}
     coordinator.last_update_success = True
     coordinator._write_service = AsyncMock()
+    # D25: the deadline reads the (synchronous) read-back schedule.
+    coordinator._write_service.read_back_delays = Mock(return_value=())
     coordinator._write_service.async_write_number.return_value = WriteResult(
         WriteRequest("gateway-one", path, 20.5), confirmed
     )
+    # L16: the setting is read live before the write.
+    coordinator.client.get_resource = AsyncMock(return_value=current)
 
     result = await coordinator.async_write_control(path, 20.5, policy)
 
     assert result is confirmed
+    # The control type rule of the circuit compares with the current readings.
     coordinator._write_service.async_write_number.assert_awaited_once_with(
-        "gateway-one", current, 20.5, policy
+        "gateway-one", current, 20.5, policy, current=current, related={path: current}
     )
 
 
@@ -701,6 +712,8 @@ async def test_number_policy_rejects_non_numeric_value(hass: HomeAssistant) -> N
     assert policy is not None
     coordinator.data = {path: _snapshot(resource)}
     coordinator._write_service = AsyncMock()
+    # D25: the deadline reads the (synchronous) read-back schedule.
+    coordinator._write_service.read_back_delays = Mock(return_value=())
 
     with pytest.raises(WriteValidationError):
         await coordinator.async_write_control(path, True, policy)  # type: ignore[arg-type]
@@ -723,6 +736,8 @@ async def test_write_rejects_stale_resource_before_cloud_call(
         )
     }
     coordinator._write_service = AsyncMock()
+    # D25: the deadline reads the (synchronous) read-back schedule.
+    coordinator._write_service.read_back_delays = Mock(return_value=())
 
     with pytest.raises(WriteValidationError):
         await coordinator.async_write_control(
@@ -740,6 +755,8 @@ async def test_write_rate_limit_activates_global_backoff(
     coordinator.resources = {path: resource}
     coordinator.data = {path: _snapshot(resource)}
     coordinator._write_service = AsyncMock()
+    # D25: the deadline reads the (synchronous) read-back schedule.
+    coordinator._write_service.read_back_delays = Mock(return_value=())
     coordinator._write_service.async_write_enum.side_effect = RateLimited(30)
 
     with pytest.raises(RateLimited):
@@ -757,6 +774,8 @@ async def test_write_respects_existing_backoff_without_cloud_call(
     coordinator = _coordinator(hass, AsyncMock())
     coordinator._cloud_backoff_until = 10**20
     coordinator._write_service = AsyncMock()
+    # D25: the deadline reads the (synchronous) read-back schedule.
+    coordinator._write_service.read_back_delays = Mock(return_value=())
 
     with pytest.raises(RateLimited):
         await coordinator.async_write_control(
@@ -785,6 +804,8 @@ async def test_write_auth_failure_starts_reauthentication(
     coordinator.resources = {path: resource}
     coordinator.data = {path: _snapshot(resource)}
     coordinator._write_service = AsyncMock()
+    # D25: the deadline reads the (synchronous) read-back schedule.
+    coordinator._write_service.read_back_delays = Mock(return_value=())
     coordinator._write_service.async_write_enum.side_effect = AuthenticationError()
     coordinator._config_entry.async_start_reauth = Mock()
 
@@ -1175,7 +1196,7 @@ async def test_rate_limit_starts_bounded_no_request_backoff(
 
     with pytest.raises(UpdateFailed, match="no usable resources"):
         await coordinator._async_update_data()
-    with pytest.raises(UpdateFailed, match="backoff"):
+    with pytest.raises(UpdateFailed, match="rate-limit pause"):
         await coordinator._async_update_data()
 
     assert client.get_resources_bulk.await_count == 1
@@ -1442,7 +1463,7 @@ async def test_repeated_gateway_failure_opens_circuit_breaker(
         with pytest.raises(UpdateFailed, match="no usable resources"):
             await coordinator._async_update_data()
 
-    with pytest.raises(UpdateFailed, match="circuit breaker"):
+    with pytest.raises(UpdateFailed, match="protection pause"):
         await coordinator._async_update_data()
 
     assert client.get_resources_bulk.await_count == CIRCUIT_FAILURE_THRESHOLD
@@ -1478,7 +1499,7 @@ async def test_fallback_maps_scoped_errors_and_stops_on_rate_limit(
     )
     client.get_resource.side_effect = (
         ResourceNotFound(paths[0], 404),
-        ServiceUnavailable(),
+        ServiceUnavailable(503),  # an HTTP answer; no status = no connection
         RateLimited(90),
     )
 
@@ -1520,3 +1541,224 @@ def test_expired_negative_pause_and_unknown_result_are_safe(
         )
         == 0
     )
+
+
+async def test_manual_setpoint_recovery_queued_after_confirmed_mode_write(
+    hass: HomeAssistant,
+) -> None:
+    coordinator = _coordinator(hass, AsyncMock())
+    mode_path = "/heatingCircuits/hc1/operationMode"
+    target_path = "/heatingCircuits/hc1/manualRoomSetpoint"
+    metadata = ResourceMetadata(
+        resource_type="stringValue", allowed_values=("auto", "manual"), writable=True
+    )
+    old_mode = Resource(path=mode_path, value="auto", has_value=True, metadata=metadata)
+    new_mode = Resource(
+        path=mode_path, value="manual", has_value=True, metadata=metadata
+    )
+    target = _resource(target_path, 20.0)
+    coordinator.data = {
+        mode_path: _snapshot(old_mode),
+        target_path: ResourceSnapshot(
+            target, False, datetime.now(UTC), freshness=Freshness.STALE
+        ),
+    }
+    coordinator.last_update_success = True
+    coordinator._write_service = AsyncMock()
+    # D25: the deadline reads the (synchronous) read-back schedule.
+    coordinator._write_service.read_back_delays = Mock(return_value=())
+    coordinator._write_service.async_write_enum.return_value = WriteResult(
+        WriteRequest("gateway-one", mode_path, "manual"), new_mode
+    )
+    with patch.object(coordinator, "_queue_manual_setpoint_recovery") as queue:
+        await coordinator.async_write_control(
+            mode_path, "manual", HEATING_CIRCUIT_OPERATION_MODE_POLICY
+        )
+    queue.assert_called_once_with(mode_path, coordinator.data)
+
+
+async def test_manual_setpoint_recovery_reads_only_missing_target(
+    hass: HomeAssistant,
+) -> None:
+    client = AsyncMock()
+    coordinator = _coordinator(hass, client)
+    mode_path = "/heatingCircuits/hc1/operationMode"
+    target_path = "/heatingCircuits/hc1/manualRoomSetpoint"
+    mode = Resource(path=mode_path, value="manual", has_value=True)
+    target = _resource(target_path, 21.0)
+    coordinator.data = {
+        mode_path: _snapshot(mode),
+        target_path: ResourceSnapshot(
+            target, False, datetime.now(UTC), freshness=Freshness.STALE
+        ),
+    }
+    coordinator.last_update_success = True
+    client.get_resources_bulk.return_value = (_success(target_path, 22.0),)
+    with patch(
+        "custom_components.bosch_buderus_heating.coordinator.asyncio.sleep",
+        AsyncMock(),
+    ):
+        coordinator._queue_manual_setpoint_recovery(mode_path, coordinator.data)
+        await coordinator._manual_setpoint_tasks[target_path]
+    client.get_resources_bulk.assert_awaited_once_with(
+        "gateway-one", (target_path,), retryable=False
+    )
+    assert coordinator.data[target_path].available
+    assert coordinator.data[target_path].resource.value == 22.0
+
+
+async def test_manual_setpoint_recovery_stops_in_auto_mode(
+    hass: HomeAssistant,
+) -> None:
+    client = AsyncMock()
+    coordinator = _coordinator(hass, client)
+    mode_path = "/heatingCircuits/hc1/operationMode"
+    target_path = "/heatingCircuits/hc1/manualRoomSetpoint"
+    mode = Resource(path=mode_path, value="auto", has_value=True)
+    target = _resource(target_path, 21.0)
+    coordinator.data = {
+        mode_path: _snapshot(mode),
+        target_path: ResourceSnapshot(
+            target, False, datetime.now(UTC), freshness=Freshness.STALE
+        ),
+    }
+    with patch(
+        "custom_components.bosch_buderus_heating.coordinator.asyncio.sleep",
+        AsyncMock(),
+    ):
+        await coordinator._async_recover_manual_setpoint(mode_path, target_path)
+    client.get_resources_bulk.assert_not_awaited()
+
+
+async def test_manual_setpoint_recovery_queued_after_polled_mode_change(
+    hass: HomeAssistant,
+) -> None:
+    coordinator = _coordinator(hass, AsyncMock())
+    mode_path = "/heatingCircuits/hc1/operationMode"
+    target_path = "/heatingCircuits/hc1/manualRoomSetpoint"
+    old_mode = Resource(path=mode_path, value="auto", has_value=True)
+    new_mode = Resource(path=mode_path, value="manual", has_value=True)
+    target = _resource(target_path, 21.0)
+    snapshots = {
+        mode_path: _snapshot(old_mode),
+        target_path: ResourceSnapshot(
+            target, False, datetime.now(UTC), freshness=Freshness.STALE
+        ),
+    }
+    with patch.object(coordinator, "_queue_manual_setpoint_recovery") as queue:
+        coordinator._apply_results(
+            snapshots,
+            (BatchItemResult("gateway-one", mode_path, 200, resource=new_mode),),
+            attempted_at=datetime.now(UTC),
+            now_monotonic=monotonic(),
+            source=SnapshotSource.BATCH,
+        )
+    queue.assert_called_once_with(mode_path, snapshots)
+
+
+async def test_manual_setpoint_404_queues_recovery_when_mode_already_manual(
+    hass: HomeAssistant,
+) -> None:
+    coordinator = _coordinator(hass, AsyncMock())
+    mode_path = "/heatingCircuits/hc1/operationMode"
+    target_path = "/heatingCircuits/hc1/manualRoomSetpoint"
+    mode = Resource(path=mode_path, value="manual", has_value=True)
+    target = _resource(target_path, 20.0)
+    snapshots = {
+        mode_path: _snapshot(mode),
+        target_path: _snapshot(target),
+    }
+    with patch.object(coordinator, "_queue_manual_setpoint_recovery") as queue:
+        coordinator._apply_results(
+            snapshots,
+            (
+                BatchItemResult(
+                    "gateway-one",
+                    target_path,
+                    404,
+                    error=ResourceNotFound(target_path, 404),
+                ),
+            ),
+            attempted_at=datetime.now(UTC),
+            now_monotonic=monotonic(),
+            source=SnapshotSource.BATCH,
+        )
+    assert not snapshots[target_path].available
+    queue.assert_called_once_with(mode_path, snapshots)
+
+
+async def test_missing_manual_setpoint_can_be_recovered_and_polled(
+    hass: HomeAssistant,
+) -> None:
+    client = AsyncMock()
+    coordinator = _coordinator(hass, client)
+    mode_path = "/heatingCircuits/hc1/operationMode"
+    target_path = "/heatingCircuits/hc1/manualRoomSetpoint"
+    mode = Resource(path=mode_path, value="manual", has_value=True)
+    coordinator.data = {mode_path: _snapshot(mode)}
+    coordinator.resources = {mode_path: mode}
+    coordinator._paths_by_group = {PollGroup.CONTROL: (mode_path,)}
+    coordinator.last_update_success = True
+
+    with patch(
+        "custom_components.bosch_buderus_heating.coordinator.asyncio.sleep",
+        AsyncMock(),
+    ):
+        metadata = ResourceMetadata(
+            resource_type="floatValue",
+            unit="C",
+            minimum=5.0,
+            maximum=30.0,
+            writable=True,
+        )
+        recovered = Resource(
+            path=target_path, value=21.0, has_value=True, metadata=metadata
+        )
+        client.get_resources_bulk.return_value = (
+            BatchItemResult("gateway-one", target_path, 200, resource=recovered),
+        )
+        coordinator._queue_manual_setpoint_recovery(mode_path, coordinator.data)
+        await coordinator._manual_setpoint_tasks[target_path]
+
+    assert coordinator.data[target_path].resource is recovered
+    assert coordinator.data[target_path].available
+    assert target_path in coordinator._paths_by_group[PollGroup.CONTROL]
+    client.get_resources_bulk.assert_awaited_once_with(
+        "gateway-one", (target_path,), retryable=False
+    )
+
+
+async def test_missing_manual_setpoint_initial_404_does_not_block_retry(
+    hass: HomeAssistant,
+) -> None:
+    client = AsyncMock()
+    coordinator = _coordinator(hass, client)
+    mode_path = "/heatingCircuits/hc1/operationMode"
+    target_path = "/heatingCircuits/hc1/manualRoomSetpoint"
+    mode = Resource(path=mode_path, value="manual", has_value=True)
+    coordinator.data = {mode_path: _snapshot(mode)}
+    coordinator.last_update_success = True
+    metadata = ResourceMetadata(
+        resource_type="floatValue",
+        unit="C",
+        minimum=5.0,
+        maximum=30.0,
+        writable=True,
+    )
+    recovered = Resource(
+        path=target_path, value=21.0, has_value=True, metadata=metadata
+    )
+    client.get_resources_bulk.side_effect = [
+        (BatchItemResult("gateway-one", target_path, 404),),
+        (BatchItemResult("gateway-one", target_path, 200, resource=recovered),),
+    ]
+    with patch(
+        "custom_components.bosch_buderus_heating.coordinator.asyncio.sleep",
+        AsyncMock(),
+    ):
+        coordinator._queue_manual_setpoint_recovery(mode_path, coordinator.data)
+        await coordinator._manual_setpoint_tasks[target_path]
+
+    assert client.get_resources_bulk.await_count == 2
+    assert target_path not in coordinator._negative_until
+    assert coordinator.data[target_path].available

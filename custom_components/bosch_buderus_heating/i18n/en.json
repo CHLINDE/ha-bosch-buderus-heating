@@ -1,0 +1,53 @@
+{
+  "dialogs": {
+    "controls": {
+      "system": "System",
+      "heatingCircuit": "Heating circuit",
+      "hotWater": "Hot water",
+      "sections": "Appliance sections",
+      "moreSettings": "More settings",
+      "checkValue": "Please check this value.",
+      "discard": "Discard",
+      "reload": "Reload values",
+      "unsaved": "{count} unsaved changes",
+      "unsavedOne": "{count} unsaved change",
+      "saved": "Changes confirmed.",
+      "unchanged": "No changes, nothing was written.",
+      "empty": "No controls are currently available.",
+      "pending": "Changes are written only when you select Apply.",
+      "reopen": "Please close and reopen the dialog.",
+      "reloadFailed": "The values could not be reloaded.",
+      "hybrid": "Hybrid"
+    },
+    "holiday": {
+      "date": "Date",
+      "time": "Time",
+      "deleteFailed": "The deletion confirmation could not be opened. Please reload the page and try again.",
+      "reopen": "Please close and reopen the dialog.",
+      "selectRange": "Select date range",
+      "previousMonth": "Previous month",
+      "nextMonth": "Next month",
+      "lastHolidayDay": "Select last holiday day",
+      "firstHolidayDay": "Select first holiday day",
+      "cancelRange": "Cancel",
+      "applyRange": "Apply",
+      "selectCircuit": "Select at least one circuit.",
+      "rangeLabel": "Holiday period",
+      "durationOne": "Holiday duration: {days} day",
+      "durationMany": "Holiday duration: {days} days",
+      "resumeHeating": "Normal heating resumes: {date}",
+      "invalidRange": "Select a valid date range."
+    },
+    "schedule": {
+      "title": "Weekly view",
+      "clock": "Times by the clock of the heating system.",
+      "carried": "continued from the previous day",
+      "empty": "no switch points",
+      "noLevel": "no setpoint",
+      "changed": "changed, not saved yet",
+      "hours": "Hours",
+      "day": "Day",
+      "segment": "{day} {start} to {end}: {level}"
+    }
+  }
+}

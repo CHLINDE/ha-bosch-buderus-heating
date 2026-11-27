@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "family": "pointt_wallbox_cp0",
+  "provenance": {
+    "kind": "synthetic",
+    "basis": "compatibility_mapping",
+    "firmware": null,
+    "capture_date": null,
+    "created": "2026-10-24",
+    "physical_device_verified": false,
+    "redaction": "Fully constructed protocol example; no device capture."
+  },
+  "telemetry": {
+    "values": {
+      "wbState": "Charging",
+      "meter": "1250;7.2",
+      "energyTotal": 4321.5,
+      "limit": "16",
+      "activeChargingTime": 35,
+      "chargingStart": "2026-10-24T09:00:00+02:00",
+      "chargePermission": "unreviewed"
+    }
+  },
+  "conf": {"values": {"wallboxMode": "standalone", "label": "private-label"}},
+  "info": {
+    "values": {
+      "productName": "Synthetic wallbox",
+      "softwareVersion": "5.1.0",
+      "hwCurrentLimit": "32",
+      "boxSerial": "private-serial"
+    }
+  }
+}

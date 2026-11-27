@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "family": "rrc",
+  "provenance": {
+    "kind": "synthetic",
+    "basis": "compatibility_mapping",
+    "firmware": null,
+    "capture_date": null,
+    "created": "2026-10-23",
+    "redaction": "Constructed examples with fixture-local IDs; no captured response or private data.",
+    "physical_device_verified": false
+  },
+  "cases": [
+    {
+      "id": "hot_water_temperature",
+      "payload": {
+        "id": "/dhwCircuits/dhw2/actualTemp",
+        "type": "floatValue",
+        "value": 48,
+        "writeable": 0,
+        "unitOfMeasure": "C"
+      },
+      "expected": {
+        "value": 48,
+        "unit": "°C",
+        "part": null
+      }
+    },
+    {
+      "id": "away_temperature",
+      "payload": {
+        "id": "/system/awayMode/temperature",
+        "type": "floatValue",
+        "value": 16,
+        "writeable": 0,
+        "unitOfMeasure": "C"
+      },
+      "expected": {
+        "value": 16,
+        "unit": "°C",
+        "part": null
+      }
+    }
+  ]
+}

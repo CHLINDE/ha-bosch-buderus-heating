@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "work/r93b3-*", "work/r092s-*"]
   pull_request:
 
 permissions:
@@ -13,19 +13,78 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  frontend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install browser test dependencies
+        run: npm ci
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Test the controls and holiday dialogs
+        run: npm test
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          # Recorder fixtures need unittest.mock's deferred-annotation fix.
+          python-version: "3.14.7"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            .github/workflows/*.yml
+      - name: Install Home Assistant test dependencies
+        run: |
+          python -m pip install -e ".[test]"
+          python - <<'PY'
+          import importlib.resources
+          import json
+          import subprocess
+          import sys
+          # Native service descriptions import these HA base components.
+          requirements = set()
+          for component in ("frontend", "conversation", "camera", "tts", "ffmpeg", "assist_pipeline"):
+              manifest = importlib.resources.files("homeassistant").joinpath("components", component, "manifest.json")
+              requirements.update(json.loads(manifest.read_text()).get("requirements", []))
+          subprocess.check_call([sys.executable, "-m", "pip", "install", *sorted(requirements)])
+          PY
+      - name: Test the dialogs in the Home Assistant frontend
+        run: >-
+          pytest --no-cov
+          tests/frontend/ha_dialog.py
+          tests/frontend/ha_water_heater.py
+          tests/frontend/ha_rrc_water_heater.py
+          tests/frontend/ha_local_setup.py
+          tests/frontend/ha_local_first.py
+          tests/frontend/ha_rescan.py
+          tests/frontend/ha_rrc_zone.py
+          tests/frontend/ha_rrc_events.py
+
   quality:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Python 3.14.2 is available on 24.04, not the rolling latest image.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14.2"
           cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            .github/workflows/*.yml
       - name: Install development dependencies
         run: python -m pip install -e ".[test]"
       - name: Check formatting
@@ -35,10 +94,58 @@ jobs:
       - name: Type-check
         run: mypy
       - name: Test with coverage
-        run: pytest
+        run: pytest -n auto
+
+  compatibility:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14.7"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            .github/workflows/*.yml
+      - name: Install Home Assistant 2026.9.2 test environment
+        run: >-
+          python -m pip install
+          pytest-homeassistant-custom-component==0.13.365
+          hypothesis==6.170.15 aiomqtt==2.5.1
+      - name: Run the full suite on Home Assistant 2026.9.2
+        run: pytest -n auto
+
+  minimum-version:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14.7"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            .github/workflows/*.yml
+      - name: Install Home Assistant 2026.5.4 test environment
+        run: >-
+          python -m pip install
+          pytest-homeassistant-custom-component==0.13.333
+          hypothesis==6.170.15 aiomqtt==2.5.1
+      - name: Run the full suite on the minimum supported Home Assistant
+        run: pytest -n auto
 
   dependency-audit:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Check out repository
@@ -46,10 +153,13 @@ jobs:
         with:
           persist-credentials: false
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14.2"
           cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            .github/workflows/*.yml
       - name: Create isolated audit environment
         run: |
           python -m venv .audit-venv
@@ -68,7 +178,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Validate Home Assistant integration
-        uses: home-assistant/actions/hassfest@cd6f3635a740c84d8a14f6121a90068b8ece6bf6
+        uses: home-assistant/actions/hassfest@86d4564712fa02543c808e3a693dd04f9d3f8361
 
   hacs:
     runs-on: ubuntu-latest

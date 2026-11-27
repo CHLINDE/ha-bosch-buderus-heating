@@ -1,0 +1,91 @@
+"""Validated cached measurements for combined PointT entities."""
+
+from __future__ import annotations
+
+import math
+from dataclasses import replace
+
+from homeassistant.const import UnitOfTemperature
+from homeassistant.util.unit_conversion import TemperatureConverter
+
+from .coordinator import BoschBuderusDataUpdateCoordinator, Freshness
+from .held_readings import cloud_usable, held_snapshot
+from .pointt import Resource
+from .unit_contracts import TEMPERATURE_UNITS
+
+
+def fresh_resource(
+    coordinator: BoschBuderusDataUpdateCoordinator,
+    path: str,
+    *,
+    displayed: bool = False,
+    flags: bool = True,
+    held: bool = False,
+) -> Resource | None:
+    """A current, usable reading; ``displayed`` prefers a paired local value.
+
+    The same checks apply to both sources, and a failed cloud cycle still hides
+    the value, so a combined entity never looks current without the cloud.
+
+    Without ``flags`` the ``used`` and ``available`` flags of a valid reading
+    are left to a later check: the reading comes back without them, for a
+    write that reads the setting again and checks its current flags there.
+
+    ``held`` is for the display of an entity only (H-B3-2): over a short cloud
+    blip the last good reading stays current (see ``cloud_hold``). Writes and
+    their checks never pass it; they read again and stay strict.
+    """
+    assumed = getattr(coordinator, "assumed_fresh", None)
+    stored: Resource | None = assumed(path) if assumed is not None else None
+    snapshot = (
+        coordinator.display_snapshot(path)
+        if displayed
+        else held_snapshot(coordinator, path)
+        if held
+        else (coordinator.data or {}).get(path)
+    )
+    if stored is not None:
+        # Only while deciding entity creation from the stored inventory.
+        resource = stored
+    elif (
+        not (cloud_usable(coordinator) if held else coordinator.last_update_success)
+        or snapshot is None
+        or not snapshot.available
+        or snapshot.freshness is not Freshness.FRESH
+    ):
+        return None
+    else:
+        resource = snapshot.resource
+    metadata = resource.metadata
+    if (
+        resource.path != path
+        or not resource.has_value
+        or resource.has_values
+        or not metadata.availability_flags_valid
+    ):
+        return None
+    if not flags:
+        return replace(resource, metadata=replace(metadata, used=None, available=None))
+    if metadata.available is False or metadata.used is False:
+        return None
+    return resource
+
+
+def temperature(resource: Resource | None) -> float | None:
+    if resource is None:
+        return None
+    value, meta = resource.value, resource.metadata
+    unit = TEMPERATURE_UNITS.get(meta.unit or "")
+    if (
+        meta.resource_type != "floatValue"
+        or unit is None
+        or not meta.numeric_error_states_valid
+        or isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or value in meta.numeric_error_values
+        or (meta.minimum is not None and value < meta.minimum)
+        or (meta.maximum is not None and value > meta.maximum)
+    ):
+        return None
+    return TemperatureConverter.convert(value, unit, UnitOfTemperature.CELSIUS)

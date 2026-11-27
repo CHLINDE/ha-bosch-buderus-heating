@@ -1,0 +1,93 @@
+{
+  "schema": 1,
+  "family": "connectkey",
+  "provenance": {
+    "kind": "synthetic",
+    "basis": "compatibility_mapping",
+    "firmware": null,
+    "capture_date": null,
+    "created": "2026-10-23",
+    "redaction": "Constructed examples with fixture-local IDs; no captured response or private data.",
+    "physical_device_verified": false
+  },
+  "cases": [
+    {
+      "id": "room_temperature",
+      "payload": {
+        "id": "/heatingCircuits/hc2/roomtemperature",
+        "type": "floatValue",
+        "value": 21,
+        "writeable": 0,
+        "unitOfMeasure": "C"
+      },
+      "expected": {
+        "value": 21,
+        "unit": "°C",
+        "part": null
+      }
+    },
+    {
+      "id": "runtime_minutes",
+      "payload": {
+        "id": "/heatSources/workingTime/totalSystem",
+        "type": "floatValue",
+        "value": 120,
+        "writeable": 0,
+        "unitOfMeasure": "min"
+      },
+      "expected": {
+        "value": 2,
+        "unit": "h",
+        "part": null
+      }
+    },
+    {
+      "id": "runtime_hours",
+      "payload": {
+        "id": "/heatSources/workingTime/totalSystem",
+        "type": "floatValue",
+        "value": 2,
+        "writeable": 0,
+        "unitOfMeasure": "hours"
+      },
+      "expected": {
+        "value": 2,
+        "unit": "h",
+        "part": null
+      }
+    },
+    {
+      "id": "runtime_parts",
+      "payload": {
+        "id": "/heatSources/hs2/workingTime",
+        "type": "emonValue",
+        "values": {
+          "total": 7200,
+          "ch": 3600
+        }
+      },
+      "expected": {
+        "value": 2,
+        "unit": "h",
+        "part": "total"
+      }
+    },
+    {
+      "id": "energy_parts",
+      "payload": {
+        "id": "/heatSources/emon/totalConsumption",
+        "type": "emonValue",
+        "values": {
+          "compressor": 12,
+          "eheater": 3,
+          "outputProduced": 40
+        }
+      },
+      "expected": {
+        "value": 12,
+        "unit": "kWh",
+        "part": "compressor"
+      }
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "provenance": {
+    "kind": "synthetic",
+    "basis": "compatibility_mapping",
+    "physical_device_verified": false,
+    "firmware": null,
+    "capture_date": null,
+    "contract": "Reported zn/pg IDs, independent temperatures, manual/clock, numeric program selection, weekday switch points in local wall-clock minutes."
+  },
+  "resources": [
+    {"id": "/zones/list", "type": "zoneArray", "value": [{"id": 2, "name": "Rml4dHVyZSAy"}, {"id": 5, "name": "Rml4dHVyZSA1"}], "used": true, "available": true},
+    {"id": "/programs/list", "type": "programArray", "value": [{"id": 3, "name": "UHJvZ3JhbSAz"}, {"id": 7, "name": "UHJvZ3JhbSA3"}]},
+    {"id": "/zones/zn2/temperatureActual", "type": "floatValue", "value": 20.23, "unitOfMeasure": "C", "writeable": false},
+    {"id": "/zones/zn2/temperatureHeatingSetpoint", "type": "floatValue", "value": 21.5, "unitOfMeasure": "C", "writeable": false},
+    {"id": "/zones/zn2/manualTemperatureHeating", "type": "floatValue", "value": 20, "unitOfMeasure": "C", "writeable": true, "minValue": 5, "maxValue": 30, "stepSize": 0.5},
+    {"id": "/zones/zn5/manualTemperatureHeating", "type": "floatValue", "value": 19, "unitOfMeasure": "C", "writeable": true, "minValue": 10, "maxValue": 25, "stepSize": 0.25},
+    {"id": "/zones/zn2/clockOverride/temperatureHeating", "type": "floatValue", "value": 22, "unitOfMeasure": "C", "writeable": true, "minValue": 5, "maxValue": 30},
+    {"id": "/zones/zn2/userMode", "type": "stringValue", "value": "clock", "allowedValues": ["manual", "clock"], "writeable": true},
+    {"id": "/zones/zn5/userMode", "type": "stringValue", "value": "manual", "allowedValues": ["manual", "clock", "undefined"], "writeable": true},
+    {"id": "/zones/zn2/clockProgram", "type": "floatValue", "value": 3, "writeable": true},
+    {"id": "/zones/zn5/clockProgram", "type": "floatValue", "value": 7, "writeable": true},
+    {"id": "/programs/pg3/week", "type": "weekProgram", "writeable": true, "value": [{"d": "Mo", "t": 0, "Th": 16}, {"d": "Mo", "t": 425, "Th": 21.5}, {"d": "Mo", "t": 1320, "Th": 16}, {"d": "Tu", "t": 0, "Th": 17}, {"d": "Su", "t": 150, "Th": 20}]},
+    {"id": "/programs/pg3/monday", "type": "weekProgram", "writeable": true, "value": [{"d": "Mo", "t": 0, "Th": 16}, {"d": "Mo", "t": 425, "Th": 21.5}, {"d": "Mo", "t": 1320, "Th": 16}]}
+  ]
+}

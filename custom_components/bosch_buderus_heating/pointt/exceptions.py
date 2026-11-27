@@ -2,9 +2,45 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True, slots=True)
+class TokenEndpointRejection:
+    """Sanitized reason returned by the OAuth token endpoint.
+
+    The fields never contain tokens, codes or raw response bodies. The OAuth
+    error code and its description are reduced to a short, allowlisted form.
+    """
+
+    http_status: int
+    oauth_error: str | None = None
+    oauth_error_description: str | None = None
+    body_format: str = "empty"
+    content_type: str | None = None
+
+    def summary(self) -> str:
+        """Return a compact, log-safe description."""
+        parts = [f"HTTP {self.http_status}"]
+        if self.oauth_error is not None:
+            detail = self.oauth_error
+            if self.oauth_error_description:
+                detail = f"{detail}: {self.oauth_error_description}"
+            parts.append(detail)
+        else:
+            parts.append(f"no OAuth error code, {self.body_format} body")
+        return ", ".join(parts)
+
 
 class PointTError(Exception):
     """Base class for client errors."""
+
+
+class SourceStopped(PointTError):
+    """The request belongs to a source that no longer accepts work."""
+
+    def __init__(self) -> None:
+        super().__init__("PointT source is no longer active")
 
 
 class AuthenticationError(PointTError):
@@ -17,6 +53,17 @@ class AccessTokenRejected(AuthenticationError):
 
 class RefreshTokenRejected(AuthenticationError):
     """The authorization server rejected the refresh token."""
+
+    def __init__(
+        self,
+        message: str = "Refresh token was rejected",
+        *,
+        rejection: TokenEndpointRejection | None = None,
+    ) -> None:
+        self.rejection = rejection
+        if rejection is not None:
+            message = f"{message} ({rejection.summary()})"
+        super().__init__(message)
 
 
 class OAuthStateMismatch(AuthenticationError):
@@ -54,6 +101,30 @@ class ServiceUnavailable(TransportError):
         super().__init__(message)
 
 
+class SignInUnavailable(ServiceUnavailable):
+    """The sign-in service could not renew the access token for now.
+
+    Raised for temporary token endpoint failures: no answer, a server error,
+    an unreadable answer or a refusal without a definite OAuth error. It is
+    no answer of the PointT service itself and carries no HTTP status, so
+    callers treat it like a missing connection. Until ``retry_after`` seconds
+    have passed, the token manager repeats it without contacting the service.
+    """
+
+    def __init__(
+        self,
+        reason: str = "unavailable",
+        *,
+        retry_after: float | None = None,
+        rejection: TokenEndpointRejection | None = None,
+    ) -> None:
+        super().__init__()
+        self.reason = reason
+        self.retry_after = retry_after
+        self.rejection = rejection
+        self.args = (f"Sign-in service is temporarily unavailable ({reason})",)
+
+
 class RateLimited(TransportError):
     """The cloud rejected requests due to rate limiting."""
 
@@ -68,6 +139,19 @@ class UnexpectedHttpStatus(TransportError):
     def __init__(self, status: int) -> None:
         self.status = status
         super().__init__(f"Unexpected PointT HTTP status {status}")
+
+
+class RefreshRefused(UnexpectedHttpStatus):
+    """The token endpoint refused a refresh without a definite OAuth error.
+
+    An HTML page of a firewall, an empty body or an unrelated error code is
+    no reliable sign of an invalid sign-in. The refresh is retried later.
+    """
+
+    def __init__(self, status: int, *, rejection: TokenEndpointRejection) -> None:
+        super().__init__(status)
+        self.rejection = rejection
+        self.args = (f"Token refresh was refused ({rejection.summary()})",)
 
 
 class ResourceError(PointTError):
@@ -97,6 +181,10 @@ class ProtocolError(PointTError):
 
 class InvalidPayload(ProtocolError):
     """A response body did not match its required envelope."""
+
+
+class ResourceOmitted(InvalidPayload):
+    """A bulk response did not contain a requested path: no answer for it."""
 
 
 class InvalidBatchEnvelope(ProtocolError):

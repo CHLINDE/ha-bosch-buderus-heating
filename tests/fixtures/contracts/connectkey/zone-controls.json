@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "kind": "synthetic",
+    "basis": "compatibility_mapping",
+    "physical_device_verified": false,
+    "firmware": null,
+    "capture_date": null,
+    "contract": "Independent heating/cooling modes and manual setpoints; temporary overrides remain read-only."
+  },
+  "resources": [
+    {"id": "/zones/zone1/heating/operationMode", "type": "stringValue", "value": "manual", "allowedValues": ["manual", "auto"], "writeable": true},
+    {"id": "/zones/zone1/cooling/operationMode", "type": "stringValue", "value": "off", "allowedValues": ["off", "manual"], "writeable": true},
+    {"id": "/zones/zone2/heating/operationMode", "type": "stringValue", "value": "auto", "allowedValues": ["off", "auto"], "writeable": true},
+    {"id": "/zones/zone2/cooling/operationMode", "type": "stringValue", "value": "manual", "allowedValues": ["manual", "auto", "unreviewed"], "writeable": true},
+    {"id": "/zones/zone1/heating/manualRoomSetpoint", "type": "floatValue", "value": 20, "unitOfMeasure": "C", "minValue": 5, "maxValue": 25, "stepSize": 0.5, "writeable": true},
+    {"id": "/zones/zone1/cooling/manualRoomSetpoint", "type": "floatValue", "value": 24, "unitOfMeasure": "C", "minValue": 18, "maxValue": 30, "stepSize": 1, "writeable": true},
+    {"id": "/zones/zone2/heating/manualRoomSetpoint", "type": "floatValue", "value": 21, "unitOfMeasure": "C", "minValue": 10, "maxValue": 35, "stepSize": 0.25, "writeable": true},
+    {"id": "/zones/zone2/cooling/manualRoomSetpoint", "type": "floatValue", "value": 25, "unitOfMeasure": "C", "minValue": 20, "maxValue": 28, "writeable": true}
+  ]
+}

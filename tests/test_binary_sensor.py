@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 from homeassistant.core import HomeAssistant
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.bosch_buderus_heating.binary_sensor import (
     BoschBuderusBinarySensor,
+    BoschBuderusCloudControlBinarySensor,
     BoschBuderusHolidayActiveBinarySensor,
     BoschBuderusSystemFaultBinarySensor,
     async_setup_entry,
@@ -30,6 +30,7 @@ from custom_components.bosch_buderus_heating.pointt import (
     Resource,
     ResourceMetadata,
 )
+from tests.ha_test_helpers import MockConfigEntry
 
 
 def _binary_sensor(
@@ -135,16 +136,19 @@ async def test_platform_adds_safe_booleans_only(hass: HomeAssistant) -> None:
     sensor = _binary_sensor(hass, safe)
     sensor.coordinator.resources = {safe.path: safe, private.path: private}
     entry = SimpleNamespace(
-        runtime_data=SimpleNamespace(coordinators=(sensor.coordinator,))
+        runtime_data=SimpleNamespace(coordinators=(sensor.coordinator,), bacon=None),
+        async_on_unload=Mock(),
     )
     added: list[object] = []
 
     await async_setup_entry(hass, entry, added.extend)
 
-    assert len(added) == 2
+    assert len(added) == 3
     assert isinstance(added[0], BoschBuderusSystemFaultBinarySensor)
-    assert isinstance(added[1], BoschBuderusBinarySensor)
-    assert added[1].entity_description.resource_path == safe.path
+    assert isinstance(added[1], BoschBuderusCloudControlBinarySensor)
+    assert isinstance(added[2], BoschBuderusBinarySensor)
+    assert added[2].entity_description.resource_path == safe.path
+    await sensor.coordinator.async_shutdown()
 
 
 def test_unavailable_or_non_boolean_value_has_no_binary_state(
@@ -224,7 +228,10 @@ async def test_platform_adds_read_only_holiday_status(hass: HomeAssistant) -> No
     coordinator.data = {
         item.path: ResourceSnapshot(item, True, now) for item in (period, active)
     }
-    entry = SimpleNamespace(runtime_data=SimpleNamespace(coordinators=(coordinator,)))
+    entry = SimpleNamespace(
+        runtime_data=SimpleNamespace(coordinators=(coordinator,), bacon=None),
+        async_on_unload=Mock(),
+    )
     added: list[object] = []
 
     await async_setup_entry(hass, entry, added.extend)
@@ -237,3 +244,4 @@ async def test_platform_adds_read_only_holiday_status(hass: HomeAssistant) -> No
     assert holiday.is_on
     assert holiday.extra_state_attributes["period_count"] == 1
     assert holiday.unique_id == "gateway-one:holiday_active"
+    await coordinator.async_shutdown()

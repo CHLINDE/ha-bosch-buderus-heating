@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "family": "wddw2",
+  "provenance": {
+    "kind": "synthetic",
+    "basis": "compatibility_mapping",
+    "reference": "MonitorValues.updateMonitorValue and updateResourceWith",
+    "firmware": null,
+    "capture_date": null,
+    "physical_device_verified": false
+  },
+  "payload": {
+    "id": "/dhwCircuits/dhw1/monitorValues",
+    "type": "bulk",
+    "references": [
+      {
+        "id": "/dhwCircuits/dhw1/inletTemperature",
+        "type": "floatValue",
+        "value": 18,
+        "writeable": 0,
+        "unitOfMeasure": "C"
+      },
+      {
+        "id": "/dhwCircuits/dhw1/outletTemperature",
+        "type": "floatValue",
+        "value": 48,
+        "writeable": 0,
+        "unitOfMeasure": "C"
+      }
+    ]
+  },
+  "expected": {
+    "standalone_sensor": false,
+    "discovery_follows_reference_ids": true,
+    "embedded_value_fallback": false
+  },
+  "missing_evidence": [
+    "Actual response from a WDDW2 device including envelope and per-item status",
+    "Whether referenced measurements can be read individually",
+    "Changed, absent and duplicate nested resources on firmware variants"
+  ]
+}

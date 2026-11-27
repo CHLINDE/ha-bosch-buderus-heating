@@ -3,22 +3,70 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from pathlib import Path
 from typing import Any, override
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.selector import BooleanSelector, TextSelector
+from homeassistant.helpers.selector import (
+    BooleanSelector,
+    DateSelector,
+    SelectSelector,
+    TextSelector,
+)
 
 from .ha_schema import validation as vol
+from .i18n import dialog_config
+from .log_helpers import log_failure
 
 DELETE_FIELD = "holiday_delete"
 _REGISTERED = "bosch_buderus_heating.holiday_ui"
+_LOGGER = logging.getLogger(__name__)
+
+
+class HolidayAssignmentSelector(SelectSelector):
+    """Render the native circuit selector with scoped field visibility."""
+
+    @override
+    def serialize(self) -> dict[str, Any]:
+        native = super().serialize()
+        return {
+            "selector": {
+                "bosch-buderus-holiday-assignment": {
+                    **native["selector"]["select"],
+                    **dialog_config("holiday"),
+                }
+            }
+        }
 
 
 class HolidayDeleteSelector(BooleanSelector):
     """Render a button while keeping the action a server-validated boolean."""
 
     selector_type = "bosch-buderus-holiday-delete"
+
+    @override
+    def serialize(self) -> dict[str, Any]:
+        return {"selector": {self.selector_type: dialog_config("holiday")}}
+
+
+class HolidayDateRangeSelector(DateSelector):
+    """Pair two validated ISO dates in a single calendar popup."""
+
+    def __init__(self, *, endpoint: str) -> None:
+        super().__init__()
+        self._endpoint = endpoint
+
+    @override
+    def serialize(self) -> dict[str, Any]:
+        return {
+            "selector": {
+                "bosch-buderus-holiday-date-range": {
+                    "endpoint": self._endpoint,
+                    **dialog_config("holiday"),
+                }
+            }
+        }
 
 
 class HolidayDateTimeSelector(TextSelector):
@@ -34,7 +82,10 @@ class HolidayDateTimeSelector(TextSelector):
     def serialize(self) -> dict[str, Any]:
         return {
             "selector": {
-                self.selector_type: {"default_time": "08:00" if self._creating else ""}
+                self.selector_type: {
+                    "default_time": "08:00" if self._creating else "",
+                    **dialog_config("holiday"),
+                }
             }
         }
 
@@ -61,20 +112,51 @@ class HolidayFormSchema(vol.Schema):
 
 async def async_setup_holiday_ui(hass: HomeAssistant) -> None:
     """Register the selector once, without adding a panel or a cloud API."""
-    if _REGISTERED in hass.data or "frontend" not in hass.config.components:
+    await _async_register_module(hass, _REGISTERED, "holiday-dialog")
+
+
+async def async_setup_controls_ui(hass: HomeAssistant) -> None:
+    """Load the controls selector through the same supported frontend hook."""
+    await _async_register_module(
+        hass, "bosch_buderus_heating.controls_ui", "controls-dialog"
+    )
+
+
+async def async_setup_schedule_ui(hass: HomeAssistant) -> None:
+    """TP-07: load the read-only weekly view through the same hook."""
+    await _async_register_module(
+        hass, "bosch_buderus_heating.schedule_ui", "schedule-week"
+    )
+
+
+async def _async_register_module(hass: HomeAssistant, key: str, name: str) -> None:
+    if key in hass.data or "frontend" not in hass.config.components:
         return
 
     from homeassistant.components.frontend import add_extra_js_url
-    from homeassistant.components.http import (  # type: ignore[attr-defined]
+    from homeassistant.components.http import (  # type: ignore[attr-defined,unused-ignore]
         StaticPathConfig,
     )
 
-    source = Path(__file__).parent / "www" / "holiday-dialog.js"
-    content = await hass.async_add_executor_job(source.read_bytes)
-    version = hashlib.sha256(content).hexdigest()[:16]
-    url = f"/bosch_buderus_heating/holiday-dialog-{version}.js"
-    await hass.http.async_register_static_paths(
-        [StaticPathConfig(url, str(source), cache_headers=True)]
-    )
-    add_extra_js_url(hass, url)
-    hass.data[_REGISTERED] = url
+    source = Path(__file__).parent / "www" / f"{name}.js"
+    try:
+        content = await hass.async_add_executor_job(source.read_bytes)
+        version = hashlib.sha256(content).hexdigest()[:16]
+        url = f"/bosch_buderus_heating/{name}-{version}.js"
+        await hass.http.async_register_static_paths(
+            [StaticPathConfig(url, str(source), cache_headers=True)]
+        )
+        add_extra_js_url(hass, url)
+    except (OSError, ValueError, RuntimeError) as error:
+        # Only one optional dialog form is affected; the appliances, their
+        # entities and the remaining options must still start.
+        log_failure(
+            _LOGGER,
+            logging.WARNING,
+            "The dialog module %s could not be loaded, so its form cannot be "
+            "shown; everything else starts normally",
+            name,
+            error=error,
+        )
+        return
+    hass.data[key] = url

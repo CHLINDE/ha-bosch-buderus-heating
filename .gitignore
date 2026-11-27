@@ -10,6 +10,8 @@ __pycache__/
 build/
 dist/
 htmlcov/
+node_modules/
+coverage-controls.json
 
 # Local Home Assistant and sensitive PointT data
 .storage/
@@ -18,3 +20,5 @@ secrets.yaml
 raw-fixtures/
 *.raw.json
 *.tokens.json
+.vs
+.hypothesis/

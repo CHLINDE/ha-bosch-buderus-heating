@@ -17,24 +17,15 @@ not assume the presence of `hc1`, `dhw1`, or `hs1`.
 Names and semantics are based on:
 
 1. the PointT resource tree read from physical equipment;
-2. the energy semantics verified against MyBuderus, a CSV export, and two
-   physical systems;
-3. observed MyBuderus user-facing names;
-4. a static comparison of HomeCom Easy 5.0.0 and MyBuderus 5.0.0.
+2. the energy semantics verified against a CSV export and two physical
+   systems;
+3. observed user-facing names.
 
-Both app variants contain the same technical resource model and the same
-explicit PointT paths. Their differences are limited to brand and product
-wording. The integration therefore uses one shared dynamic device and entity
-model and applies the detected brand only for display.
+The integration uses one shared dynamic device and entity model and applies
+the detected brand only for display.
 
-The German Android resources were resolved separately and compared with the
-English base strings: 5,582 strings per app, including 2,392 related to
-heating. The generated working files, APK files, and extracted program code are
-not included in this repository.
-
-Path constants found in the apps are only indications of possible features.
-They do not prove that a particular heating system exposes a resource. The
-dynamically returned resource tree and write metadata of the connected gateway
+Known path names are only indications of possible features. They do not prove
+that a particular heating system exposes a resource. The dynamically returned resource tree and write metadata of the connected gateway
 remain authoritative.
 
 ## Legend
@@ -101,16 +92,15 @@ added or marked unavailable after rediscovery. IDs come exclusively from
 PointT references, never from an assumed number sequence.
 
 In the tables, `{hc}`, `{dhw}`, `{hs}`, `{sc}`, `{zone}`, and `{device}`
-represent dynamically discovered IDs. The reference system reported `hc1`,
+represent dynamically discovered IDs. A real installation reported `hc1`,
 `dhw1`, and `hs1`.
 These IDs remain part of the stable entity identifier but do not create
 separate Home Assistant devices.
 
 ## Holiday mode
 
-MyBuderus and HomeCom Easy contain matching user flows for several named
-holiday periods and separate holiday behavior for heating, hot water, and
-ventilation. The integration probes only the three known optional resources:
+PointT supports several named holiday periods and separate holiday behavior
+for heating, hot water, and ventilation. The integration probes only the three known optional resources:
 
 | PointT path | Access | HA mapping / note |
 |---|---:|---|
@@ -139,7 +129,7 @@ of `/holidayMode/list`; a timeout does not cause the mutation to be repeated.
 |---|---|---:|---|
 | `/heatingCircuits` | Available heating circuits | R | Internal: dynamic discovery |
 | `/heatingCircuits/{hc}` | Heating circuit | R | Internal: circuit resources |
-| `.../activeSwitchProgram` | Active schedule | R/W | Diagnostic; write only after observing multiple schedules |
+| `.../activeSwitchProgram` | Active schedule | R/W | Sensor; a select with the options A/B only when at least two of A and B are allowed, the current one among them, and every allowed program is readable and valid |
 | `.../controlType` | Control type | R/W | Diagnostic; safety-relevant configuration, read-only initially |
 | `.../currentRoomSetpoint` | Desired temperature | R | Temperature sensor |
 | `.../currentSuWiMode` | Current heating/cooling status | R | `off`, `forced`, `cooling` |
@@ -151,9 +141,9 @@ of `/holidayMode/list`; a timeout does not cause the mutation to be repeated.
 | `.../name` | Heating-circuit name | R/W | Decoded sensor only when configured; renaming not offered initially |
 | `.../operationMode` | Operation mode | R/W | Select: Off, Manual, Auto |
 | `.../overallStatus` | Operating status | R | Status sensor |
-| `.../switchProgramMode` | Schedule type | R/W | Read-only diagnostic; supports the app-defined `level`, `levels`, and `absolute` modes |
+| `.../switchProgramMode` | Schedule type | R/W | Read-only diagnostic; supports the `level`, `levels`, and `absolute` modes; never written, because it changes the meaning of every switch point |
 | `.../switchPrograms` | Available schedules | R | Internal: dynamic discovery |
-| `.../switchPrograms/{program}` | Schedule | R/W | No separate entity without scalar content; a future editor requires a verified schema |
+| `.../switchPrograms/{program}` | Schedule | R/W | Diagnostic enum sensor; changed as a whole week under Configure > Heating and hot water schedules (raw JSON array, one PUT, read-back) |
 | `.../switchPrograms/name{program}` | Schedule name | R/W | Readable decoded configuration value |
 | `.../temperatureLevels` | Available temperature levels | R | Internal: dynamic discovery |
 | `.../temperatureLevels/comfort2` | Heating | R/W | Number in °C, when available |
@@ -184,7 +174,7 @@ Observed `overallStatus` values:
 | `heating_manual_off` | Manual heating off |
 | `heating_auto` | Automatic heating |
 
-APK-confirmed `overallStatus` values for hot-water circuits are
+The `overallStatus` values for hot-water circuits are
 `dhw_enabled`, `dhw_disabled`, `auto`, `manual_off`, `manual_on_low`,
 `manual_on_eco`, `manual_on_high`, `extra`, `away`, `holiday`,
 `floor_drying`, and `td`.
@@ -231,13 +221,15 @@ PointT codes and app display names for operation mode:
 | PointT path | User-facing name | Access | HA mapping / note |
 |---|---|---:|---|
 | `/heatSources` | Available heat sources | R | Internal: dynamic discovery |
-| `/heatSources/actualHeatDemand` | Current heat demand | R | Heating, hot water, and/or frost protection |
+| `/heatSources/actualHeatDemand` | Current heat demand | R | Heating, hot water and/or frost range (`frost`, meaning not documented) |
 | `/heatSources/actualModulation` | Current modulation | R | Measurement in % |
-| `/heatSources/actualSupplyTemperature` | Supply temperature | R | Temperature sensor |
+| `/heatSources/actualSupplyTemperature` | System supply temperature | R | Temperature sensor; the supply of the heating system (behind a buffer cylinder the heating side's flow), not necessarily the heat pump's own flow (TC1) |
 | `/heatSources/chStatus` | Central heating status | R | Optional status; probed when omitted from the reference tree |
 | `/heatSources/compressor/status` | Compressor status | R | Operating mode including heating, cooling, hot water, defrost, and alarm |
 | `/heatSources/Source/eHeater/status` | Auxiliary-heater status | R | Operating mode including heating, hot water, defrost, and blocked states |
 | `/heatSources/additionalHeater/operationMode` | Auxiliary-heater operation mode | R/W | Select: Off, On, Auto; only for the exact live capability |
+| `/heatSources/hybrid/controlStrategy` | Hybrid control strategy | R/W | Select over the reported values the integration knows (at least two); created disabled, expected but untested on a real installation |
+| `/system/energyTariff/electricity`, `gas`, `oil`, `pv` | Electricity, gas, oil price and feed-in tariff | R/W | Numbers within the reported limits and step, in the reported unit; the oil price only without a gas price; created disabled, expected but untested on a real installation |
 | `/heatSources/additionalHeater/primary/status` | Primary auxiliary-heater status | R | Optional operating state |
 | `/heatSources/additionalHeater/primary/type` | Primary auxiliary-heater type | R | Static diagnostic, disabled by default |
 | `/heatSources/currentEmergencyMode` | Emergency mode | R | Optional operating state |
@@ -250,13 +242,13 @@ PointT codes and app display names for operation mode:
 | `/heatSources/{hs}/brineCircuit/collectorOutflowTemp` | Brine inlet temperature | R | Fluid returning to the heat pump, named from the heating-system perspective |
 | `/heatSources/{hs}/defrostActive` | Defrost active | R | Boolean or app status, depending on the gateway |
 | `/heatSources/{hs}/heatPumpType` | Heat-pump type | R | Diagnostic: air/water, brine/water, or exhaust-air/water |
-| `/heatSources/{hs}/numberOfStarts` | Starts by operation | R | Multipart cumulative counter |
+| `/heatSources/{hs}/numberOfStarts` | Starts by operation | R | Independent `emonValue` cumulative counters: `total`, `ch`, `cooling`, `dhw`, `pool`; validated whole numbers |
 | `/heatSources/{hs}/powerPercentage` | Current power percentage | R | Instantaneous measurement in % |
 | `/heatSources/{hs}/supplyFlowCondenserTemp` | Condenser outlet temperature (TC3) | R | Diagnostic temperature |
 | `/heatSources/{hs}/type` | Heat-source type | R | Diagnostic |
 | `/heatSources/{hs}/workingTime` | Operating time by operation | R | Multipart cumulative counter |
 | `/heatSources/info` | Heat-source information | R | Internal/diagnostic structured object |
-| `/heatSources/numberOfStarts` | Total starts | R | No separate entity; identical to `total` of the dynamic heat source |
+| `/heatSources/numberOfStarts` | Number of starts | R | Independent `floatValue` cumulative diagnostic counter, enabled by default; 15-minute or 30-minute polling according to the selected profile |
 | `/heatSources/passiveCooling/inflowTemp` | Passive-cooling inlet temperature | R | Optional temperature sensor |
 | `/heatSources/pvContactState` | PV contact status | R | Optional operating state |
 | `/heatSources/returnTemperature` | Return temperature | R | Temperature sensor |
@@ -265,6 +257,14 @@ PointT codes and app display names for operation mode:
 | `/heatSources/standbyMode` | Standby mode | R | Optional operating state |
 | `/heatSources/systemPressure` | System pressure | R | Pressure sensor in bar; validated range values as attributes and optional derived status sensor |
 | `/heatSources/systemPressureRange` | Permitted pressure range | R | Six static diagnostic sensors in bar |
+
+A supported multipart `numberOfStarts` resource keeps stable entities for the
+known keys even with a partial payload; missing values remain unknown.
+The general counter and source-specific totals are not assumed to be equal.
+No total is calculated from partial counts, and a failed read never switches
+an entity to another source. See [start counters](start-counters.md) for numeric
+validation, recovery and migration behavior. This does not add a predefined
+`pool` key to `workingTime`.
 
 PointT returns the pressure range as a structured `values` object. The
 integration creates one entity for each of `highSystemPressure`,
@@ -277,8 +277,8 @@ boundary. In particular, `gas_boiler` is displayed as **Boiler** without using
 the type of one heat source to infer that the complete installation is or is
 not a hybrid system.
 
-The optional paths listed above are present in both official app variants but
-may be omitted from a gateway's reference tree. Discovery probes this bounded
+The optional paths listed above may be omitted from a gateway's reference
+tree. Discovery probes this bounded
 catalog once. Per-source paths are generated only for heat-source IDs returned
 by PointT; the integration never assumes that `hs1` or `hs2` exists. A path is
 polled only after a successful response with the expected type and unit.
@@ -309,14 +309,17 @@ Derived total values:
 
 - **Total electricity consumption:** direct `electricity`, or
   `compressor + eheater` only when both components are complete.
-- **Total environmental energy:**
+- **Environmental energy:**
   `outputProduced - compressor - eheater`, only for complete, finite,
-  non-negative inputs and a non-negative result. The entity is named
-  **Total – Environmental energy (calculated)** so it cannot be confused with
-  a value supplied directly by PointT.
-- Do not calculate environmental energy separately for heating, hot water, or
-  cooling. PointT's allocation of standby consumption can create misleading
-  negative results for those areas.
+  non-negative inputs and a non-negative result, for the total, heating, hot
+  water and pool collections alike (the same calculation the manufacturer's
+  app uses). The entities are named, for example, **Total – Environmental
+  energy (calculated)** so they cannot be confused with a value supplied
+  directly by PointT. A negative result (the parts are read at different
+  times, and standby consumption is allocated per area) is not shown and never
+  starts a new meter cycle. The entities of heating, hot water and pool are
+  created disabled; cooling has none, as its collection has no auxiliary
+  heater and the app shows no environmental energy for it.
 - A cooling response with HTTP 200 and only zero-valued counters does not prove
   that cooling equipment exists.
 
@@ -344,11 +347,10 @@ Derived total values:
 | `/system/variableTariff` | Variable electricity tariff | R | Internal: discovery |
 | `/system/variableTariff/supportStatus` | Variable-tariff support | R | Diagnostic |
 
-## Optional app path catalog
+## Optional path catalog
 
-Static analysis of both official app variants found the same optional PointT
-families. The integration now combines these known paths with dynamic
-references returned by the gateway. Concrete circuit, heat-source, solar,
+The integration combines a bounded set of known optional PointT paths with
+dynamic references returned by the gateway. Concrete circuit, heat-source, solar,
 ventilation-zone, room-zone, and room-device IDs are derived from discovered
 containers; they are never generated as an assumed numeric sequence.
 
@@ -360,7 +362,7 @@ containers; they are never generated as an assumed numeric sequence.
 | System | appliance state/model/firmware, health, iSRC installation state, power guard/limitation, low-noise and silent mode, season optimizer thresholds/mode, additional system temperatures, units, energy tariff, and variable-tariff state |
 | Solar | collector and tank temperatures, maximum temperature, limit state, pump modulation, and yield |
 | Pool | current and target temperature, enabled state, and auxiliary-heater mode |
-| Ventilation | manual fan target and per-zone fan level, filter lifetime, air-quality/humidity limits, mode, supply temperature, and ventilation level |
+| Ventilation | manual fan target and per-zone fan level, filter lifetime, air-quality/humidity limits, mode, supply temperature, and ventilation level; disabled diagnostic readings of the demand, exhaust, extract and outdoor air temperature, indoor air quality and humidity; writable: mode and filter run time |
 | Zones and room devices | current and target climate values, child lock, heating/cooling modes, battery, signal, connection state, errors, assignment, and static product information |
 | Photovoltaics | enabled and surplus-available states |
 
@@ -371,8 +373,8 @@ discovery determines polling; HTTP 403/404 and schema mismatches are retained
 only as value-free diagnostics and do not consume the recurring request
 budget.
 
-The apps also contain historical `/recordings/...` paths and a separate Bosch
-shared-energy tariff service. Historical series are not normal current-state
+Historical `/recordings/...` paths and a separate shared-energy tariff service
+also exist. Historical series are not normal current-state
 entities and therefore remain outside this catalog until an opt-in statistics
 import can enforce time ranges, deduplication, and a strict request budget.
 The separate tariff service likewise remains disabled until its response and
@@ -414,7 +416,7 @@ exported. Temporary failures recover automatically; see the
 
 ## Write release policy
 
-The 24 resources reported as writable by the reference system are not exposed
+The 24 resources reported as writable by a real installation are not exposed
 automatically as controls. The first safe release tier includes:
 
 - operation mode for every dynamically discovered heating circuit;

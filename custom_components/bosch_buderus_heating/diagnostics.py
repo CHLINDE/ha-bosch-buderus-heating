@@ -845,8 +845,7 @@ def _gateway_diagnostics(
             # Bounded write trace: operation, field names, status codes and
             # attempt counts only; no private dates, temperatures or IDs.
             "icom_last_write": (
-                coordinator._icom_holiday_write_service.last_write_diagnostics
-                or None
+                coordinator._icom_holiday_write_service.last_write_diagnostics or None
             ),
             "active_status_available": holiday_state.active is not None,
             "timezone_source": holiday_state.timezone_source,

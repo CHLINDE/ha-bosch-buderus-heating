@@ -82,7 +82,7 @@ class IcomHolidayWriteService:
         values: HolidayWriteValues | None,
         expected: HolidayWriteValues | None,
     ) -> Resource:
-        """Recheck each step; test dates before assignments for new holidays."""
+        """Recheck each step; initialize dates before assigning new holidays."""
         self.confirmed = {}
         self.invalidated = set()
         self.last_write_diagnostics = {
@@ -100,10 +100,8 @@ class IcomHolidayWriteService:
             "read_back_not_found_count": 0,
             "last_missing_field": None,
             "last_readback_status": None,
-            "assignment_trace": [],
             "date_initialization_changes": [],
             "skipped_already_matching": [],
-            "date_first_experiment": operation == "create",
             "partial_creation_status": "not_started",
         }
         if not is_icom_slot(source_path) or operation not in (
@@ -174,7 +172,8 @@ class IcomHolidayWriteService:
             self.last_write_diagnostics["current_field"] = field
             self.last_write_diagnostics["stage"] = "put"
             await self._async_put(
-                gateway_id, f"{source_path}/{field}",
+                gateway_id,
+                f"{source_path}/{field}",
                 "TRUE" if explicit else reset_reference,
             )
             self.last_write_diagnostics["stage"] = "read_back"
@@ -242,8 +241,8 @@ class IcomHolidayWriteService:
             and not _field_matches(field, current[f"{source_path}/{field}"], value)
         ]
         if operation == "create":
-            # Diagnostic experiment: keep modes first, but initialize dates
-            # before assigning circuits. Updates retain the original order.
+            # Initialize dates before assigning circuits: iCom can populate
+            # assignments automatically. Updates retain the original order.
             steps.sort(
                 key=lambda step: {"startStop": 1, "assignedTo": 2}.get(step[0], 0)
             )
@@ -282,13 +281,6 @@ class IcomHolidayWriteService:
             if operation == "create" and field == "startStop":
                 self.last_write_diagnostics["partial_creation_status"] = "date_write_attempted"
             if field == "assignedTo":
-                self.last_write_diagnostics["assignment_put"] = {
-                    "path": path,
-                    "json_body": {"values": list(values.assigned_to)},
-                }
-                self.last_write_diagnostics["assignment_before"] = getattr(
-                    self.client, "icom_assignment_wire_read", None
-                )
                 await self._async_put_assignments(
                     gateway_id, source_path, values.assigned_to
                 )
@@ -312,7 +304,7 @@ class IcomHolidayWriteService:
             previous = self.last_write_diagnostics["confirmed_fields"]
             if isinstance(previous, tuple):
                 self.last_write_diagnostics["confirmed_fields"] = (*previous, field)
-        # Re-read every discovered leaf after the experimental creation.
+        # Re-read every discovered leaf after creation.
         if operation == "create":
             self.last_write_diagnostics["stage"] = "final_read"
             current = await self._read(gateway_id, paths)
@@ -428,16 +420,6 @@ class IcomHolidayWriteService:
                             count + 1
                         )
                     leaf = err.path.rsplit("/", 1)[-1]
-                    trace = self.last_write_diagnostics["assignment_trace"]
-                    if (
-                        isinstance(trace, list)
-                        and self.last_write_diagnostics["current_field"] == "assignedTo"
-                    ):
-                        trace.append({
-                            "attempt": attempt,
-                            "status": "resource_not_found",
-                            "path": err.path if err.path in paths else "<redacted>",
-                        })
                     self.last_write_diagnostics["last_missing_field"] = (
                         leaf if leaf in (*ICOM_FIELDS, "delete") else "other"
                     )
@@ -449,21 +431,7 @@ class IcomHolidayWriteService:
                 else:
                     self.last_write_diagnostics["last_readback_status"] = "unavailable"
                 continue
-            trace = self.last_write_diagnostics["assignment_trace"]
-            if (
-                isinstance(trace, list)
-                and self.last_write_diagnostics["current_field"] == "assignedTo"
-            ):
-                path = start_path.rsplit("/", 1)[0] + "/assignedTo"
-                resource = actual.get(path)
-                trace.append({
-                    "attempt": attempt,
-                    "wire": getattr(self.client, "icom_assignment_wire_read", None),
-                    "has_value": resource.has_value if resource else None,
-                    "has_values": resource.has_values if resource else None,
-                    "matches": confirmed(actual),
-                })
-            if self.last_write_diagnostics["date_first_experiment"]:
+            if self.last_write_diagnostics["operation"] == "create":
                 date_resource = actual.get(start_path)
                 self.last_write_diagnostics["last_observed_date_state"] = (
                     "valid" if icom_dates(date_resource) is not None

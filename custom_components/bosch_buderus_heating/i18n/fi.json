@@ -23,7 +23,15 @@
       "date": "Päivämäärä",
       "time": "Aika",
       "deleteFailed": "Poiston vahvistusta ei voitu avata. Lataa sivu uudelleen ja yritä uudelleen.",
-      "reopen": "Sulje ikkuna ja avaa se uudelleen."
+      "reopen": "Sulje ikkuna ja avaa se uudelleen.",
+      "selectRange": "Valitse ajanjakso",
+      "previousMonth": "Edellinen kuukausi",
+      "nextMonth": "Seuraava kuukausi",
+      "lastHolidayDay": "Valitse viimeinen lomapäivä",
+      "firstHolidayDay": "Valitse ensimmäinen lomapäivä",
+      "cancelRange": "Peruuta",
+      "applyRange": "Käytä",
+      "selectCircuit": "Valitse vähintään yksi piiri."
     },
     "schedule": {
       "title": "Viikkonäkymä",

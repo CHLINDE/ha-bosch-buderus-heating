@@ -31,7 +31,12 @@
       "firstHolidayDay": "Изберете първия ден от отпуската",
       "cancelRange": "Отказ",
       "applyRange": "Прилагане",
-      "selectCircuit": "Изберете поне един кръг."
+      "selectCircuit": "Изберете поне един кръг.",
+      "rangeLabel": "Период на отпуската",
+      "durationOne": "Продължителност: {days} ден",
+      "durationMany": "Продължителност: {days} дни",
+      "resumeHeating": "Възстановяване на нормалното отопление: {date}",
+      "invalidRange": "Изберете валиден период."
     },
     "schedule": {
       "title": "Седмичен изглед",

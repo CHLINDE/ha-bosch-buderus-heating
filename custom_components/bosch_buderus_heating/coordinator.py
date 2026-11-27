@@ -926,7 +926,7 @@ class BoschBuderusDataUpdateCoordinator(
         await self.faults.async_load()
         try:
             stored = await self._icom_reset_store.async_load()
-        except (OSError, ValueError):
+        except OSError, ValueError:
             stored = None
         marker = stored.get("marker") if isinstance(stored, dict) else None
         if isinstance(marker, str) and marker in ICOM_EMPTY_PERIODS:

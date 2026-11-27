@@ -78,6 +78,7 @@ from .enum_translation import writable_enum_options
 from .ha_schema import validation as vol
 from .holiday_ui import (
     DELETE_FIELD,
+    HolidayAssignmentSelector,
     HolidayDateTimeSelector,
     HolidayDeleteSelector,
     HolidayFormSchema,
@@ -1613,27 +1614,34 @@ class BoschBuderusOptionsFlow(
                     isinstance(item, str) for item in assigned_to
                 ):
                     raise WriteValidationError("Invalid holiday assignments")
+                if not assigned_to:
+                    raise WriteValidationError("Choose at least one holiday circuit")
+                selected = tuple(item.casefold() for item in assigned_to)
+                heating_selected = any(item.startswith("hc") for item in selected)
+                dhw_selected = any(item.startswith("dhw") for item in selected)
+                ventilation_selected = any(item.startswith("vent") for item in selected)
+                heating_mode = _holiday_mode_from_form(
+                    user_input.get(CONF_HOLIDAY_HEATING_MODE) if heating_selected else None,
+                    current.heating_mode,
+                    choice.configuration.heating_modes,
+                )
                 values = configure_holiday_values(
                     replace(displayed.period, write_values=values),
                     choice.configuration,
                     assigned_to=assigned_to,
-                    heating_mode=_holiday_mode_from_form(
-                        user_input.get(CONF_HOLIDAY_HEATING_MODE),
-                        current.heating_mode,
-                        choice.configuration.heating_modes,
-                    ),
+                    heating_mode=heating_mode,
                     dhw_mode=_holiday_mode_from_form(
-                        user_input.get(CONF_HOLIDAY_DHW_MODE),
+                        user_input.get(CONF_HOLIDAY_DHW_MODE) if dhw_selected else None,
                         current.dhw_mode,
                         choice.configuration.dhw_modes,
                     ),
                     ventilation_mode=_holiday_mode_from_form(
-                        user_input.get(CONF_HOLIDAY_VENTILATION_MODE),
+                        user_input.get(CONF_HOLIDAY_VENTILATION_MODE) if ventilation_selected else None,
                         current.ventilation_mode,
                         choice.configuration.ventilation_modes,
                     ),
                     thermal_disinfection=_holiday_mode_from_form(
-                        user_input.get(CONF_HOLIDAY_THERMAL_DISINFECTION),
+                        user_input.get(CONF_HOLIDAY_THERMAL_DISINFECTION) if dhw_selected else None,
                         current.thermal_disinfection,
                         choice.configuration.thermal_disinfection_modes,
                     ),
@@ -1641,6 +1649,8 @@ class BoschBuderusOptionsFlow(
                         user_input.get(
                             CONF_HOLIDAY_FIX_TEMPERATURE, current.fix_temperature
                         )
+                        if heating_selected and heating_mode in ("FIX_TEMP", "FIX_TEMPERATURE")
+                        else current.fix_temperature
                     ),
                 )
                 holiday_id = holiday_period_id(choice.period)
@@ -1848,7 +1858,7 @@ class BoschBuderusOptionsFlow(
             suggestions.update(_holiday_date_suggestions(choice))
         fields[
             vol.Required(CONF_HOLIDAY_ASSIGNED_TO, default=list(current.assigned_to))
-        ] = SelectSelector(
+        ] = HolidayAssignmentSelector(
             SelectSelectorConfig(
                 options=[
                     SelectOptionDict(

@@ -31,7 +31,12 @@
       "firstHolidayDay": "Select first holiday day",
       "cancelRange": "Cancel",
       "applyRange": "Apply",
-      "selectCircuit": "Select at least one circuit."
+      "selectCircuit": "Select at least one circuit.",
+      "rangeLabel": "Holiday period",
+      "durationOne": "Holiday duration: {days} day",
+      "durationMany": "Holiday duration: {days} days",
+      "resumeHeating": "Normal heating resumes: {date}",
+      "invalidRange": "Select a valid date range."
     },
     "schedule": {
       "title": "Weekly view",

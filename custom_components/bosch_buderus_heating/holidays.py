@@ -12,6 +12,7 @@ from datetime import UTC, date, datetime, time, timedelta, timezone, tzinfo
 from functools import lru_cache
 
 from .legacy_holidays import (
+    ICOM_EMPTY_PERIODS,
     SYSTEM_INFO_PATH,
     icom_assignments,
     icom_components,
@@ -349,10 +350,11 @@ def parse_holiday_write_configuration(
     resources: Mapping[str, Resource],
     *,
     source_path: str | None = None,
+    reset_marker: str | None = None,
 ) -> HolidayWriteConfiguration | None:
     """Return a strict write configuration for the dedicated holiday endpoint."""
     if source_path is not None and source_path != HOLIDAY_CREATE_PATH:
-        return icom_write_configuration(resources, source_path)
+        return icom_write_configuration(resources, source_path, reset_marker=reset_marker)
     if source_path is None and HOLIDAY_LIST_PATH not in resources:
         return next(
             (
@@ -532,7 +534,7 @@ def icom_write_values(
 
 
 def icom_write_configuration(
-    resources: Mapping[str, Resource], source_path: str
+    resources: Mapping[str, Resource], source_path: str, *, reset_marker: str | None = None
 ) -> HolidayWriteConfiguration | None:
     """Derive each slot's capabilities from its own current metadata."""
     current = icom_write_values(resources, source_path)
@@ -644,7 +646,10 @@ def icom_write_configuration(
             and icom_dates(start) is not None
             and start.metadata.writable
             and not components.hmi800_hp_light
-            and icom_reset_reference(resources, source_path) is not None
+            and (
+                icom_reset_reference(resources, source_path) is not None
+                or icom_cached_reset_allowed(resources, reset_marker)
+            )
         ),
         fix_temperature_step=step,
     )
@@ -659,6 +664,29 @@ def icom_delete_command_supported(delete: Resource | None) -> bool:
         and delete.metadata.unit in (None, "")
         and not delete.has_values
         and (not delete.metadata.allowed_values or "TRUE" in delete.metadata.allowed_values)
+    )
+
+
+def icom_observed_reset_markers(resources: Mapping[str, Resource]) -> set[str]:
+    """Collect recognized empty markers from the current gateway."""
+    return {
+        resource.value
+        for slot in icom_slots(resources)
+        if (resource := resources.get(f"{slot}/startStop")) is not None
+        and icom_empty(resource)
+        and isinstance(resource.value, str)
+    }
+
+
+def icom_cached_reset_allowed(
+    resources: Mapping[str, Resource], marker: str | None
+) -> bool:
+    """Only fall back to a known marker when every reported slot is occupied."""
+    slots = icom_slots(resources)
+    return (
+        marker in ICOM_EMPTY_PERIODS
+        and bool(slots)
+        and all(icom_dates(resources.get(f"{slot}/startStop")) is not None for slot in slots)
     )
 
 

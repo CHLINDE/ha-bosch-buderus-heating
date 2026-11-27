@@ -1617,9 +1617,16 @@ class BoschBuderusOptionsFlow(
                 if not assigned_to:
                     raise WriteValidationError("Choose at least one holiday circuit")
                 selected = tuple(item.casefold() for item in assigned_to)
-                heating_selected = any(item.startswith("hc") for item in selected)
-                dhw_selected = any(item.startswith("dhw") for item in selected)
-                ventilation_selected = any(item.startswith("vent") for item in selected)
+                modern = choice.configuration.source_path == HOLIDAY_CREATE_PATH
+                heating_selected = modern or any(
+                    item.startswith("hc") for item in selected
+                )
+                dhw_selected = modern or any(
+                    item.startswith("dhw") for item in selected
+                )
+                ventilation_selected = modern or any(
+                    item.startswith("vent") for item in selected
+                )
                 heating_mode = _holiday_mode_from_form(
                     user_input.get(CONF_HOLIDAY_HEATING_MODE)
                     if heating_selected
@@ -1656,7 +1663,7 @@ class BoschBuderusOptionsFlow(
                             CONF_HOLIDAY_FIX_TEMPERATURE, current.fix_temperature
                         )
                         if heating_selected
-                        and heating_mode in ("FIX_TEMP", "FIX_TEMPERATURE")
+                        and (modern or heating_mode in ("FIX_TEMP", "FIX_TEMPERATURE"))
                         else current.fix_temperature
                     ),
                 )

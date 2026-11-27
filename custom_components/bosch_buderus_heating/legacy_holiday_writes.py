@@ -95,6 +95,8 @@ class IcomHolidayWriteService:
             "last_missing_field": None,
             "last_readback_status": None,
             "assignment_trace": [],
+            "date_initialization_changes": [],
+            "skipped_already_matching": [],
             "date_first_experiment": operation == "create",
             "partial_creation_status": "not_started",
         }
@@ -220,7 +222,15 @@ class IcomHolidayWriteService:
             )
         for field, path, value in steps:
             if _field_matches(field, current[path], value):
+                skipped = self.last_write_diagnostics["skipped_already_matching"]
+                if isinstance(skipped, list):
+                    skipped.append(field)
+                previous = self.last_write_diagnostics["confirmed_fields"]
+                if isinstance(previous, tuple):
+                    self.last_write_diagnostics["confirmed_fields"] = (*previous, field)
                 continue
+            if not current[path].metadata.writable:
+                raise WriteValidationError("Legacy holiday field is no longer writable")
             # C38: ``current`` is the complete read just before this step: the
             # initial one or the previous step's read-back, without any wait.
             # Each read-back compares every other field, so a change in the
@@ -252,7 +262,11 @@ class IcomHolidayWriteService:
                 paths,
                 start_path,
                 partial(_field_confirmed, field, path, value),
-                conflict=partial(_other_field_changed, path, before),
+                conflict=(
+                    partial(self._date_initialization_conflict, path, before, value)
+                    if operation == "create" and field == "startStop"
+                    else partial(_other_field_changed, path, before)
+                ),
             )
             if operation == "create" and field == "startStop":
                 self.last_write_diagnostics["partial_creation_status"] = "date_confirmed"
@@ -269,14 +283,47 @@ class IcomHolidayWriteService:
             self.last_write_diagnostics["stage"] = "final_mismatch"
             self.last_write_diagnostics["mismatched_fields"] = tuple(
                 field
-                for field, path, wanted in steps
-                if not _field_matches(field, current[path], wanted)
+                for field, wanted in desired.items()
+                if f"{source_path}/{field}" in current
+                and not _field_matches(field, current[f"{source_path}/{field}"], wanted)
             )
             raise HolidayWriteNotConfirmed(current.get(start_path))
         self.last_write_diagnostics["stage"] = "confirmed"
         if operation == "create":
             self.last_write_diagnostics["partial_creation_status"] = "complete"
         return current[start_path]
+
+    def _date_initialization_conflict(
+        self,
+        path: str,
+        before: Mapping[str, Resource],
+        wanted: JsonValue,
+        read: Mapping[str, Resource],
+    ) -> bool:
+        """Permit only assignment initialization when the requested dates match."""
+        changed = tuple(
+            other for other in before if other != path and read[other] != before[other]
+        )
+        self.last_write_diagnostics["date_initialization_changes"] = [
+            other.rsplit("/", 1)[-1] for other in changed
+        ]
+        assignment_path = path.rsplit("/", 1)[0] + "/assignedTo"
+        if not changed:
+            return False
+        if changed != (assignment_path,) or not _field_matches(
+            "startStop", read[path], wanted
+        ):
+            return True
+        old, new = before[assignment_path], read[assignment_path]
+        # Only accept initialization of a previously empty assignment. A
+        # changed nonempty assignment could be a concurrent user edit.
+        if old.values or old.has_value or not new.values:
+            return True
+        allowed = old.metadata.allowed_values
+        return not (
+            all(isinstance(item, str) and item in allowed for item in new.values)
+            and len(new.values) == len(set(new.values))
+        )
 
     async def _async_put(self, gateway_id: str, path: str, value: JsonValue) -> None:
         """Send one leaf once; resolve an unknown outcome only by reading."""

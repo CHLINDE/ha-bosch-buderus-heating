@@ -31,7 +31,12 @@
       "firstHolidayDay": "Roghnaigh an chéad lá saoire",
       "cancelRange": "Cealaigh",
       "applyRange": "Cuir i bhfeidhm",
-      "selectCircuit": "Roghnaigh ciorcad amháin ar a laghad."
+      "selectCircuit": "Roghnaigh ciorcad amháin ar a laghad.",
+      "rangeLabel": "Tréimhse saoire",
+      "durationOne": "Fad na saoire: {days} lá",
+      "durationMany": "Fad na saoire (laethanta): {days}",
+      "resumeHeating": "Atosaíonn an gnáth-théamh: {date}",
+      "invalidRange": "Roghnaigh raon bailí dátaí."
     },
     "schedule": {
       "title": "Amharc seachtainiúil",

@@ -31,7 +31,12 @@
       "firstHolidayDay": "Sélectionner le premier jour de vacances",
       "cancelRange": "Annuler",
       "applyRange": "Appliquer",
-      "selectCircuit": "Sélectionnez au moins un circuit."
+      "selectCircuit": "Sélectionnez au moins un circuit.",
+      "rangeLabel": "Période de vacances",
+      "durationOne": "Durée des vacances : {days} jour",
+      "durationMany": "Durée des vacances : {days} jours",
+      "resumeHeating": "Reprise du chauffage normal : {date}",
+      "invalidRange": "Sélectionnez une période valide."
     },
     "schedule": {
       "title": "Vue hebdomadaire",

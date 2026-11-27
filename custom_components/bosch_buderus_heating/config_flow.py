@@ -1740,7 +1740,9 @@ class BoschBuderusOptionsFlow(
             for period in state.periods:
                 holiday_id = holiday_period_id(period)
                 period_configuration = parse_holiday_write_configuration(
-                    resources, source_path=period.source_path
+                    resources,
+                    source_path=period.source_path,
+                    reset_marker=coordinator.icom_reset_marker,
                 )
                 if (
                     holiday_id is None

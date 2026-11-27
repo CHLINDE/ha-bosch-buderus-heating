@@ -437,18 +437,18 @@ class BoschBuderusHolidayDateRange extends HTMLElement {
     const start = pair.holiday_start?.value || "";
     const end = pair.holiday_end?.value || "";
     const valid = start && end && end >= start;
-    this.shadowRoot.querySelector(".label").textContent = this._text("Urlaubszeitraum", "Holiday period");
+    this.shadowRoot.querySelector(".label").textContent = this._text("rangeLabel");
     this._open.textContent = [this._format(start), this._format(end)].filter(Boolean).join(" – ") || this._text("selectRange");
     let summary = "";
     if (valid) {
       const days = Math.round((this._date(end) - this._date(start)) / 86400000) + 1;
       const resume = this._date(end);
       resume.setUTCDate(resume.getUTCDate() + 1);
-      summary = this._text("Urlaubsdauer: ", "Holiday duration: ") + days +
-        (days === 1 ? this._text(" Tag", " day") : this._text(" Tage", " days")) + "\n" +
-        this._text("Normaler Heizbetrieb ab: ", "Normal heating resumes: ") + this._format(this._iso(resume));
+      const duration = days === 1 ? this._text("durationOne") : this._text("durationMany");
+      summary = duration.replace("{days}", String(days)) + "\n" +
+        this._text("resumeHeating").replace("{date}", this._format(this._iso(resume)));
     } else if (start || end) {
-      summary = this._text("Bitte einen gültigen Zeitraum auswählen.", "Select a valid date range.");
+      summary = this._text("invalidRange");
     }
     this.shadowRoot.querySelector(".summary").textContent = summary;
   }

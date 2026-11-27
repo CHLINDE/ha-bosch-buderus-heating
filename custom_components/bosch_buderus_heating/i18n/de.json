@@ -31,7 +31,12 @@
       "firstHolidayDay": "Ersten Urlaubstag auswählen",
       "cancelRange": "Abbrechen",
       "applyRange": "Übernehmen",
-      "selectCircuit": "Mindestens einen Kreis auswählen."
+      "selectCircuit": "Mindestens einen Kreis auswählen.",
+      "rangeLabel": "Urlaubszeitraum",
+      "durationOne": "Urlaubsdauer: {days} Tag",
+      "durationMany": "Urlaubsdauer: {days} Tage",
+      "resumeHeating": "Normaler Heizbetrieb ab: {date}",
+      "invalidRange": "Bitte einen gültigen Zeitraum auswählen."
     },
     "schedule": {
       "title": "Wochenansicht",

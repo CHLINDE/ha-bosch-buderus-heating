@@ -23,7 +23,15 @@
       "date": "Datum",
       "time": "Tid",
       "deleteFailed": "Bekräftelsen av borttagningen kunde inte öppnas. Läs in sidan igen och försök på nytt.",
-      "reopen": "Stäng och öppna dialogrutan igen."
+      "reopen": "Stäng och öppna dialogrutan igen.",
+      "selectRange": "Välj datumintervall",
+      "previousMonth": "Föregående månad",
+      "nextMonth": "Nästa månad",
+      "lastHolidayDay": "Välj sista semesterdagen",
+      "firstHolidayDay": "Välj första semesterdagen",
+      "cancelRange": "Avbryt",
+      "applyRange": "Verkställ",
+      "selectCircuit": "Välj minst en krets."
     },
     "schedule": {
       "title": "Veckovy",

@@ -519,9 +519,12 @@ async def test_legacy_native_dialog_has_dates_no_clock_or_name_and_saves(
     assert fields["holiday_start"].selector_type == "date"
     assert fields["holiday_end"].selector_type == "date"
     for field in ("holiday_start", "holiday_end"):
-        assert fields[field].serialize()["selector"][
-            "bosch-buderus-holiday-date-range"
-        ]["endpoint"] == field
+        assert (
+            fields[field].serialize()["selector"]["bosch-buderus-holiday-date-range"][
+                "endpoint"
+            ]
+            == field
+        )
     assert ("holiday_delete" in fields) is (not creating)
     draft = _holiday_form_input(result)
     draft.update(holiday_start="2030-11-03", holiday_end="2030-11-01")

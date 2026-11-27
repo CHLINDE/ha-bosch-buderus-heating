@@ -1205,3 +1205,37 @@ async def test_icom_reset_delete_uses_observed_empty_marker(environment):
     )
     client.put_icom_holiday_assignments.assert_not_awaited()
     assert not parse_holiday_state(coordinator.resources).periods
+
+
+@pytest.mark.parametrize("marker", [None, "invalid", "2017-01-01/2017-01-01"])
+async def test_icom_full_calendar_requires_known_reset_marker(environment, marker):
+    """Only a previously observed marker permits deletion of a full calendar."""
+    state = wire(environment)
+    coordinator, client, _ = environment
+    delete = f"{SLOT}/delete"
+    state.pop(delete)
+    free_start = f"{FREE}/startStop"
+    state[free_start] = replace(state[free_start], value="2031-01-01/2031-01-02")
+    coordinator.resources = dict(state)
+    coordinator.data = snapshots(*state.values())
+    coordinator.icom_reset_marker = marker
+    baseline = icom_write_values(state, SLOT)
+    original = client.put_resource_value.side_effect
+
+    async def put(gateway, path, value):
+        await original(gateway, path, value)
+        if path == START:
+            assignment = f"{SLOT}/assignedTo"
+            state[assignment] = replace(state[assignment], values=())
+
+    client.put_resource_value.side_effect = put
+    if marker != "2017-01-01/2017-01-01":
+        with pytest.raises(WriteValidationError):
+            await coordinator.async_delete_holiday(2, expected=baseline)
+        client.put_resource_value.assert_not_awaited()
+    else:
+        await coordinator.async_delete_holiday(2, expected=baseline)
+        client.put_resource_value.assert_awaited_once_with(
+            "synthetic-gateway", START, marker
+        )
+        assert state[free_start].value == "2031-01-01/2031-01-02"

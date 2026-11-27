@@ -58,7 +58,7 @@ class IcomHolidayWriteService:
         self.client = client
         self.confirmed: dict[str, Resource] = {}
         self.invalidated: set[str] = set()
-        # Codes and field names only; never values, times, circuit IDs or paths.
+        # Technical assignment fields only; no dates or gateway IDs.
         self.last_write_diagnostics: dict[str, object] = {}
         self._sleep = sleep
         # I1: an iCom gateway reads back after 1, 2, 3 and 4 seconds; the
@@ -94,6 +94,7 @@ class IcomHolidayWriteService:
             "read_back_not_found_count": 0,
             "last_missing_field": None,
             "last_readback_status": None,
+            "assignment_trace": [],
         }
         if not is_icom_slot(source_path) or operation not in (
             "create",
@@ -222,6 +223,13 @@ class IcomHolidayWriteService:
             self.last_write_diagnostics["current_field"] = field
             self.last_write_diagnostics["stage"] = "put"
             if field == "assignedTo":
+                self.last_write_diagnostics["assignment_put"] = {
+                    "path": path,
+                    "json_body": {"values": list(values.assigned_to)},
+                }
+                self.last_write_diagnostics["assignment_before"] = getattr(
+                    self.client, "icom_assignment_wire_read", None
+                )
                 await self._async_put_assignments(
                     gateway_id, source_path, values.assigned_to
                 )
@@ -316,6 +324,16 @@ class IcomHolidayWriteService:
                             count + 1
                         )
                     leaf = err.path.rsplit("/", 1)[-1]
+                    trace = self.last_write_diagnostics["assignment_trace"]
+                    if (
+                        isinstance(trace, list)
+                        and self.last_write_diagnostics["current_field"] == "assignedTo"
+                    ):
+                        trace.append({
+                            "attempt": attempt,
+                            "status": "resource_not_found",
+                            "path": err.path if err.path in paths else "<redacted>",
+                        })
                     self.last_write_diagnostics["last_missing_field"] = (
                         leaf if leaf in (*ICOM_FIELDS, "delete") else "other"
                     )
@@ -327,6 +345,20 @@ class IcomHolidayWriteService:
                 else:
                     self.last_write_diagnostics["last_readback_status"] = "unavailable"
                 continue
+            trace = self.last_write_diagnostics["assignment_trace"]
+            if (
+                isinstance(trace, list)
+                and self.last_write_diagnostics["current_field"] == "assignedTo"
+            ):
+                path = start_path.rsplit("/", 1)[0] + "/assignedTo"
+                resource = actual.get(path)
+                trace.append({
+                    "attempt": attempt,
+                    "wire": getattr(self.client, "icom_assignment_wire_read", None),
+                    "has_value": resource.has_value if resource else None,
+                    "has_values": resource.has_values if resource else None,
+                    "matches": confirmed(actual),
+                })
             if conflict(actual):
                 self.last_write_diagnostics["last_readback_status"] = (
                     "other_field_changed"

@@ -147,7 +147,9 @@ class IcomHolidayWriteService:
             if system_info is not None
             else {**resources, **reset_resources, **current},
             source_path,
-            reset_marker=reset_reference if icom_cached_reset_allowed(resources, reset_reference) else None,
+            reset_marker=reset_reference
+            if icom_cached_reset_allowed(resources, reset_reference)
+            else None,
         )
         baseline = icom_write_values(current, source_path)
         if configuration is None or baseline is None:
@@ -167,7 +169,9 @@ class IcomHolidayWriteService:
                 )
             self.invalidated.update(paths)
             self.confirmed.clear()
-            explicit = icom_delete_command_supported(current.get(f"{source_path}/delete"))
+            explicit = icom_delete_command_supported(
+                current.get(f"{source_path}/delete")
+            )
             if not explicit and reset_reference is None:
                 raise WriteValidationError("No verified empty holiday reference")
             field = "delete" if explicit else "startStop"
@@ -187,12 +191,14 @@ class IcomHolidayWriteService:
                 gateway_id,
                 paths,
                 start_path,
-                lambda read: icom_empty(read.get(start_path))
-                and (
-                    explicit
-                    or (
-                        not read[f"{source_path}/assignedTo"].has_value
-                        and not read[f"{source_path}/assignedTo"].values
+                lambda read: (
+                    icom_empty(read.get(start_path))
+                    and (
+                        explicit
+                        or (
+                            not read[f"{source_path}/assignedTo"].has_value
+                            and not read[f"{source_path}/assignedTo"].values
+                        )
                     )
                 ),
             )
@@ -285,7 +291,9 @@ class IcomHolidayWriteService:
             self.last_write_diagnostics["current_field"] = field
             self.last_write_diagnostics["stage"] = "put"
             if operation == "create" and field == "startStop":
-                self.last_write_diagnostics["partial_creation_status"] = "date_write_attempted"
+                self.last_write_diagnostics["partial_creation_status"] = (
+                    "date_write_attempted"
+                )
             if field == "assignedTo":
                 await self._async_put_assignments(
                     gateway_id, source_path, values.assigned_to
@@ -306,7 +314,9 @@ class IcomHolidayWriteService:
                 ),
             )
             if operation == "create" and field == "startStop":
-                self.last_write_diagnostics["partial_creation_status"] = "date_confirmed"
+                self.last_write_diagnostics["partial_creation_status"] = (
+                    "date_confirmed"
+                )
             previous = self.last_write_diagnostics["confirmed_fields"]
             if isinstance(previous, tuple):
                 self.last_write_diagnostics["confirmed_fields"] = (*previous, field)
@@ -440,8 +450,11 @@ class IcomHolidayWriteService:
             if self.last_write_diagnostics["operation"] == "create":
                 date_resource = actual.get(start_path)
                 self.last_write_diagnostics["last_observed_date_state"] = (
-                    "valid" if icom_dates(date_resource) is not None
-                    else "empty" if icom_empty(date_resource) else "unknown"
+                    "valid"
+                    if icom_dates(date_resource) is not None
+                    else "empty"
+                    if icom_empty(date_resource)
+                    else "unknown"
                 )
             if conflict(actual):
                 self.last_write_diagnostics["last_readback_status"] = (

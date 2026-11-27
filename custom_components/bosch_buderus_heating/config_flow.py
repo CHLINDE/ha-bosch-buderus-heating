@@ -8,7 +8,7 @@ import math
 import re
 from contextlib import suppress
 from dataclasses import dataclass, replace
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from time import monotonic
 from typing import Any, cast, override
 
@@ -79,6 +79,7 @@ from .ha_schema import validation as vol
 from .holiday_ui import (
     DELETE_FIELD,
     HolidayAssignmentSelector,
+    HolidayDateRangeSelector,
     HolidayDateTimeSelector,
     HolidayDeleteSelector,
     HolidayFormSchema,
@@ -1550,6 +1551,8 @@ class BoschBuderusOptionsFlow(
                 if date_only:
                     start = date.fromisoformat(user_input["holiday_start"])
                     end = date.fromisoformat(user_input["holiday_end"])
+                    if choice.configuration.source_path != HOLIDAY_CREATE_PATH:
+                        end += timedelta(days=1)
                 else:
                     start = _holiday_datetime_input(user_input["holiday_start"])
                     end = _holiday_datetime_input(user_input["holiday_end"])
@@ -1864,7 +1867,10 @@ class BoschBuderusOptionsFlow(
             suggestions["holiday_name"] = "" if creating else choice.period.name or ""
         for field in ("holiday_start", "holiday_end"):
             fields[vol.Required(field)] = (
-                DateSelector()
+                HolidayDateRangeSelector(endpoint=field)
+                if configuration.date_time_mode == "date"
+                and configuration.source_path != HOLIDAY_CREATE_PATH
+                else DateSelector()
                 if configuration.date_time_mode == "date"
                 else HolidayDateTimeSelector(creating=creating)
             )
@@ -1965,6 +1971,12 @@ def _holiday_date_suggestions(choice: _HolidayChoice) -> dict[str, str]:
         ("holiday_start", choice.period.start),
         ("holiday_end", choice.period.end),
     ):
+        if (
+            field == "holiday_end"
+            and choice.configuration.date_time_mode == "date"
+            and choice.configuration.source_path != HOLIDAY_CREATE_PATH
+        ):
+            value -= timedelta(days=1)
         suggestions[field] = (
             value.date().isoformat()
             if choice.configuration.date_time_mode == "date"
@@ -2034,7 +2046,11 @@ def _holiday_label(
     fallback = localize(language, "Urlaub", "Holiday")
     name = period.name or f"{fallback} {holiday_id}"
     if period.all_day:
-        timespan = f"{period.start:%Y-%m-%d} / {period.end:%Y-%m-%d}"
+        end = period.end
+        if period.source_path != HOLIDAY_CREATE_PATH:
+            end -= timedelta(days=1)
+        fmt = "%d.%m.%Y" if language.startswith("de") else "%Y-%m-%d"
+        timespan = f"{period.start:{fmt}} / {end:{fmt}}"
     else:
         timespan = f"{period.start:%Y-%m-%d %H:%M} / {period.end:%Y-%m-%d %H:%M}"
     gateway = f"{_gateway_label(coordinator.gateway)} · " if multiple_gateways else ""

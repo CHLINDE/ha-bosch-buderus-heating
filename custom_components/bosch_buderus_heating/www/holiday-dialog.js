@@ -237,6 +237,7 @@ class BoschBuderusHolidayAssignment extends HTMLElement {
   get value() { return this._value; }
   set selector(value) {
     const config = value?.["bosch-buderus-holiday-assignment"];
+    this._config = config;
     this._options = Array.isArray(config?.options) ? config.options : [];
     const container = this.shadowRoot.querySelector(".options");
     container.replaceChildren();
@@ -265,7 +266,7 @@ class BoschBuderusHolidayAssignment extends HTMLElement {
   focus() { this.shadowRoot.querySelector("input")?.focus(); }
   reportValidity() {
     const valid = this._value.length > 0;
-    this.shadowRoot.querySelector(".error").textContent = valid ? "" : (this._hass?.language?.startsWith("de") ? "Mindestens einen Kreis auswählen." : "Select at least one circuit.");
+    this.shadowRoot.querySelector(".error").textContent = valid ? "" : holidayText(this._hass, this._config, "selectCircuit");
     return valid;
   }
   set hass(value) { this._hass = value; }
@@ -423,7 +424,7 @@ class BoschBuderusHolidayDateRange extends HTMLElement {
   set required(value) { this._required = Boolean(value); }
   focus() { (this._pair().holiday_start || this)._open.focus(); }
   reportValidity() { return !this._required || Boolean(this.value); }
-  _text(de, en) { return this._hass?.language?.startsWith("de") ? de : en; }
+  _text(key) { return holidayText(this._hass, this._config, key); }
   _date(value) { return new Date(value + "T12:00:00Z"); }
   _iso(value) { return value.toISOString().slice(0, 10); }
   _format(value) {
@@ -437,7 +438,7 @@ class BoschBuderusHolidayDateRange extends HTMLElement {
     const end = pair.holiday_end?.value || "";
     const valid = start && end && end >= start;
     this.shadowRoot.querySelector(".label").textContent = this._text("Urlaubszeitraum", "Holiday period");
-    this._open.textContent = [this._format(start), this._format(end)].filter(Boolean).join(" – ") || this._text("Zeitraum auswählen", "Select date range");
+    this._open.textContent = [this._format(start), this._format(end)].filter(Boolean).join(" – ") || this._text("selectRange");
     let summary = "";
     if (valid) {
       const days = Math.round((this._date(end) - this._date(start)) / 86400000) + 1;
@@ -485,15 +486,15 @@ class BoschBuderusHolidayDateRange extends HTMLElement {
     root.querySelector(".month").textContent = new Intl.DateTimeFormat(language, {
       month:"long", year:"numeric", timeZone:"UTC",
     }).format(this._month);
-    root.querySelector(".prev").setAttribute("aria-label", this._text("Vorheriger Monat", "Previous month"));
-    root.querySelector(".next").setAttribute("aria-label", this._text("Nächster Monat", "Next month"));
+    root.querySelector(".prev").setAttribute("aria-label", this._text("previousMonth"));
+    root.querySelector(".next").setAttribute("aria-label", this._text("nextMonth"));
     root.querySelector(".hint").textContent = this._selectEnd
-      ? this._text("Letzten Urlaubstag auswählen", "Select last holiday day")
-      : this._text("Ersten Urlaubstag auswählen", "Select first holiday day");
+      ? this._text("lastHolidayDay")
+      : this._text("firstHolidayDay");
     root.querySelector(".range").textContent = [this._format(this._start), this._format(this._end)].filter(Boolean).join(" – ");
-    root.querySelector(".cancel").textContent = this._text("Abbrechen", "Cancel");
+    root.querySelector(".cancel").textContent = this._text("cancelRange");
     const apply = root.querySelector(".apply");
-    apply.textContent = this._text("Übernehmen", "Apply");
+    apply.textContent = this._text("applyRange");
     apply.disabled = !(this._start && this._end && this._end >= this._start);
     const days = root.querySelector(".days");
     days.replaceChildren();

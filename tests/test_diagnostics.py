@@ -234,6 +234,7 @@ async def test_diagnostics_contains_schema_and_metrics_but_no_private_data(
         "supported_resources": ("/holidayMode/list",),
         "valid_period_count": 1,
         "invalid_period_count": 0,
+        "icom_last_write": None,
         "active_status_available": True,
         "timezone_source": "home_assistant",
         "calendar_writes_available": False,

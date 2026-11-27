@@ -8,7 +8,12 @@ from pathlib import Path
 from typing import Any, override
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.selector import BooleanSelector, SelectSelector, TextSelector
+from homeassistant.helpers.selector import (
+    BooleanSelector,
+    DateSelector,
+    SelectSelector,
+    TextSelector,
+)
 
 from .ha_schema import validation as vol
 from .i18n import dialog_config
@@ -40,6 +45,25 @@ class HolidayDeleteSelector(BooleanSelector):
     @override
     def serialize(self) -> dict[str, Any]:
         return {"selector": {self.selector_type: dialog_config("holiday")}}
+
+
+class HolidayDateRangeSelector(DateSelector):
+    """Pair two validated ISO dates in a single calendar popup."""
+
+    def __init__(self, *, endpoint: str) -> None:
+        super().__init__()
+        self._endpoint = endpoint
+
+    @override
+    def serialize(self) -> dict[str, Any]:
+        return {
+            "selector": {
+                "bosch-buderus-holiday-date-range": {
+                    "endpoint": self._endpoint,
+                    **dialog_config("holiday"),
+                }
+            }
+        }
 
 
 class HolidayDateTimeSelector(TextSelector):

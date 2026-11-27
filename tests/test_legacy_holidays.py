@@ -1017,6 +1017,12 @@ async def test_icom_transient_assignment_404_after_put_recovers_without_retry(
     )
     assert [call.args[0] for call in service._sleep.await_args_list] == [0.5, 1.0]
     assert coordinator.data[START].freshness is Freshness.FRESH
+    trace = service.last_write_diagnostics
+    assert trace["stage"] == "confirmed"
+    assert trace["current_field"] == "dhwMode"
+    assert trace["read_back_not_found_count"] == 1
+    assert trace["last_missing_field"] == "assignedTo"
+    assert trace["last_readback_status"] == "field_confirmed"
 
 
 async def test_icom_persistent_assignment_404_stops_without_another_put(
@@ -1057,6 +1063,12 @@ async def test_icom_persistent_assignment_404_stops_without_another_put(
     assignment = coordinator.data[f"{SLOT}/assignedTo"]
     assert not assignment.available
     assert assignment.freshness is Freshness.STALE
+    trace = coordinator._icom_holiday_write_service.last_write_diagnostics
+    assert trace["stage"] == "unconfirmed"
+    assert trace["current_field"] == "dhwMode"
+    assert trace["read_back_not_found_count"] == 3
+    assert trace["last_missing_field"] == "assignedTo"
+    assert trace["last_readback_status"] == "resource_not_found"
 
 
 async def test_icom_delayed_read_back_is_read_again_without_another_put(environment):
@@ -1131,3 +1143,15 @@ async def test_icom_unchanged_read_back_ends_unconfirmed_after_three_reads(
     assert counts["get"] == 6 * (1 + 3)
     # The last complete read is authoritative and shown as it is.
     assert coordinator.data[f"{SLOT}/dhwMode"].resource.value == "OFF"
+    trace = coordinator._icom_holiday_write_service.last_write_diagnostics
+    assert trace["operation"] == "update"
+    assert trace["slot"] == "hm2"
+    assert trace["stage"] == "unconfirmed"
+    assert trace["planned_fields"] == ("dhwMode",)
+    assert trace["current_field"] == "dhwMode"
+    assert trace["read_back_attempts"] == 3
+    assert trace["last_readback_status"] == "field_mismatch"
+    assert trace["read_back_not_found_count"] == 0
+    assert "LOW" not in repr(trace)
+    assert "2030-10-26" not in repr(trace)
+    assert "dhw1" not in repr(trace)

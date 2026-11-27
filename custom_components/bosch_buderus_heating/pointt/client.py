@@ -153,6 +153,25 @@ class PointTClient:
             request_type="fallback" if fallback_reason is not None else None,
             fallback_reason=fallback_reason,
         )
+        if re.fullmatch(r"/system/holidayModes/hm[0-9]+/assignedTo", normalized):
+            # Capture only technical assignment fields, never gateway IDs or dates.
+            def safe_assignment(value: object) -> object:
+                if isinstance(value, str):
+                    return value if re.fullmatch(r"(?:hc|dhw)[0-9]+", value) else "<redacted>"
+                if isinstance(value, list):
+                    return [safe_assignment(item) for item in value[:32]]
+                if value is None or isinstance(value, (bool, int, float)):
+                    return value
+                return "<redacted>"
+            self.icom_assignment_wire_read = {
+                "path": normalized,
+                "payload_type": type(payload).__name__,
+                "fields": {
+                    key: safe_assignment(payload[key])
+                    for key in ("value", "values", "allowedValues")
+                    if key in payload
+                } if isinstance(payload, dict) else {},
+            }
         return parse_resource(payload, path=normalized)
 
     async def get_wallbox_section(

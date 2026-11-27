@@ -76,7 +76,7 @@ class IcomHolidayWriteService:
         values: HolidayWriteValues | None,
         expected: HolidayWriteValues | None,
     ) -> Resource:
-        """Recheck each step, commit dates last and stop on any conflict or failure."""
+        """Recheck each step; test dates before assignments for new holidays."""
         self.confirmed = {}
         self.invalidated = set()
         self.last_write_diagnostics = {
@@ -95,6 +95,8 @@ class IcomHolidayWriteService:
             "last_missing_field": None,
             "last_readback_status": None,
             "assignment_trace": [],
+            "date_first_experiment": operation == "create",
+            "partial_creation_status": "not_started",
         }
         if not is_icom_slot(source_path) or operation not in (
             "create",
@@ -198,6 +200,12 @@ class IcomHolidayWriteService:
             if f"{source_path}/{field}" in current
             and not _field_matches(field, current[f"{source_path}/{field}"], value)
         ]
+        if operation == "create":
+            # Diagnostic experiment: keep modes first, but initialize dates
+            # before assigning circuits. Updates retain the original order.
+            steps.sort(
+                key=lambda step: {"startStop": 1, "assignedTo": 2}.get(step[0], 0)
+            )
         self.last_write_diagnostics["planned_fields"] = tuple(
             field for field, _path, _value in steps
         )
@@ -222,6 +230,8 @@ class IcomHolidayWriteService:
             self.confirmed.clear()
             self.last_write_diagnostics["current_field"] = field
             self.last_write_diagnostics["stage"] = "put"
+            if operation == "create" and field == "startStop":
+                self.last_write_diagnostics["partial_creation_status"] = "date_write_attempted"
             if field == "assignedTo":
                 self.last_write_diagnostics["assignment_put"] = {
                     "path": path,
@@ -244,9 +254,15 @@ class IcomHolidayWriteService:
                 partial(_field_confirmed, field, path, value),
                 conflict=partial(_other_field_changed, path, before),
             )
+            if operation == "create" and field == "startStop":
+                self.last_write_diagnostics["partial_creation_status"] = "date_confirmed"
             previous = self.last_write_diagnostics["confirmed_fields"]
             if isinstance(previous, tuple):
                 self.last_write_diagnostics["confirmed_fields"] = (*previous, field)
+        # Re-read every discovered leaf after the experimental creation.
+        if operation == "create":
+            self.last_write_diagnostics["stage"] = "final_read"
+            current = await self._read(gateway_id, paths)
         # A full final comparison also covers no-op submissions and slot identity.
         actual_values = icom_write_values(current, source_path)
         if actual_values is None or not _same_values(actual_values, values):
@@ -258,6 +274,8 @@ class IcomHolidayWriteService:
             )
             raise HolidayWriteNotConfirmed(current.get(start_path))
         self.last_write_diagnostics["stage"] = "confirmed"
+        if operation == "create":
+            self.last_write_diagnostics["partial_creation_status"] = "complete"
         return current[start_path]
 
     async def _async_put(self, gateway_id: str, path: str, value: JsonValue) -> None:
@@ -359,6 +377,12 @@ class IcomHolidayWriteService:
                     "has_values": resource.has_values if resource else None,
                     "matches": confirmed(actual),
                 })
+            if self.last_write_diagnostics["date_first_experiment"]:
+                date_resource = actual.get(start_path)
+                self.last_write_diagnostics["last_observed_date_state"] = (
+                    "valid" if icom_dates(date_resource) is not None
+                    else "empty" if icom_empty(date_resource) else "unknown"
+                )
             if conflict(actual):
                 self.last_write_diagnostics["last_readback_status"] = (
                     "other_field_changed"

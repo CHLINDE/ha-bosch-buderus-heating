@@ -31,7 +31,12 @@
       "firstHolidayDay": "Eerste vakantiedag selecteren",
       "cancelRange": "Annuleren",
       "applyRange": "Toepassen",
-      "selectCircuit": "Selecteer minstens één circuit."
+      "selectCircuit": "Selecteer minstens één circuit.",
+      "rangeLabel": "Vakantieperiode",
+      "durationOne": "Vakantieduur: {days} dag",
+      "durationMany": "Vakantieduur: {days} dagen",
+      "resumeHeating": "Normale verwarming hervat op: {date}",
+      "invalidRange": "Selecteer een geldig datumbereik."
     },
     "schedule": {
       "title": "Weekoverzicht",

@@ -201,15 +201,21 @@ class BoschBuderusHolidayAssignment extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
-    this.shadowRoot.innerHTML = '<style>:host {display:block}</style><ha-selector></ha-selector>';
-    this._native = this.shadowRoot.querySelector("ha-selector");
-    this._native.addEventListener("value-changed", (event) => {
-      event.stopPropagation();
-      this.value = event.detail.value;
-      this.dispatchEvent(new CustomEvent("value-changed", {
-        detail: { value: this._value }, bubbles: true, composed: true,
-      }));
-    });
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host { display:block; }
+        .label { display:block; margin-bottom:8px; }
+        label { display:flex; align-items:center; gap:12px; min-height:44px; cursor:pointer; }
+        input { width:20px; height:20px; accent-color:var(--primary-color, #03a9f4); margin:0; }
+        .helper { color:var(--secondary-text-color); font-size:.85em; }
+        .error { color:var(--error-color); font-size:.85em; }
+        .error:empty, .helper:empty { display:none; }
+      </style>
+      <span class="label" id="label"></span>
+      <div class="options" role="group" aria-labelledby="label"></div>
+      <div class="helper"></div><div class="error" role="alert"></div>`;
+    this._options = [];
+    this._value = [];
     this._onFormChange = () => this._schedule();
   }
   connectedCallback() {
@@ -224,23 +230,51 @@ class BoschBuderusHolidayAssignment extends HTMLElement {
     this._form = undefined;
   }
   set value(value) {
-    this._value = value;
-    this._native.value = value;
+    this._value = Array.isArray(value) ? [...value] : [];
+    this._updateChecks();
     this._schedule();
   }
   get value() { return this._value; }
   set selector(value) {
-    this._native.selector = { select: value?.["bosch-buderus-holiday-assignment"] || {} };
+    const config = value?.["bosch-buderus-holiday-assignment"];
+    this._options = Array.isArray(config?.options) ? config.options : [];
+    const container = this.shadowRoot.querySelector(".options");
+    container.replaceChildren();
+    for (const option of this._options) {
+      const row = document.createElement("label");
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.value = typeof option === "string" ? option : option.value;
+      const label = document.createElement("span");
+      label.textContent = typeof option === "string" ? option : option.label;
+      row.append(input, label);
+      container.append(row);
+      input.addEventListener("change", () => {
+        this.value = [...container.querySelectorAll("input:checked")].map((el) => el.value);
+        this.dispatchEvent(new CustomEvent("value-changed", {
+          detail: { value: this._value }, bubbles: true, composed: true,
+        }));
+      });
+    }
+    this._updateChecks();
   }
-  set hass(value) { this._native.hass = value; }
-  set label(value) { this._native.label = value; }
-  set helper(value) { this._native.helper = value; }
-  set disabled(value) { this._native.disabled = value; }
-  set required(value) { this._native.required = value; }
-  set narrow(value) { this._native.narrow = value; }
-  focus() { this._native.focus?.(); }
+  set label(value) { this.shadowRoot.querySelector(".label").textContent = value || ""; }
+  set helper(value) { this.shadowRoot.querySelector(".helper").textContent = value || ""; }
+  set disabled(value) { this._disabled = Boolean(value); this._updateChecks(); }
+  set required(value) { this._required = Boolean(value); }
+  focus() { this.shadowRoot.querySelector("input")?.focus(); }
   reportValidity() {
-    return Array.isArray(this._value) && this._value.length > 0;
+    const valid = this._value.length > 0;
+    this.shadowRoot.querySelector(".error").textContent = valid ? "" : (this._hass?.language?.startsWith("de") ? "Mindestens einen Kreis auswählen." : "Select at least one circuit.");
+    return valid;
+  }
+  set hass(value) { this._hass = value; }
+  _updateChecks() {
+    for (const input of this.shadowRoot.querySelectorAll("input")) {
+      input.checked = this._value.includes(input.value);
+      input.disabled = this._disabled || false;
+    }
+    if (this._value.length) this.shadowRoot.querySelector(".error").textContent = "";
   }
   _schedule() {
     if (!this.isConnected) return;

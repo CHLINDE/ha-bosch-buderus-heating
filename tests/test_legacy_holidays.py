@@ -40,6 +40,7 @@ from custom_components.bosch_buderus_heating.pointt import (
     AuthenticationError,
     RateLimited,
     RequestTimeout,
+    ResourceNotFound,
     WriteNotConfirmed,
     WriteValidationError,
 )
@@ -172,6 +173,78 @@ def test_invalid_slot_metadata_does_not_borrow_from_other_slots(field, change):
     }
     assert icom_write_configuration(resources, SLOT) is None
     assert icom_write_configuration(resources, FREE) is not None
+
+
+def test_missing_fixed_temperature_keeps_safe_icom_modes_for_new_holiday():
+    """A missing temperature resource must hide only fixed-temperature modes."""
+    resources = {
+        path: resource
+        for path, resource in RESOURCES.items()
+        if path != f"{FREE}/fixTemperature"
+    }
+    config = icom_write_configuration(resources, FREE)
+    assert config is not None
+    assert config.heating_modes == ("OFF", "ECO")
+    # Prefer the advertised ECO mode to switching heating off by default.
+    assert config.heating_mode == "ECO"
+    assert config.fix_temperature_min is None
+    assert config.fix_temperature_max is None
+    values = create_holiday_values(
+        date(2030, 11, 3),
+        date(2030, 11, 6),
+        "",
+        config,
+        ZoneInfo("Europe/Berlin"),
+    )
+    assert values.heating_mode == "ECO"
+    assert values.fix_temperature == 0.0
+
+
+def test_missing_fixed_temperature_preserves_existing_safe_default():
+    """Keep a currently selected safe heating mode in a free slot."""
+    mode_path = f"{FREE}/hcMode"
+    resources = {
+        **{
+            path: resource
+            for path, resource in RESOURCES.items()
+            if path != f"{FREE}/fixTemperature"
+        },
+        mode_path: replace(RESOURCES[mode_path], value="ECO"),
+    }
+    config = icom_write_configuration(resources, FREE)
+    assert config is not None
+    assert config.heating_mode == "ECO"
+    assert config.heating_modes == ("OFF", "ECO")
+
+
+def test_missing_fixed_temperature_does_not_rewrite_occupied_holiday():
+    """Do not silently migrate an active fixed-temperature setting."""
+    resources = {
+        path: resource
+        for path, resource in RESOURCES.items()
+        if path != f"{SLOT}/fixTemperature"
+    }
+    assert icom_write_configuration(resources, SLOT) is None
+
+
+def test_missing_fixed_temperature_with_no_safe_modes_remains_blocked():
+    """A gateway advertising only fixed-temperature mode stays read-only."""
+    mode_path = f"{FREE}/hcMode"
+    resources = {
+        **{
+            path: resource
+            for path, resource in RESOURCES.items()
+            if path != f"{FREE}/fixTemperature"
+        },
+        mode_path: replace(
+            RESOURCES[mode_path],
+            metadata=replace(
+                RESOURCES[mode_path].metadata,
+                allowed_values=("FIX_TEMPERATURE",),
+            ),
+        ),
+    }
+    assert icom_write_configuration(resources, FREE) is None
 
 
 @pytest.mark.parametrize("on", [True, False])
@@ -379,6 +452,38 @@ def flow_entry(hass, resources):
     coordinator.data = snapshots(*resources.values())
     coordinator.async_create_holiday = AsyncMock()
     return entry, coordinator
+
+
+@pytest.mark.parametrize("missing_fixed_temperature", [False, True])
+async def test_empty_icom_calendar_opens_create_form_without_selection(
+    hass, enable_custom_integrations, missing_fixed_temperature
+):
+    """No holiday_period step, even when iCom lacks fixTemperature entirely."""
+    resources = {
+        **{
+            path: resource
+            for path, resource in RESOURCES.items()
+            if path != WDDW2_HOLIDAY_PATH
+        },
+        START: replace(RESOURCES[START], value="2017-01-01/2017-01-01"),
+    }
+    # The fixture contains two iCom slots plus a separate WDDW2 mode; this
+    # test must model one iCom-only plant with all slots empty.
+    assert not parse_holiday_state(resources).periods
+    if missing_fixed_temperature:
+        resources = {
+            path: item
+            for path, item in resources.items()
+            if not path.endswith("/fixTemperature")
+        }
+    entry, coordinator = flow_entry(hass, resources)
+    result = await _start_holiday_options(hass, entry)
+    assert result["step_id"] == "new_legacy_holiday"
+    fields = {marker.schema for marker in result["data_schema"].schema}
+    assert "holiday_period" not in fields
+    assert {"holiday_start", "holiday_end", "holiday_assigned_to"} <= fields
+    assert ("holiday_fix_temperature" in fields) is (not missing_fixed_temperature)
+    coordinator.async_create_holiday.assert_not_awaited()
 
 
 @pytest.mark.parametrize("creating", [False, True])
@@ -875,6 +980,83 @@ async def test_icom_create_reads_each_step_only_once(environment):
     assert puts() == 4
     # The initial read and one read-back per step: 30 instead of 54 GETs.
     assert counts["get"] == slot_paths * (1 + puts()) == 30
+
+
+async def test_icom_transient_assignment_404_after_put_recovers_without_retry(
+    environment,
+):
+    """The gateway can briefly omit assignedTo after accepting a mode PUT."""
+    state = wire(environment)
+    coordinator, client, _ = environment
+    service = coordinator._icom_holiday_write_service
+    original_put = client.put_resource_value.side_effect
+    original_get = client.get_resource.side_effect
+    write_sent = False
+    missing_once = True
+
+    async def put(gateway, path, value):
+        nonlocal write_sent
+        await original_put(gateway, path, value)
+        write_sent = True
+
+    async def get(gateway, path):
+        nonlocal missing_once
+        if write_sent and missing_once and path == f"{SLOT}/assignedTo":
+            missing_once = False
+            raise ResourceNotFound(path, 404)
+        return await original_get(gateway, path)
+
+    client.put_resource_value.side_effect = put
+    client.get_resource.side_effect = get
+    baseline = icom_write_values(state, SLOT)
+    await coordinator.async_update_holiday(
+        2, replace(baseline, dhw_mode="LOW"), expected=baseline
+    )
+    client.put_resource_value.assert_awaited_once_with(
+        "synthetic-gateway", f"{SLOT}/dhwMode", "LOW"
+    )
+    assert [call.args[0] for call in service._sleep.await_args_list] == [0.5, 1.0]
+    assert coordinator.data[START].freshness is Freshness.FRESH
+
+
+async def test_icom_persistent_assignment_404_stops_without_another_put(
+    environment,
+):
+    """A permanent 404 is never treated as proof the holiday was saved."""
+    state = wire(environment)
+    coordinator, client, _ = environment
+    original_put = client.put_resource_value.side_effect
+    original_get = client.get_resource.side_effect
+    write_sent = False
+
+    async def put(gateway, path, value):
+        nonlocal write_sent
+        await original_put(gateway, path, value)
+        write_sent = True
+
+    async def get(gateway, path):
+        if write_sent and path == f"{SLOT}/assignedTo":
+            raise ResourceNotFound(path, 404)
+        return await original_get(gateway, path)
+
+    client.put_resource_value.side_effect = put
+    client.get_resource.side_effect = get
+    baseline = icom_write_values(state, SLOT)
+    with pytest.raises(WriteNotConfirmed):
+        await coordinator.async_update_holiday(
+            2, replace(baseline, dhw_mode="LOW"), expected=baseline
+        )
+    client.put_resource_value.assert_awaited_once_with(
+        "synthetic-gateway", f"{SLOT}/dhwMode", "LOW"
+    )
+    assert len(coordinator._icom_holiday_write_service._sleep.await_args_list) == 3
+    # Successfully read leaves stay authoritative; only the missing leaf
+    # remains stale and the overall operation is not confirmed.
+    assert coordinator.data[START].available
+    assert coordinator.data[START].freshness is Freshness.FRESH
+    assignment = coordinator.data[f"{SLOT}/assignedTo"]
+    assert not assignment.available
+    assert assignment.freshness is Freshness.STALE
 
 
 async def test_icom_delayed_read_back_is_read_again_without_another_put(environment):

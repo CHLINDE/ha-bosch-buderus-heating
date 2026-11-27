@@ -579,10 +579,34 @@ def icom_write_configuration(
     if not allowed:
         return None
     fixed = resources.get(f"{source_path}/fixTemperature")
-    if fixed is None and any(
-        mode in ("FIX_TEMP", "FIX_TEMPERATURE") for mode in heating_modes
-    ):
-        return None
+    default_heating_mode = current.heating_mode
+    if fixed is None:
+        # Some iCom controllers advertise fixed-temperature modes without
+        # exposing the resource needed to configure their temperature. Exclude
+        # only those modes; other holiday modes can still be written safely.
+        heating_modes = tuple(
+            mode
+            for mode in heating_modes
+            if mode not in ("FIX_TEMP", "FIX_TEMPERATURE")
+        )
+        if any(circuit.startswith("hc") for circuit in allowed):
+            if not heating_modes:
+                return None
+            if default_heating_mode not in heating_modes:
+                # A free slot can have an unsupported factory default. Select
+                # an explicitly advertised non-fixed mode for newly created
+                # holidays, but never silently change an occupied holiday or
+                # override the HMI800 HP Light's read-only heating mode.
+                if (
+                    default_heating_mode not in ("FIX_TEMP", "FIX_TEMPERATURE")
+                    or not icom_empty(start)
+                    or components.hmi800_hp_light
+                ):
+                    return None
+                default_heating_mode = next(
+                    (mode for mode in heating_modes if mode == "ECO"),
+                    heating_modes[0],
+                )
     minimum = maximum = step = None
     if fixed is not None and fixed.metadata.writable:
         minimum, maximum = fixed.metadata.minimum, fixed.metadata.maximum
@@ -602,7 +626,7 @@ def icom_write_configuration(
     return HolidayWriteConfiguration(
         date_time_mode="date",
         assigned_to=allowed,
-        heating_mode=current.heating_mode,
+        heating_mode=default_heating_mode,
         dhw_mode=current.dhw_mode,
         ventilation_mode=None,
         thermal_disinfection=None,

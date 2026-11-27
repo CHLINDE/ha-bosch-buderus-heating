@@ -327,8 +327,8 @@ if (!customElements.get("ha-selector-bosch-buderus-holiday-assignment")) {
 }
 
 
-// Keep HA's two validated ISO date fields, but let either open the same
-// range picker. Only the sibling selector in the current form is updated.
+// Keep HA's two validated ISO dates, but expose a single range control.
+// The end selector remains mounted for native form validation and submission.
 class BoschBuderusHolidayDateRange extends HTMLElement {
   constructor() {
     super();
@@ -352,11 +352,13 @@ class BoschBuderusHolidayDateRange extends HTMLElement {
         .days button.inside { background:var(--primary-color); color:var(--text-primary-color,#fff); opacity:.7; }
         .days button.edge { background:var(--primary-color); color:var(--text-primary-color,#fff); }
         .weekday { text-align:center; font-size:.8em; color:var(--secondary-text-color); }
-        .hint,.range { margin:8px 0; font-size:.9em; }
+        .hint,.range,.summary { margin:8px 0; font-size:.9em; }
+        .summary { color:var(--secondary-text-color); white-space:pre-line; }
+        .summary:empty { display:none; }
         button:focus-visible { outline:2px solid var(--primary-color); }
         button:disabled { opacity:.45; cursor:default; }
       </style>
-      <span class="label"></span><button type="button" class="open"></button>
+      <span class="label"></span><button type="button" class="open" aria-haspopup="dialog"></button><div class="summary"></div>
       <dialog><div class="nav"><button type="button" class="prev">‹</button>
       <strong class="month"></strong><button type="button" class="next">›</button></div>
       <div class="hint" aria-live="polite"></div><div class="range"></div>
@@ -374,14 +376,52 @@ class BoschBuderusHolidayDateRange extends HTMLElement {
       if (["Enter", " ", "Escape"].includes(event.key)) event.stopPropagation();
     });
   }
-  set selector(value) { this._config = value?.["bosch-buderus-holiday-date-range"]; this._refresh(); }
+  connectedCallback() { this._schedule(); }
+  disconnectedCallback() {
+    cancelAnimationFrame(this._frame);
+    this._form?.removeEventListener("value-changed", this._onFormChange);
+    this._observer?.disconnect();
+    this._form = undefined;
+    if (this._hiddenHost) this._hiddenHost.style.display = this._previousDisplay;
+    this._hiddenHost = undefined;
+  }
+  _schedule() {
+    if (!this.isConnected) return;
+    cancelAnimationFrame(this._frame);
+    this._frame = requestAnimationFrame(() => this._sync());
+  }
+  _sync() {
+    let form;
+    let host;
+    for (let node = this; node; node = node.parentElement || node.getRootNode()?.host) {
+      if (node.localName === "ha-selector" && !host) host = node;
+      if (node.localName === "ha-form") { form = node; break; }
+    }
+    if (!form?.shadowRoot) return;
+    if (form !== this._form) {
+      this._form = form;
+      this._onFormChange = () => this._schedule();
+      form.addEventListener("value-changed", this._onFormChange);
+      this._observer = new MutationObserver(this._onFormChange);
+      this._observer.observe(form.shadowRoot, { childList:true, subtree:true });
+    }
+    const pair = this._pair();
+    // Only hide the redundant endpoint when both controls exist.
+    if (this._config?.endpoint === "holiday_end" && pair.holiday_start && host && !this._hiddenHost) {
+      this._hiddenHost = host;
+      this._previousDisplay = host.style.display;
+      host.style.display = "none";
+    }
+    this._refresh();
+  }
+  set selector(value) { this._config = value?.["bosch-buderus-holiday-date-range"]; this._refresh(); this._schedule(); }
   set hass(value) { this._hass = value; this._refresh(); }
   set label(value) { this._label = value || ""; this._refresh(); }
-  set value(value) { this._value = value || ""; this._refresh(); }
+  set value(value) { this._value = value || ""; this._refresh(); this._schedule(); }
   get value() { return this._value || ""; }
   set disabled(value) { this._open.disabled = Boolean(value); }
   set required(value) { this._required = Boolean(value); }
-  focus() { this._open.focus(); }
+  focus() { (this._pair().holiday_start || this)._open.focus(); }
   reportValidity() { return !this._required || Boolean(this.value); }
   _text(de, en) { return this._hass?.language?.startsWith("de") ? de : en; }
   _date(value) { return new Date(value + "T12:00:00Z"); }
@@ -392,8 +432,24 @@ class BoschBuderusHolidayDateRange extends HTMLElement {
     }).format(this._date(value)) : "";
   }
   _refresh() {
-    this.shadowRoot.querySelector(".label").textContent = this._label || "";
-    this._open.textContent = this._format(this.value) || this._text("Zeitraum auswählen", "Select date range");
+    const pair = this._pair();
+    const start = pair.holiday_start?.value || "";
+    const end = pair.holiday_end?.value || "";
+    const valid = start && end && end >= start;
+    this.shadowRoot.querySelector(".label").textContent = this._text("Urlaubszeitraum", "Holiday period");
+    this._open.textContent = [this._format(start), this._format(end)].filter(Boolean).join(" – ") || this._text("Zeitraum auswählen", "Select date range");
+    let summary = "";
+    if (valid) {
+      const days = Math.round((this._date(end) - this._date(start)) / 86400000) + 1;
+      const resume = this._date(end);
+      resume.setUTCDate(resume.getUTCDate() + 1);
+      summary = this._text("Urlaubsdauer: ", "Holiday duration: ") + days +
+        (days === 1 ? this._text(" Tag", " day") : this._text(" Tage", " days")) + "\n" +
+        this._text("Normaler Heizbetrieb ab: ", "Normal heating resumes: ") + this._format(this._iso(resume));
+    } else if (start || end) {
+      summary = this._text("Bitte einen gültigen Zeitraum auswählen.", "Select a valid date range.");
+    }
+    this.shadowRoot.querySelector(".summary").textContent = summary;
   }
   _pair() {
     let form;
@@ -412,8 +468,8 @@ class BoschBuderusHolidayDateRange extends HTMLElement {
     this._fields = this._pair();
     this._start = this._fields.holiday_start?.value || "";
     this._end = this._fields.holiday_end?.value || "";
-    this._selectEnd = this._config?.endpoint === "holiday_end" && Boolean(this._start);
-    const anchor = this._selectEnd ? this._end || this._start : this._start;
+    this._selectEnd = false;
+    const anchor = this._start || this._end;
     const date = anchor ? this._date(anchor) : new Date();
     this._month = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1, 12));
     this._render();
@@ -481,6 +537,7 @@ class BoschBuderusHolidayDateRange extends HTMLElement {
         detail:{value}, bubbles:true, composed:true,
       }));
     }
+    this._refresh();
     this._dialog.close();
   }
 }

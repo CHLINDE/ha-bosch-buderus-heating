@@ -80,7 +80,9 @@ class IcomHolidayWriteService:
         self.confirmed = {}
         self.invalidated = set()
         self.last_write_diagnostics = {
-            "operation": operation if operation in ("create", "update", "delete") else "invalid",
+            "operation": operation
+            if operation in ("create", "update", "delete")
+            else "invalid",
             "slot": source_path.rsplit("/", 1)[-1]
             if is_icom_slot(source_path)
             else None,
@@ -310,19 +312,25 @@ class IcomHolidayWriteService:
                 if isinstance(err, ResourceNotFound):
                     count = self.last_write_diagnostics["read_back_not_found_count"]
                     if isinstance(count, int):
-                        self.last_write_diagnostics["read_back_not_found_count"] = count + 1
+                        self.last_write_diagnostics["read_back_not_found_count"] = (
+                            count + 1
+                        )
                     leaf = err.path.rsplit("/", 1)[-1]
                     self.last_write_diagnostics["last_missing_field"] = (
                         leaf if leaf in (*ICOM_FIELDS, "delete") else "other"
                     )
-                    self.last_write_diagnostics["last_readback_status"] = "resource_not_found"
+                    self.last_write_diagnostics["last_readback_status"] = (
+                        "resource_not_found"
+                    )
                 elif isinstance(err, RequestTimeout):
                     self.last_write_diagnostics["last_readback_status"] = "timeout"
                 else:
                     self.last_write_diagnostics["last_readback_status"] = "unavailable"
                 continue
             if conflict(actual):
-                self.last_write_diagnostics["last_readback_status"] = "other_field_changed"
+                self.last_write_diagnostics["last_readback_status"] = (
+                    "other_field_changed"
+                )
                 break
             if confirmed(actual):
                 self.last_write_diagnostics["last_readback_status"] = "field_confirmed"

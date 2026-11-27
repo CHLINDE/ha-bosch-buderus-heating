@@ -487,8 +487,12 @@ async def test_empty_icom_calendar_opens_create_form_without_selection(
 
 
 @pytest.mark.parametrize("creating", [False, True])
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [("2030-11-01", "2030-11-01"), ("2030-12-30", "2031-01-02")],
+)
 async def test_legacy_native_dialog_has_dates_no_clock_or_name_and_saves(
-    hass, enable_custom_integrations, creating
+    hass, enable_custom_integrations, creating, start, end
 ):
     entry, coordinator = flow_entry(hass, RESOURCES)
     result = await _start_holiday_options(hass, entry)
@@ -514,13 +518,17 @@ async def test_legacy_native_dialog_has_dates_no_clock_or_name_and_saves(
     assert "holiday_name" not in fields
     assert fields["holiday_start"].selector_type == "date"
     assert fields["holiday_end"].selector_type == "date"
+    for field in ("holiday_start", "holiday_end"):
+        assert fields[field].serialize()["selector"][
+            "bosch-buderus-holiday-date-range"
+        ]["endpoint"] == field
     assert ("holiday_delete" in fields) is (not creating)
     draft = _holiday_form_input(result)
     draft.update(holiday_start="2030-11-03", holiday_end="2030-11-01")
     result = await hass.config_entries.options.async_configure(result["flow_id"], draft)
     assert result["errors"] == {"holiday_end": "holiday_end_not_after_start"}
     assert _holiday_form_input(result)["holiday_start"] == "2030-11-03"
-    draft.update(holiday_start="2030-11-01", holiday_end="2030-11-04")
+    draft.update(holiday_start=start, holiday_end=end)
     result = await hass.config_entries.options.async_configure(result["flow_id"], draft)
     # Back in the main menu with the note of the saved holiday.
     assert await outcome(hass, result) == (
@@ -534,7 +542,8 @@ async def test_legacy_native_dialog_has_dates_no_clock_or_name_and_saves(
     values = call.args[0 if creating else 1]
     assert (
         values.source_path == (FREE if creating else SLOT)
-        and values.end_date == "2030-11-03"
+        and values.start_date == start
+        and values.end_date == end
     )
 
 

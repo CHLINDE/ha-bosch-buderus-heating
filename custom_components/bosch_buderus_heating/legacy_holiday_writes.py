@@ -15,7 +15,13 @@ from .holiday_writes import (
     HolidayWriteNotConfirmed,
     validate_holiday_values,
 )
-from .holidays import HolidayWriteValues, icom_write_configuration, icom_write_values
+from .holidays import (
+    HolidayWriteValues,
+    icom_delete_command_supported,
+    icom_reset_reference,
+    icom_write_configuration,
+    icom_write_values,
+)
 from .legacy_holidays import (
     HMI800_FIXED_FIELDS,
     ICOM_EMPTY_PERIODS,
@@ -113,15 +119,30 @@ class IcomHolidayWriteService:
         )
         if not paths:
             raise WriteValidationError("The legacy holiday was not discovered")
+        reset_reference = None
+        reset_resources: dict[str, Resource] = {}
+        if operation == "delete" and f"{source_path}/delete" not in resources:
+            reference = icom_reset_reference(resources, source_path)
+            if reference is not None:
+                reference_path, marker = reference
+                fresh = await self.client.get_resource(gateway_id, reference_path)
+                if (
+                    fresh.path != reference_path
+                    or not icom_empty(fresh)
+                    or fresh.value != marker
+                ):
+                    raise HolidayChangedError("The empty holiday reference changed")
+                reset_reference = marker
+                reset_resources[reference_path] = fresh
         current = await self._read(gateway_id, paths)
         # I2: the component list is not read again; the last fresh reading
         # of the coordinator applies its rules to this transaction.
         system_info = resources.get(SYSTEM_INFO_PATH)
         components = icom_components(system_info)
         configuration = icom_write_configuration(
-            {**current, SYSTEM_INFO_PATH: system_info}
+            {**reset_resources, **current, SYSTEM_INFO_PATH: system_info}
             if system_info is not None
-            else current,
+            else {**reset_resources, **current},
             source_path,
         )
         baseline = icom_write_values(current, source_path)
@@ -142,17 +163,35 @@ class IcomHolidayWriteService:
                 )
             self.invalidated.update(paths)
             self.confirmed.clear()
-            self.last_write_diagnostics["planned_fields"] = ("delete",)
-            self.last_write_diagnostics["current_field"] = "delete"
+            explicit = icom_delete_command_supported(current.get(f"{source_path}/delete"))
+            if not explicit and reset_reference is None:
+                raise WriteValidationError("No verified empty holiday reference")
+            field = "delete" if explicit else "startStop"
+            self.last_write_diagnostics["delete_method"] = (
+                "explicit" if explicit else "reset_start_stop"
+            )
+            self.last_write_diagnostics["planned_fields"] = (field,)
+            self.last_write_diagnostics["current_field"] = field
             self.last_write_diagnostics["stage"] = "put"
-            await self._async_put(gateway_id, f"{source_path}/delete", "TRUE")
+            await self._async_put(
+                gateway_id, f"{source_path}/{field}",
+                "TRUE" if explicit else reset_reference,
+            )
             self.last_write_diagnostics["stage"] = "read_back"
             actual = await self._async_read_back(
                 gateway_id,
                 paths,
                 start_path,
-                lambda read: icom_empty(read.get(start_path)),
+                lambda read: icom_empty(read.get(start_path))
+                and (
+                    explicit
+                    or (
+                        not read[f"{source_path}/assignedTo"].has_value
+                        and not read[f"{source_path}/assignedTo"].values
+                    )
+                ),
             )
+            self.last_write_diagnostics["confirmed_fields"] = (field,)
             self.last_write_diagnostics["stage"] = "confirmed"
             return actual[start_path]
         if values is None or values.source_path != source_path:

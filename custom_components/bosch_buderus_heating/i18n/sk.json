@@ -23,7 +23,15 @@
       "date": "Dátum",
       "time": "Čas",
       "deleteFailed": "Potvrdenie odstránenia sa nepodarilo otvoriť. Obnovte stránku a skúste to znova.",
-      "reopen": "Zatvorte a znova otvorte okno."
+      "reopen": "Zatvorte a znova otvorte okno.",
+      "selectRange": "Vyberte rozsah dátumov",
+      "previousMonth": "Predchádzajúci mesiac",
+      "nextMonth": "Nasledujúci mesiac",
+      "lastHolidayDay": "Vyberte posledný deň dovolenky",
+      "firstHolidayDay": "Vyberte prvý deň dovolenky",
+      "cancelRange": "Zrušiť",
+      "applyRange": "Použiť",
+      "selectCircuit": "Vyberte aspoň jeden okruh."
     },
     "schedule": {
       "title": "Týždenný prehľad",

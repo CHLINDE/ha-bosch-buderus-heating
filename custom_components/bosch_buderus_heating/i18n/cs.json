@@ -31,7 +31,12 @@
       "firstHolidayDay": "Vyberte první den dovolené",
       "cancelRange": "Zrušit",
       "applyRange": "Použít",
-      "selectCircuit": "Vyberte alespoň jeden okruh."
+      "selectCircuit": "Vyberte alespoň jeden okruh.",
+      "rangeLabel": "Období dovolené",
+      "durationOne": "Délka dovolené: {days} den",
+      "durationMany": "Délka dovolené (dny): {days}",
+      "resumeHeating": "Obnovení běžného vytápění: {date}",
+      "invalidRange": "Vyberte platný rozsah dat."
     },
     "schedule": {
       "title": "Týdenní přehled",

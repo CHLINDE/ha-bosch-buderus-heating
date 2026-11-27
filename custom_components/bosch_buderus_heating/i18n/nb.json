@@ -31,7 +31,12 @@
       "firstHolidayDay": "Velg første feriedag",
       "cancelRange": "Avbryt",
       "applyRange": "Bruk",
-      "selectCircuit": "Velg minst én krets."
+      "selectCircuit": "Velg minst én krets.",
+      "rangeLabel": "Ferieperiode",
+      "durationOne": "Feriens varighet: {days} dag",
+      "durationMany": "Feriens varighet: {days} dager",
+      "resumeHeating": "Normal oppvarming gjenopptas: {date}",
+      "invalidRange": "Velg et gyldig datointervall."
     },
     "schedule": {
       "title": "Ukevisning",

@@ -32,7 +32,10 @@ class HolidayAssignmentSelector(SelectSelector):
         native = super().serialize()
         return {
             "selector": {
-                "bosch-buderus-holiday-assignment": native["selector"]["select"]
+                "bosch-buderus-holiday-assignment": {
+                    **native["selector"]["select"],
+                    **dialog_config("holiday"),
+                }
             }
         }
 

@@ -116,7 +116,7 @@ from .writes import (
 )
 from .zone_climate import zone_climate_diagnostics
 
-DIAGNOSTICS_SCHEMA_VERSION = 48
+DIAGNOSTICS_SCHEMA_VERSION = 49
 _LOGGER = logging.getLogger(__name__)
 
 if TYPE_CHECKING:

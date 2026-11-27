@@ -17,6 +17,7 @@ from .holiday_writes import (
 )
 from .holidays import (
     HolidayWriteValues,
+    icom_cached_reset_allowed,
     icom_delete_command_supported,
     icom_reset_reference,
     icom_write_configuration,
@@ -81,6 +82,8 @@ class IcomHolidayWriteService:
         source_path: str,
         values: HolidayWriteValues | None,
         expected: HolidayWriteValues | None,
+        *,
+        reset_marker: str | None = None,
     ) -> Resource:
         """Recheck each step; initialize dates before assigning new holidays."""
         self.confirmed = {}
@@ -132,16 +135,19 @@ class IcomHolidayWriteService:
                     raise HolidayChangedError("The empty holiday reference changed")
                 reset_reference = marker
                 reset_resources[reference_path] = fresh
+            elif icom_cached_reset_allowed(resources, reset_marker):
+                reset_reference = reset_marker
         current = await self._read(gateway_id, paths)
         # I2: the component list is not read again; the last fresh reading
         # of the coordinator applies its rules to this transaction.
         system_info = resources.get(SYSTEM_INFO_PATH)
         components = icom_components(system_info)
         configuration = icom_write_configuration(
-            {**reset_resources, **current, SYSTEM_INFO_PATH: system_info}
+            {**resources, **reset_resources, **current, SYSTEM_INFO_PATH: system_info}
             if system_info is not None
-            else {**reset_resources, **current},
+            else {**resources, **reset_resources, **current},
             source_path,
+            reset_marker=reset_reference if icom_cached_reset_allowed(resources, reset_reference) else None,
         )
         baseline = icom_write_values(current, source_path)
         if configuration is None or baseline is None:

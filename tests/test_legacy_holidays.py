@@ -708,7 +708,7 @@ async def test_unconfirmed_legacy_put_is_not_repeated(environment, operation):
 
 
 @pytest.mark.parametrize(
-    "removed", ["delete", "assignedTo", "startStop", "hcMode", "fixTemperature"]
+    "removed", ["assignedTo", "startStop", "hcMode", "fixTemperature"]
 )
 async def test_incomplete_or_read_only_slots_do_not_allow_delete(environment, removed):
     state = wire(environment)
@@ -978,8 +978,8 @@ async def test_icom_create_reads_each_step_only_once(environment):
     await coordinator.async_create_holiday(values)
     slot_paths = 6
     assert puts() == 4
-    # The initial read and one read-back per step: 30 instead of 54 GETs.
-    assert counts["get"] == slot_paths * (1 + puts()) == 30
+    # Initial read, one read-back per step and final creation verification.
+    assert counts["get"] == slot_paths * (2 + puts()) == 36
 
 
 async def test_icom_transient_assignment_404_after_put_recovers_without_retry(
@@ -1155,3 +1155,53 @@ async def test_icom_unchanged_read_back_ends_unconfirmed_after_three_reads(
     assert "LOW" not in repr(trace)
     assert "2030-10-26" not in repr(trace)
     assert "dhw1" not in repr(trace)
+
+
+async def test_icom_creation_accepts_automatic_matching_assignments(environment):
+    """The date write may initialize the requested circuits automatically."""
+    state = wire(environment)
+    coordinator, client, _ = environment
+    original = client.put_resource_value.side_effect
+    assignment = f"{FREE}/assignedTo"
+    values = replace(
+        icom_write_values(state, FREE),
+        start_date="2030-11-01",
+        end_date="2030-11-03",
+        assigned_to=("hc2", "dhw1"),
+    )
+
+    async def put(gateway, path, value):
+        await original(gateway, path, value)
+        if path == f"{FREE}/startStop":
+            state[assignment] = replace(state[assignment], values=values.assigned_to)
+
+    client.put_resource_value.side_effect = put
+    await coordinator.async_create_holiday(values)
+    client.put_icom_holiday_assignments.assert_not_awaited()
+    assert icom_write_values(coordinator.resources, FREE) == values
+
+
+async def test_icom_reset_delete_uses_observed_empty_marker(environment):
+    """Without a delete resource, reset only the selected slot."""
+    state = wire(environment)
+    coordinator, client, _ = environment
+    delete = f"{SLOT}/delete"
+    state.pop(delete)
+    coordinator.resources.pop(delete)
+    coordinator.data.pop(delete)
+    baseline = icom_write_values(state, SLOT)
+    original = client.put_resource_value.side_effect
+    assignment = f"{SLOT}/assignedTo"
+
+    async def put(gateway, path, value):
+        await original(gateway, path, value)
+        if path == START:
+            state[assignment] = replace(state[assignment], values=())
+
+    client.put_resource_value.side_effect = put
+    await coordinator.async_delete_holiday(2, expected=baseline)
+    client.put_resource_value.assert_awaited_once_with(
+        "synthetic-gateway", START, state[f"{FREE}/startStop"].value
+    )
+    client.put_icom_holiday_assignments.assert_not_awaited()
+    assert not parse_holiday_state(coordinator.resources).periods

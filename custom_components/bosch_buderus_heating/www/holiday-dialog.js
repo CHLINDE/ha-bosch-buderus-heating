@@ -194,3 +194,100 @@ if (!customElements.get("ha-selector-bosch-buderus-holiday-delete")) {
 if (!customElements.get("ha-selector-bosch-buderus-holiday-datetime")) {
   customElements.define("ha-selector-bosch-buderus-holiday-datetime", BoschBuderusHolidayDateTime);
 }
+
+ 
+// Scope visibility to this holiday form, without patching HA prototypes.
+class BoschBuderusHolidayAssignment extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this.shadowRoot.innerHTML = '<style>:host {display:block}</style><ha-selector></ha-selector>';
+    this._native = this.shadowRoot.querySelector("ha-selector");
+    this._native.addEventListener("value-changed", (event) => {
+      event.stopPropagation();
+      this.value = event.detail.value;
+      this.dispatchEvent(new CustomEvent("value-changed", {
+        detail: { value: this._value }, bubbles: true, composed: true,
+      }));
+    });
+    this._onFormChange = () => this._schedule();
+  }
+  connectedCallback() {
+    this._schedule();
+  }
+  disconnectedCallback() {
+    this._form?.removeEventListener("value-changed", this._onFormChange);
+    this._observer?.disconnect();
+    cancelAnimationFrame(this._frame);
+    for (const [field, display] of this._hidden || []) field.style.display = display;
+    this._hidden?.clear();
+    this._form = undefined;
+  }
+  set value(value) {
+    this._value = value;
+    this._native.value = value;
+    this._schedule();
+  }
+  get value() { return this._value; }
+  set selector(value) {
+    this._native.selector = { select: value?.["bosch-buderus-holiday-assignment"] || {} };
+  }
+  set hass(value) { this._native.hass = value; }
+  set label(value) { this._native.label = value; }
+  set helper(value) { this._native.helper = value; }
+  set disabled(value) { this._native.disabled = value; }
+  set required(value) { this._native.required = value; }
+  set narrow(value) { this._native.narrow = value; }
+  focus() { this._native.focus?.(); }
+  reportValidity() {
+    return Array.isArray(this._value) && this._value.length > 0;
+  }
+  _schedule() {
+    if (!this.isConnected) return;
+    cancelAnimationFrame(this._frame);
+    this._frame = requestAnimationFrame(() => this._sync());
+  }
+  _sync() {
+    if (!this.isConnected) return;
+    let form;
+    for (let node = this; node; node = node.parentElement || node.getRootNode()?.host) {
+      if (node.localName === "ha-form") { form = node; break; }
+    }
+    if (!form?.shadowRoot) return;
+    if (form !== this._form) {
+      this._form?.removeEventListener("value-changed", this._onFormChange);
+      this._observer?.disconnect();
+      this._form = form;
+      this._hidden = new Map();
+      form.addEventListener("value-changed", this._onFormChange);
+      this._observer = new MutationObserver(this._onFormChange);
+      this._observer.observe(form.shadowRoot, { childList: true, subtree: true });
+    }
+    const selected = Array.isArray(this._value) ? this._value : [];
+    const has = (prefix) => selected.some((item) => String(item).toLowerCase().startsWith(prefix));
+    const heating = has("hc");
+    const dhw = has("dhw");
+    const mode = String(form.data?.holiday_heating_mode || "").toLowerCase();
+    const visibility = {
+      holiday_heating_mode: heating,
+      holiday_fix_temperature: heating && ["fix_temp", "fix_temperature"].includes(mode),
+      holiday_dhw_mode: dhw,
+      holiday_thermal_disinfection: dhw,
+      holiday_ventilation_mode: has("vent"),
+    };
+    for (const field of form.shadowRoot.querySelectorAll("ha-selector")) {
+      const name = field.name || field.schema?.name;
+      if (!Object.hasOwn(visibility, name)) continue;
+      if (!visibility[name] && !this._hidden.has(field)) {
+        this._hidden.set(field, field.style.display);
+        field.style.display = "none";
+      } else if (visibility[name] && this._hidden.has(field)) {
+        field.style.display = this._hidden.get(field);
+        this._hidden.delete(field);
+      }
+    }
+  }
+}
+if (!customElements.get("ha-selector-bosch-buderus-holiday-assignment")) {
+  customElements.define("ha-selector-bosch-buderus-holiday-assignment", BoschBuderusHolidayAssignment);
+}

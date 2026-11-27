@@ -40,6 +40,7 @@ from custom_components.bosch_buderus_heating.pointt import (
     AuthenticationError,
     RateLimited,
     RequestTimeout,
+    ResourceNotFound,
     WriteNotConfirmed,
     WriteValidationError,
 )
@@ -979,6 +980,78 @@ async def test_icom_create_reads_each_step_only_once(environment):
     assert puts() == 4
     # The initial read and one read-back per step: 30 instead of 54 GETs.
     assert counts["get"] == slot_paths * (1 + puts()) == 30
+
+
+async def test_icom_transient_assignment_404_after_put_recovers_without_retry(
+    environment,
+):
+    """The gateway can briefly omit assignedTo after accepting a mode PUT."""
+    state = wire(environment)
+    coordinator, client, _ = environment
+    service = coordinator._icom_holiday_write_service
+    original_put = client.put_resource_value.side_effect
+    original_get = client.get_resource.side_effect
+    write_sent = False
+    missing_once = True
+
+    async def put(gateway, path, value):
+        nonlocal write_sent
+        await original_put(gateway, path, value)
+        write_sent = True
+
+    async def get(gateway, path):
+        nonlocal missing_once
+        if write_sent and missing_once and path == f"{SLOT}/assignedTo":
+            missing_once = False
+            raise ResourceNotFound(path, 404)
+        return await original_get(gateway, path)
+
+    client.put_resource_value.side_effect = put
+    client.get_resource.side_effect = get
+    baseline = icom_write_values(state, SLOT)
+    await coordinator.async_update_holiday(
+        2, replace(baseline, dhw_mode="LOW"), expected=baseline
+    )
+    client.put_resource_value.assert_awaited_once_with(
+        "synthetic-gateway", f"{SLOT}/dhwMode", "LOW"
+    )
+    assert [call.args[0] for call in service._sleep.await_args_list] == [0.5, 1.0]
+    assert coordinator.data[START].freshness is Freshness.FRESH
+
+
+async def test_icom_persistent_assignment_404_stops_without_another_put(
+    environment,
+):
+    """A permanent 404 is never treated as proof the holiday was saved."""
+    state = wire(environment)
+    coordinator, client, _ = environment
+    original_put = client.put_resource_value.side_effect
+    original_get = client.get_resource.side_effect
+    write_sent = False
+
+    async def put(gateway, path, value):
+        nonlocal write_sent
+        await original_put(gateway, path, value)
+        write_sent = True
+
+    async def get(gateway, path):
+        if write_sent and path == f"{SLOT}/assignedTo":
+            raise ResourceNotFound(path, 404)
+        return await original_get(gateway, path)
+
+    client.put_resource_value.side_effect = put
+    client.get_resource.side_effect = get
+    baseline = icom_write_values(state, SLOT)
+    with pytest.raises(WriteNotConfirmed):
+        await coordinator.async_update_holiday(
+            2, replace(baseline, dhw_mode="LOW"), expected=baseline
+        )
+    client.put_resource_value.assert_awaited_once_with(
+        "synthetic-gateway", f"{SLOT}/dhwMode", "LOW"
+    )
+    assert len(coordinator._icom_holiday_write_service._sleep.await_args_list) == 3
+    assert not coordinator.data[START].available
+    assert coordinator.data[START].freshness is Freshness.STALE
 
 
 async def test_icom_delayed_read_back_is_read_again_without_another_put(environment):

@@ -146,6 +146,7 @@ class IcomHolidayWriteService:
                 start_path,
                 lambda read: icom_empty(read.get(start_path)),
             )
+            self.last_write_diagnostics["stage"] = "confirmed"
             return actual[start_path]
         if values is None or values.source_path != source_path:
             raise WriteValidationError("Legacy holiday source changed")

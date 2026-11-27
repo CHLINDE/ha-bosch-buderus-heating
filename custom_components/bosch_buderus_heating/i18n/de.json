@@ -23,7 +23,15 @@
       "date": "Datum",
       "time": "Uhrzeit",
       "deleteFailed": "Die Löschbestätigung konnte nicht geöffnet werden. Bitte lade die Seite neu und versuche es erneut.",
-      "reopen": "Bitte schließe den Dialog und öffne ihn erneut."
+      "reopen": "Bitte schließe den Dialog und öffne ihn erneut.",
+      "selectRange": "Zeitraum auswählen",
+      "previousMonth": "Vorheriger Monat",
+      "nextMonth": "Nächster Monat",
+      "lastHolidayDay": "Letzten Urlaubstag auswählen",
+      "firstHolidayDay": "Ersten Urlaubstag auswählen",
+      "cancelRange": "Abbrechen",
+      "applyRange": "Übernehmen",
+      "selectCircuit": "Mindestens einen Kreis auswählen."
     },
     "schedule": {
       "title": "Wochenansicht",

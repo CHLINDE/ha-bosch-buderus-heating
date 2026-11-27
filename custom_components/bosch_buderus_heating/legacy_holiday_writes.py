@@ -31,6 +31,7 @@ from .pointt import (
     RateLimited,
     RequestTimeout,
     Resource,
+    ResourceNotFound,
     ServiceUnavailable,
     WriteValidationError,
 )
@@ -253,13 +254,20 @@ class IcomHolidayWriteService:
         yet updated is read again after 0.5, 1 and 2 seconds (iCom gateways:
         1, 2, 3 and 4 seconds, I1).
         """
-        last_temporary_error: RequestTimeout | ServiceUnavailable | None = None
+        # A real iCom gateway has returned HTTP 404 for assignedTo directly
+        # after accepting a holiday-mode PUT (204), even though its preflight
+        # GETs succeeded. Treat missing *read-back* leaves as potentially
+        # transient; never reinterpret an initial missing resource as writable
+        # and never retry the PUT.
+        last_temporary_error: (
+            RequestTimeout | ResourceNotFound | ServiceUnavailable | None
+        ) = None
         actual: dict[str, Resource] | None = None
         for delay in self._read_back_delays:
             await self._sleep(delay)
             try:
                 actual = await self._read(gateway_id, paths)
-            except (RequestTimeout, ServiceUnavailable) as err:
+            except (RequestTimeout, ResourceNotFound, ServiceUnavailable) as err:
                 last_temporary_error = err
                 continue
             if conflict(actual):

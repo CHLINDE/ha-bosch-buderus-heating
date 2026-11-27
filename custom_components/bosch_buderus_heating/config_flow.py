@@ -1621,7 +1621,9 @@ class BoschBuderusOptionsFlow(
                 dhw_selected = any(item.startswith("dhw") for item in selected)
                 ventilation_selected = any(item.startswith("vent") for item in selected)
                 heating_mode = _holiday_mode_from_form(
-                    user_input.get(CONF_HOLIDAY_HEATING_MODE) if heating_selected else None,
+                    user_input.get(CONF_HOLIDAY_HEATING_MODE)
+                    if heating_selected
+                    else None,
                     current.heating_mode,
                     choice.configuration.heating_modes,
                 )
@@ -1636,12 +1638,16 @@ class BoschBuderusOptionsFlow(
                         choice.configuration.dhw_modes,
                     ),
                     ventilation_mode=_holiday_mode_from_form(
-                        user_input.get(CONF_HOLIDAY_VENTILATION_MODE) if ventilation_selected else None,
+                        user_input.get(CONF_HOLIDAY_VENTILATION_MODE)
+                        if ventilation_selected
+                        else None,
                         current.ventilation_mode,
                         choice.configuration.ventilation_modes,
                     ),
                     thermal_disinfection=_holiday_mode_from_form(
-                        user_input.get(CONF_HOLIDAY_THERMAL_DISINFECTION) if dhw_selected else None,
+                        user_input.get(CONF_HOLIDAY_THERMAL_DISINFECTION)
+                        if dhw_selected
+                        else None,
                         current.thermal_disinfection,
                         choice.configuration.thermal_disinfection_modes,
                     ),
@@ -1649,7 +1655,8 @@ class BoschBuderusOptionsFlow(
                         user_input.get(
                             CONF_HOLIDAY_FIX_TEMPERATURE, current.fix_temperature
                         )
-                        if heating_selected and heating_mode in ("FIX_TEMP", "FIX_TEMPERATURE")
+                        if heating_selected
+                        and heating_mode in ("FIX_TEMP", "FIX_TEMPERATURE")
                         else current.fix_temperature
                     ),
                 )
@@ -1742,7 +1749,7 @@ class BoschBuderusOptionsFlow(
                 period_configuration = parse_holiday_write_configuration(
                     resources,
                     source_path=period.source_path,
-                    reset_marker=coordinator.icom_reset_marker,
+                    reset_marker=getattr(coordinator, "icom_reset_marker", None),
                 )
                 if (
                     holiday_id is None

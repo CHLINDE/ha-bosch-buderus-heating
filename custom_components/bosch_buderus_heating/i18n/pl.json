@@ -31,7 +31,12 @@
       "firstHolidayDay": "Wybierz pierwszy dzień urlopu",
       "cancelRange": "Anuluj",
       "applyRange": "Zastosuj",
-      "selectCircuit": "Wybierz co najmniej jeden obieg."
+      "selectCircuit": "Wybierz co najmniej jeden obieg.",
+      "rangeLabel": "Okres urlopu",
+      "durationOne": "Czas trwania urlopu: {days} dzień",
+      "durationMany": "Czas trwania urlopu: {days} dni",
+      "resumeHeating": "Powrót do normalnego ogrzewania: {date}",
+      "invalidRange": "Wybierz prawidłowy zakres dat."
     },
     "schedule": {
       "title": "Widok tygodniowy",

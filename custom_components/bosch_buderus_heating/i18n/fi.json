@@ -31,7 +31,12 @@
       "firstHolidayDay": "Valitse ensimmäinen lomapäivä",
       "cancelRange": "Peruuta",
       "applyRange": "Käytä",
-      "selectCircuit": "Valitse vähintään yksi piiri."
+      "selectCircuit": "Valitse vähintään yksi piiri.",
+      "rangeLabel": "Lomajakso",
+      "durationOne": "Loman kesto: {days} päivä",
+      "durationMany": "Loman kesto: {days} päivää",
+      "resumeHeating": "Normaali lämmitys jatkuu: {date}",
+      "invalidRange": "Valitse kelvollinen ajanjakso."
     },
     "schedule": {
       "title": "Viikkonäkymä",

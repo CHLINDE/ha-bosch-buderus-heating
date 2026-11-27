@@ -31,7 +31,12 @@
       "firstHolidayDay": "Izberite prvi dan dopusta",
       "cancelRange": "Prekliči",
       "applyRange": "Uporabi",
-      "selectCircuit": "Izberite vsaj en krog."
+      "selectCircuit": "Izberite vsaj en krog.",
+      "rangeLabel": "Obdobje dopusta",
+      "durationOne": "Trajanje dopusta: {days} dan",
+      "durationMany": "Trajanje dopusta (dnevi): {days}",
+      "resumeHeating": "Nadaljevanje običajnega ogrevanja: {date}",
+      "invalidRange": "Izberite veljavno časovno obdobje."
     },
     "schedule": {
       "title": "Tedenski pogled",

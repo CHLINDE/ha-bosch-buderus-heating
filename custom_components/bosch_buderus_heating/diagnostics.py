@@ -842,6 +842,12 @@ def _gateway_diagnostics(
             "supported_resources": holiday_state.supported_paths,
             "valid_period_count": len(holiday_state.periods),
             "invalid_period_count": holiday_state.invalid_period_count,
+            # Bounded write trace: operation, field names, status codes and
+            # attempt counts only; no private dates, temperatures or IDs.
+            "icom_last_write": (
+                coordinator._icom_holiday_write_service.last_write_diagnostics
+                or None
+            ),
             "active_status_available": holiday_state.active is not None,
             "timezone_source": holiday_state.timezone_source,
             "calendar_writes_available": parse_holiday_write_configuration(

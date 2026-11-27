@@ -354,7 +354,9 @@ def parse_holiday_write_configuration(
 ) -> HolidayWriteConfiguration | None:
     """Return a strict write configuration for the dedicated holiday endpoint."""
     if source_path is not None and source_path != HOLIDAY_CREATE_PATH:
-        return icom_write_configuration(resources, source_path, reset_marker=reset_marker)
+        return icom_write_configuration(
+            resources, source_path, reset_marker=reset_marker
+        )
     if source_path is None and HOLIDAY_LIST_PATH not in resources:
         return next(
             (
@@ -534,7 +536,10 @@ def icom_write_values(
 
 
 def icom_write_configuration(
-    resources: Mapping[str, Resource], source_path: str, *, reset_marker: str | None = None
+    resources: Mapping[str, Resource],
+    source_path: str,
+    *,
+    reset_marker: str | None = None,
 ) -> HolidayWriteConfiguration | None:
     """Derive each slot's capabilities from its own current metadata."""
     current = icom_write_values(resources, source_path)
@@ -641,7 +646,8 @@ def icom_write_configuration(
         fix_temperature_min=minimum,
         fix_temperature_max=maximum,
         source_path=source_path,
-        can_delete=icom_delete_command_supported(delete) or (
+        can_delete=icom_delete_command_supported(delete)
+        or (
             delete is None
             and icom_dates(start) is not None
             and start.metadata.writable
@@ -663,7 +669,10 @@ def icom_delete_command_supported(delete: Resource | None) -> bool:
         and delete.metadata.resource_type == "stringValue"
         and delete.metadata.unit in (None, "")
         and not delete.has_values
-        and (not delete.metadata.allowed_values or "TRUE" in delete.metadata.allowed_values)
+        and (
+            not delete.metadata.allowed_values
+            or "TRUE" in delete.metadata.allowed_values
+        )
     )
 
 
@@ -686,7 +695,9 @@ def icom_cached_reset_allowed(
     return (
         marker in ICOM_EMPTY_PERIODS
         and bool(slots)
-        and all(icom_dates(resources.get(f"{slot}/startStop")) is not None for slot in slots)
+        and all(
+            icom_dates(resources.get(f"{slot}/startStop")) is not None for slot in slots
+        )
     )
 
 
@@ -700,7 +711,11 @@ def icom_reset_reference(
             continue
         path = f"{slot}/startStop"
         resource = resources.get(path)
-        if resource is not None and icom_empty(resource) and isinstance(resource.value, str):
+        if (
+            resource is not None
+            and icom_empty(resource)
+            and isinstance(resource.value, str)
+        ):
             candidates.append((path, resource.value))
     if len({value for _, value in candidates}) != 1:
         return None

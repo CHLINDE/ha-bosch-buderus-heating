@@ -23,7 +23,15 @@
       "date": "Dato",
       "time": "Tidspunkt",
       "deleteFailed": "Slettebekreftelsen kunne ikke åpnes. Last siden på nytt og prøv igjen.",
-      "reopen": "Lukk og åpne dialogen på nytt."
+      "reopen": "Lukk og åpne dialogen på nytt.",
+      "selectRange": "Velg datointervall",
+      "previousMonth": "Forrige måned",
+      "nextMonth": "Neste måned",
+      "lastHolidayDay": "Velg siste feriedag",
+      "firstHolidayDay": "Velg første feriedag",
+      "cancelRange": "Avbryt",
+      "applyRange": "Bruk",
+      "selectCircuit": "Velg minst én krets."
     },
     "schedule": {
       "title": "Ukevisning",

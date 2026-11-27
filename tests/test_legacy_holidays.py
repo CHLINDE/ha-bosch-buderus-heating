@@ -487,8 +487,12 @@ async def test_empty_icom_calendar_opens_create_form_without_selection(
 
 
 @pytest.mark.parametrize("creating", [False, True])
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [("2030-11-01", "2030-11-01"), ("2030-12-30", "2031-01-02")],
+)
 async def test_legacy_native_dialog_has_dates_no_clock_or_name_and_saves(
-    hass, enable_custom_integrations, creating
+    hass, enable_custom_integrations, creating, start, end
 ):
     entry, coordinator = flow_entry(hass, RESOURCES)
     result = await _start_holiday_options(hass, entry)
@@ -514,13 +518,20 @@ async def test_legacy_native_dialog_has_dates_no_clock_or_name_and_saves(
     assert "holiday_name" not in fields
     assert fields["holiday_start"].selector_type == "date"
     assert fields["holiday_end"].selector_type == "date"
+    for field in ("holiday_start", "holiday_end"):
+        assert (
+            fields[field].serialize()["selector"]["bosch-buderus-holiday-date-range"][
+                "endpoint"
+            ]
+            == field
+        )
     assert ("holiday_delete" in fields) is (not creating)
     draft = _holiday_form_input(result)
     draft.update(holiday_start="2030-11-03", holiday_end="2030-11-01")
     result = await hass.config_entries.options.async_configure(result["flow_id"], draft)
     assert result["errors"] == {"holiday_end": "holiday_end_not_after_start"}
     assert _holiday_form_input(result)["holiday_start"] == "2030-11-03"
-    draft.update(holiday_start="2030-11-01", holiday_end="2030-11-04")
+    draft.update(holiday_start=start, holiday_end=end)
     result = await hass.config_entries.options.async_configure(result["flow_id"], draft)
     # Back in the main menu with the note of the saved holiday.
     assert await outcome(hass, result) == (
@@ -534,7 +545,8 @@ async def test_legacy_native_dialog_has_dates_no_clock_or_name_and_saves(
     values = call.args[0 if creating else 1]
     assert (
         values.source_path == (FREE if creating else SLOT)
-        and values.end_date == "2030-11-03"
+        and values.start_date == start
+        and values.end_date == end
     )
 
 
@@ -708,7 +720,7 @@ async def test_unconfirmed_legacy_put_is_not_repeated(environment, operation):
 
 
 @pytest.mark.parametrize(
-    "removed", ["delete", "assignedTo", "startStop", "hcMode", "fixTemperature"]
+    "removed", ["assignedTo", "startStop", "hcMode", "fixTemperature"]
 )
 async def test_incomplete_or_read_only_slots_do_not_allow_delete(environment, removed):
     state = wire(environment)
@@ -978,8 +990,8 @@ async def test_icom_create_reads_each_step_only_once(environment):
     await coordinator.async_create_holiday(values)
     slot_paths = 6
     assert puts() == 4
-    # The initial read and one read-back per step: 30 instead of 54 GETs.
-    assert counts["get"] == slot_paths * (1 + puts()) == 30
+    # Initial read, one read-back per step and final creation verification.
+    assert counts["get"] == slot_paths * (2 + puts()) == 36
 
 
 async def test_icom_transient_assignment_404_after_put_recovers_without_retry(
@@ -1017,6 +1029,12 @@ async def test_icom_transient_assignment_404_after_put_recovers_without_retry(
     )
     assert [call.args[0] for call in service._sleep.await_args_list] == [0.5, 1.0]
     assert coordinator.data[START].freshness is Freshness.FRESH
+    trace = service.last_write_diagnostics
+    assert trace["stage"] == "confirmed"
+    assert trace["current_field"] == "dhwMode"
+    assert trace["read_back_not_found_count"] == 1
+    assert trace["last_missing_field"] == "assignedTo"
+    assert trace["last_readback_status"] == "field_confirmed"
 
 
 async def test_icom_persistent_assignment_404_stops_without_another_put(
@@ -1057,6 +1075,12 @@ async def test_icom_persistent_assignment_404_stops_without_another_put(
     assignment = coordinator.data[f"{SLOT}/assignedTo"]
     assert not assignment.available
     assert assignment.freshness is Freshness.STALE
+    trace = coordinator._icom_holiday_write_service.last_write_diagnostics
+    assert trace["stage"] == "unconfirmed"
+    assert trace["current_field"] == "dhwMode"
+    assert trace["read_back_not_found_count"] == 3
+    assert trace["last_missing_field"] == "assignedTo"
+    assert trace["last_readback_status"] == "resource_not_found"
 
 
 async def test_icom_delayed_read_back_is_read_again_without_another_put(environment):
@@ -1131,3 +1155,99 @@ async def test_icom_unchanged_read_back_ends_unconfirmed_after_three_reads(
     assert counts["get"] == 6 * (1 + 3)
     # The last complete read is authoritative and shown as it is.
     assert coordinator.data[f"{SLOT}/dhwMode"].resource.value == "OFF"
+    trace = coordinator._icom_holiday_write_service.last_write_diagnostics
+    assert trace["operation"] == "update"
+    assert trace["slot"] == "hm2"
+    assert trace["stage"] == "unconfirmed"
+    assert trace["planned_fields"] == ("dhwMode",)
+    assert trace["current_field"] == "dhwMode"
+    assert trace["read_back_attempts"] == 3
+    assert trace["last_readback_status"] == "field_mismatch"
+    assert trace["read_back_not_found_count"] == 0
+    assert "LOW" not in repr(trace)
+    assert "2030-10-26" not in repr(trace)
+    assert "dhw1" not in repr(trace)
+
+
+async def test_icom_creation_accepts_automatic_matching_assignments(environment):
+    """The date write may initialize the requested circuits automatically."""
+    state = wire(environment)
+    coordinator, client, _ = environment
+    original = client.put_resource_value.side_effect
+    assignment = f"{FREE}/assignedTo"
+    values = replace(
+        icom_write_values(state, FREE),
+        start_date="2030-11-01",
+        end_date="2030-11-03",
+        assigned_to=("hc2", "dhw1"),
+    )
+
+    async def put(gateway, path, value):
+        await original(gateway, path, value)
+        if path == f"{FREE}/startStop":
+            state[assignment] = replace(state[assignment], values=values.assigned_to)
+
+    client.put_resource_value.side_effect = put
+    await coordinator.async_create_holiday(values)
+    client.put_icom_holiday_assignments.assert_not_awaited()
+    assert icom_write_values(coordinator.resources, FREE) == values
+
+
+async def test_icom_reset_delete_uses_observed_empty_marker(environment):
+    """Without a delete resource, reset only the selected slot."""
+    state = wire(environment)
+    coordinator, client, _ = environment
+    delete = f"{SLOT}/delete"
+    state.pop(delete)
+    coordinator.resources.pop(delete)
+    coordinator.data.pop(delete)
+    baseline = icom_write_values(state, SLOT)
+    original = client.put_resource_value.side_effect
+    assignment = f"{SLOT}/assignedTo"
+
+    async def put(gateway, path, value):
+        await original(gateway, path, value)
+        if path == START:
+            state[assignment] = replace(state[assignment], values=())
+
+    client.put_resource_value.side_effect = put
+    await coordinator.async_delete_holiday(2, expected=baseline)
+    client.put_resource_value.assert_awaited_once_with(
+        "synthetic-gateway", START, state[f"{FREE}/startStop"].value
+    )
+    client.put_icom_holiday_assignments.assert_not_awaited()
+    assert not parse_holiday_state(coordinator.resources).periods
+
+
+@pytest.mark.parametrize("marker", [None, "invalid", "2017-01-01/2017-01-01"])
+async def test_icom_full_calendar_requires_known_reset_marker(environment, marker):
+    """Only a previously observed marker permits deletion of a full calendar."""
+    state = wire(environment)
+    coordinator, client, _ = environment
+    delete = f"{SLOT}/delete"
+    state.pop(delete)
+    free_start = f"{FREE}/startStop"
+    state[free_start] = replace(state[free_start], value="2031-01-01/2031-01-02")
+    coordinator.resources = dict(state)
+    coordinator.data = snapshots(*state.values())
+    coordinator.icom_reset_marker = marker
+    baseline = icom_write_values(state, SLOT)
+    original = client.put_resource_value.side_effect
+
+    async def put(gateway, path, value):
+        await original(gateway, path, value)
+        if path == START:
+            assignment = f"{SLOT}/assignedTo"
+            state[assignment] = replace(state[assignment], values=())
+
+    client.put_resource_value.side_effect = put
+    if marker != "2017-01-01/2017-01-01":
+        with pytest.raises(WriteValidationError):
+            await coordinator.async_delete_holiday(2, expected=baseline)
+        client.put_resource_value.assert_not_awaited()
+    else:
+        await coordinator.async_delete_holiday(2, expected=baseline)
+        client.put_resource_value.assert_awaited_once_with(
+            "synthetic-gateway", START, marker
+        )
+        assert state[free_start].value == "2031-01-01/2031-01-02"

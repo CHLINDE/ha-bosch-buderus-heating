@@ -23,7 +23,15 @@
       "date": "Date",
       "time": "Heure",
       "deleteFailed": "Impossible d'ouvrir la confirmation de suppression. Veuillez recharger la page et réessayer.",
-      "reopen": "Veuillez fermer puis rouvrir la boîte de dialogue."
+      "reopen": "Veuillez fermer puis rouvrir la boîte de dialogue.",
+      "selectRange": "Sélectionner une période",
+      "previousMonth": "Mois précédent",
+      "nextMonth": "Mois suivant",
+      "lastHolidayDay": "Sélectionner le dernier jour de vacances",
+      "firstHolidayDay": "Sélectionner le premier jour de vacances",
+      "cancelRange": "Annuler",
+      "applyRange": "Appliquer",
+      "selectCircuit": "Sélectionnez au moins un circuit."
     },
     "schedule": {
       "title": "Vue hebdomadaire",

@@ -1050,8 +1050,13 @@ async def test_icom_persistent_assignment_404_stops_without_another_put(
         "synthetic-gateway", f"{SLOT}/dhwMode", "LOW"
     )
     assert len(coordinator._icom_holiday_write_service._sleep.await_args_list) == 3
-    assert not coordinator.data[START].available
-    assert coordinator.data[START].freshness is Freshness.STALE
+    # Successfully read leaves stay authoritative; only the missing leaf
+    # remains stale and the overall operation is not confirmed.
+    assert coordinator.data[START].available
+    assert coordinator.data[START].freshness is Freshness.FRESH
+    assignment = coordinator.data[f"{SLOT}/assignedTo"]
+    assert not assignment.available
+    assert assignment.freshness is Freshness.STALE
 
 
 async def test_icom_delayed_read_back_is_read_again_without_another_put(environment):

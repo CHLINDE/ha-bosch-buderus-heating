@@ -639,19 +639,44 @@ def icom_write_configuration(
         fix_temperature_min=minimum,
         fix_temperature_max=maximum,
         source_path=source_path,
-        can_delete=bool(
-            delete is not None
-            and delete.metadata.writable
-            and delete.metadata.resource_type == "stringValue"
-            and delete.metadata.unit in (None, "")
-            and not delete.has_values
-            and (
-                not delete.metadata.allowed_values
-                or "TRUE" in delete.metadata.allowed_values
-            )
+        can_delete=icom_delete_command_supported(delete) or (
+            delete is None
+            and icom_dates(start) is not None
+            and start.metadata.writable
+            and not components.hmi800_hp_light
+            and icom_reset_reference(resources, source_path) is not None
         ),
         fix_temperature_step=step,
     )
+
+
+def icom_delete_command_supported(delete: Resource | None) -> bool:
+    """Check the advertised explicit delete command."""
+    return bool(
+        delete is not None
+        and delete.metadata.writable
+        and delete.metadata.resource_type == "stringValue"
+        and delete.metadata.unit in (None, "")
+        and not delete.has_values
+        and (not delete.metadata.allowed_values or "TRUE" in delete.metadata.allowed_values)
+    )
+
+
+def icom_reset_reference(
+    resources: Mapping[str, Resource], source_path: str
+) -> tuple[str, str] | None:
+    """Use only a recognized empty marker observed on another slot."""
+    candidates: list[tuple[str, str]] = []
+    for slot in icom_slots(resources):
+        if slot == source_path:
+            continue
+        path = f"{slot}/startStop"
+        resource = resources.get(path)
+        if resource is not None and icom_empty(resource) and isinstance(resource.value, str):
+            candidates.append((path, resource.value))
+    if len({value for _, value in candidates}) != 1:
+        return None
+    return candidates[0]
 
 
 def _resource_payloads(resource: Resource) -> Iterable[JsonValue]:

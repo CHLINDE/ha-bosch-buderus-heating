@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, override
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.selector import BooleanSelector, TextSelector
+from homeassistant.helpers.selector import BooleanSelector, SelectSelector, TextSelector
 
 from .ha_schema import validation as vol
 from .i18n import dialog_config
@@ -17,6 +17,19 @@ from .log_helpers import log_failure
 DELETE_FIELD = "holiday_delete"
 _REGISTERED = "bosch_buderus_heating.holiday_ui"
 _LOGGER = logging.getLogger(__name__)
+
+
+class HolidayAssignmentSelector(SelectSelector):
+    """Render the native circuit selector with scoped field visibility."""
+
+    @override
+    def serialize(self) -> dict[str, Any]:
+        native = super().serialize()
+        return {
+            "selector": {
+                "bosch-buderus-holiday-assignment": native["selector"]["select"]
+            }
+        }
 
 
 class HolidayDeleteSelector(BooleanSelector):

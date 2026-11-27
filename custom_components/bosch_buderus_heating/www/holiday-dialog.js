@@ -325,3 +325,165 @@ class BoschBuderusHolidayAssignment extends HTMLElement {
 if (!customElements.get("ha-selector-bosch-buderus-holiday-assignment")) {
   customElements.define("ha-selector-bosch-buderus-holiday-assignment", BoschBuderusHolidayAssignment);
 }
+
+
+// Keep HA's two validated ISO date fields, but let either open the same
+// range picker. Only the sibling selector in the current form is updated.
+class BoschBuderusHolidayDateRange extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host { display:block; }
+        button { font:inherit; color:var(--primary-text-color); cursor:pointer; }
+        .open { width:100%; min-height:56px; padding:12px; text-align:start;
+          background:var(--input-fill-color, var(--secondary-background-color));
+          border:0; border-bottom:1px solid var(--secondary-text-color); border-radius:4px; }
+        .label { display:block; margin-bottom:8px; }
+        dialog { color:var(--primary-text-color); background:var(--card-background-color);
+          border:1px solid var(--divider-color); border-radius:12px; padding:16px;
+          width:min(340px, calc(100vw - 48px)); max-height:85vh; box-sizing:border-box; }
+        dialog::backdrop { background:#0008; }
+        .nav,.actions { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+        .nav button,.actions button { padding:8px; border:0; background:transparent; min-height:40px; }
+        .days { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:2px; margin:12px 0; }
+        .days button { border:0; background:transparent; min-height:36px; border-radius:6px; padding:2px; }
+        .days button.inside { background:var(--primary-color); color:var(--text-primary-color,#fff); opacity:.7; }
+        .days button.edge { background:var(--primary-color); color:var(--text-primary-color,#fff); }
+        .weekday { text-align:center; font-size:.8em; color:var(--secondary-text-color); }
+        .hint,.range { margin:8px 0; font-size:.9em; }
+        button:focus-visible { outline:2px solid var(--primary-color); }
+        button:disabled { opacity:.45; cursor:default; }
+      </style>
+      <span class="label"></span><button type="button" class="open"></button>
+      <dialog><div class="nav"><button type="button" class="prev">‹</button>
+      <strong class="month"></strong><button type="button" class="next">›</button></div>
+      <div class="hint" aria-live="polite"></div><div class="range"></div>
+      <div class="days"></div><div class="actions">
+      <button type="button" class="cancel"></button><button type="button" class="apply"></button>
+      </div></dialog>`;
+    this._open = this.shadowRoot.querySelector(".open");
+    this._dialog = this.shadowRoot.querySelector("dialog");
+    this._open.addEventListener("click", () => this._show());
+    this.shadowRoot.querySelector(".prev").addEventListener("click", () => this._move(-1));
+    this.shadowRoot.querySelector(".next").addEventListener("click", () => this._move(1));
+    this.shadowRoot.querySelector(".cancel").addEventListener("click", () => this._dialog.close());
+    this.shadowRoot.querySelector(".apply").addEventListener("click", () => this._apply());
+    this.shadowRoot.addEventListener("keydown", (event) => {
+      if (["Enter", " ", "Escape"].includes(event.key)) event.stopPropagation();
+    });
+  }
+  set selector(value) { this._config = value?.["bosch-buderus-holiday-date-range"]; this._refresh(); }
+  set hass(value) { this._hass = value; this._refresh(); }
+  set label(value) { this._label = value || ""; this._refresh(); }
+  set value(value) { this._value = value || ""; this._refresh(); }
+  get value() { return this._value || ""; }
+  set disabled(value) { this._open.disabled = Boolean(value); }
+  set required(value) { this._required = Boolean(value); }
+  focus() { this._open.focus(); }
+  reportValidity() { return !this._required || Boolean(this.value); }
+  _text(de, en) { return this._hass?.language?.startsWith("de") ? de : en; }
+  _date(value) { return new Date(value + "T12:00:00Z"); }
+  _iso(value) { return value.toISOString().slice(0, 10); }
+  _format(value) {
+    return value ? new Intl.DateTimeFormat(this._hass?.language || "en", {
+      year:"numeric", month:"2-digit", day:"2-digit", timeZone:"UTC",
+    }).format(this._date(value)) : "";
+  }
+  _refresh() {
+    this.shadowRoot.querySelector(".label").textContent = this._label || "";
+    this._open.textContent = this._format(this.value) || this._text("Zeitraum auswählen", "Select date range");
+  }
+  _pair() {
+    let form;
+    for (let node = this; node; node = node.parentElement || node.getRootNode()?.host) {
+      if (node.localName === "ha-form") { form = node; break; }
+    }
+    const pair = {};
+    for (const host of form?.shadowRoot?.querySelectorAll("ha-selector") || []) {
+      const field = host.shadowRoot?.querySelector("ha-selector-bosch-buderus-holiday-date-range");
+      if (field?._config?.endpoint) pair[field._config.endpoint] = field;
+    }
+    pair[this._config?.endpoint] = this;
+    return pair;
+  }
+  _show() {
+    this._fields = this._pair();
+    this._start = this._fields.holiday_start?.value || "";
+    this._end = this._fields.holiday_end?.value || "";
+    this._selectEnd = this._config?.endpoint === "holiday_end" && Boolean(this._start);
+    const anchor = this._selectEnd ? this._end || this._start : this._start;
+    const date = anchor ? this._date(anchor) : new Date();
+    this._month = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1, 12));
+    this._render();
+    this._dialog.showModal();
+  }
+  _move(delta) {
+    this._month.setUTCMonth(this._month.getUTCMonth() + delta);
+    this._render();
+  }
+  _render() {
+    const root = this.shadowRoot;
+    const language = this._hass?.language || "en";
+    root.querySelector(".month").textContent = new Intl.DateTimeFormat(language, {
+      month:"long", year:"numeric", timeZone:"UTC",
+    }).format(this._month);
+    root.querySelector(".prev").setAttribute("aria-label", this._text("Vorheriger Monat", "Previous month"));
+    root.querySelector(".next").setAttribute("aria-label", this._text("Nächster Monat", "Next month"));
+    root.querySelector(".hint").textContent = this._selectEnd
+      ? this._text("Letzten Urlaubstag auswählen", "Select last holiday day")
+      : this._text("Ersten Urlaubstag auswählen", "Select first holiday day");
+    root.querySelector(".range").textContent = [this._format(this._start), this._format(this._end)].filter(Boolean).join(" – ");
+    root.querySelector(".cancel").textContent = this._text("Abbrechen", "Cancel");
+    const apply = root.querySelector(".apply");
+    apply.textContent = this._text("Übernehmen", "Apply");
+    apply.disabled = !(this._start && this._end && this._end >= this._start);
+    const days = root.querySelector(".days");
+    days.replaceChildren();
+    for (let i=0; i<7; i++) {
+      const label = document.createElement("span");
+      label.className = "weekday";
+      label.textContent = new Intl.DateTimeFormat(language, {weekday:"short", timeZone:"UTC"})
+        .format(new Date(Date.UTC(2024,0,1+i,12)));
+      days.append(label);
+    }
+    const offset = (this._month.getUTCDay()+6)%7;
+    for (let i=0;i<offset;i++) days.append(document.createElement("span"));
+    const year = this._month.getUTCFullYear(), month = this._month.getUTCMonth();
+    const count = new Date(Date.UTC(year,month+1,0)).getUTCDate();
+    for (let day=1;day<=count;day++) {
+      const iso = this._iso(new Date(Date.UTC(year,month,day,12)));
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = String(day);
+      button.setAttribute("aria-label", this._format(iso));
+      if (iso === this._start || iso === this._end) button.className = "edge";
+      else if (this._start && this._end && iso > this._start && iso < this._end) button.className = "inside";
+      button.addEventListener("click", () => {
+        if (!this._selectEnd || iso < this._start) {
+          this._start = iso; this._end = ""; this._selectEnd = true;
+        } else {
+          this._end = iso; this._selectEnd = false;
+        }
+        this._render();
+      });
+      days.append(button);
+    }
+  }
+  _apply() {
+    if (!this._start || !this._end || this._end < this._start ||
+        !this._fields.holiday_start || !this._fields.holiday_end) return;
+    for (const [field, value] of [["holiday_start", this._start], ["holiday_end", this._end]]) {
+      const target = this._fields[field];
+      target.value = value;
+      target.dispatchEvent(new CustomEvent("value-changed", {
+        detail:{value}, bubbles:true, composed:true,
+      }));
+    }
+    this._dialog.close();
+  }
+}
+if (!customElements.get("ha-selector-bosch-buderus-holiday-date-range")) {
+  customElements.define("ha-selector-bosch-buderus-holiday-date-range", BoschBuderusHolidayDateRange);
+}
